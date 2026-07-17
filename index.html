@@ -304,7 +304,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v2.7';
+const APP_VERSION = 'v2.8';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -1115,11 +1115,16 @@ async function toggleItemActive(id){
 function editItem(id){
   const it = id? S.items[id] : {name:'',cat:'',sizes:{}};
   const sizes=Object.keys(it.sizes||{}).sort(sizeSort);
-  const cats=[...new Set(itemsSorted().map(([,i])=>i.cat||''))];
+  const cats=[...new Set(allItemsSorted().map(([,i])=>i.cat||'Other'))].sort((a,b)=>a.localeCompare(b));
+  if(it.cat && !cats.includes(it.cat)) cats.push(it.cat);
   openModal(`<h3><button class="x" onclick="closeModal()">✕</button>${id?'Edit':'New'} Item</h3>
     <label>Name</label><input id="ei_name" value="${esc(it.name)}" placeholder="e.g. Mens T-Shirt (Green)">
-    <label>Category</label><input id="ei_cat" list="catlist" value="${esc(it.cat||'')}" placeholder="e.g. T-Shirts">
-    <datalist id="catlist">${cats.map(c=>`<option value="${esc(c)}">`).join('')}</datalist>
+    <label>Category — pick any, or create a new one</label>
+    <select id="ei_cat" onchange="if(this.value==='__new'){const i=document.createElement('input');i.id='ei_cat';i.placeholder='Type the new category name';this.replaceWith(i);i.focus();}">
+      ${it.cat?'':'<option value="" selected disabled>Pick a category…</option>'}
+      ${cats.map(c=>`<option ${c===it.cat?'selected':''}>${esc(c)}</option>`).join('')}
+      <option value="__new">＋ New category…</option>
+    </select>
     <label>Colour dot — the little circle sellers see beside the item name</label>
     <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
       <input type="color" id="ei_color" value="${it.color&&it.color!=='none'?esc(it.color):'#009246'}"
@@ -1173,7 +1178,10 @@ function addSizeRow(){
   $('ei_sizes').insertAdjacentHTML('beforeend', sizeRowHTML(next,null,def));
 }
 async function saveItem(id){
-  const name=$('ei_name').value.trim(), cat=$('ei_cat').value.trim()||'Other';
+  const name=$('ei_name').value.trim();
+  let cat=$('ei_cat').value.trim();
+  if(cat==='__new') cat='';
+  cat=cat||'Other';
   if(!name){ toast('Name is required',1); return; }
   const sizes={};
   document.querySelectorAll('#ei_sizes .sizeedit').forEach(r=>{
