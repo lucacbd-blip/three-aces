@@ -199,7 +199,7 @@
   .stockgrid th,.stockgrid td{padding:8px 9px;border-bottom:1px solid var(--line2);white-space:nowrap;}
   .stockgrid tr:last-child td{border-bottom:none;}
   .stockgrid .itc{position:sticky;left:0;background:var(--panel);text-align:left;z-index:1;
-    max-width:190px;overflow:hidden;text-overflow:ellipsis;font-weight:600;}
+    min-width:120px;max-width:175px;white-space:normal;line-height:1.25;font-weight:600;}
   .stockgrid td.c{text-align:center;}
   .stockgrid .dim{color:var(--line);}
   .stockgrid .lowc{color:var(--gold);font-weight:700;}
@@ -252,6 +252,7 @@
   </div>
   <div style="text-align:center;margin-top:22px">
     <button class="btn gray small themeIco" onclick="toggleTheme()">🌙</button>
+    <p class="muted" id="verTag" style="font-size:11px;margin-top:14px"></p>
   </div>
 </div>
 
@@ -303,6 +304,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
+const APP_VERSION = 'v2.7';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -1259,7 +1261,7 @@ function settingsHTML(){
       <button class="toggle ${st.allowMemberSales!==false?'on':''}"
         onclick="DB.set(['settings','allowMemberSales'],!this.classList.contains('on'))"></button></div>
     </div>
-    <div class="card muted">Mode: <b>${CLOUD?'🟢 Live sync (Firebase)':'🟡 Local test mode'}</b><br><br>
+    <div class="card muted">App version: <b>${APP_VERSION}</b> · Mode: <b>${CLOUD?'🟢 Live sync (Firebase)':'🟡 Local test mode'}</b><br><br>
     ${CLOUD?'All phones using this page see the same live data.':'Data lives only in this browser. To go live for the event, follow the Firebase steps in the README, paste the config into index.html, and re-upload to GitHub.'}</div>`;
 }
 function dataHTML(){
@@ -1382,6 +1384,7 @@ function toggleTheme(){
   applyTheme();
 }
 applyTheme();
+$('verTag').textContent='Three Aces Sales App · '+APP_VERSION;
 
 /* ------------------------------ MODAL ------------------------------------- */
 function openModal(html){ $('modalBox').innerHTML=html; $('modalBg').classList.add('open'); }
