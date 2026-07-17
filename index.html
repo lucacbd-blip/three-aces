@@ -275,6 +275,11 @@
   <div id="salesList"></div>
 </div>
 
+<!-- MY MONEY (members with a profit share) -->
+<div id="mymoney" class="view">
+  <div id="myMoneyBody"></div>
+</div>
+
 <!-- ADMIN -->
 <div id="admin" class="view">
   <div class="tabbar" id="adminTabs"></div>
@@ -304,7 +309,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v2.8';
+const APP_VERSION = 'v2.9';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -552,16 +557,18 @@ function rerender(){
   $('nav').style.display='flex';
   $('chipName').textContent=meU().name;
   renderNav();
-  ['sell','stock','saleslog','admin'].forEach(v=>$(v).classList.toggle('active', v===view));
+  if(view==='mymoney' && !((meU().profitPct||0)>0)) view='sell';
+  ['sell','stock','saleslog','mymoney','admin'].forEach(v=>$(v).classList.toggle('active', v===view));
   if(view==='sell') renderSell();
   if(view==='stock') renderStock();
   if(view==='saleslog') renderSales();
+  if(view==='mymoney') renderMyMoney();
   if(view==='admin') renderAdmin();
   renderCartBar();
 }
 function showLogin(){
   $('appHeader').style.display='none'; $('nav').style.display='none';
-  ['sell','stock','saleslog','admin'].forEach(v=>$(v).classList.remove('active'));
+  ['sell','stock','saleslog','mymoney','admin'].forEach(v=>$(v).classList.remove('active'));
   $('login').classList.add('active');
   // convenience: prefill the last name used on this device (never shows anyone else's name)
   if(!$('loginName').value){
@@ -613,6 +620,7 @@ document.addEventListener('keydown', e=>{
 
 function renderNav(){
   const tabs=[['sell','🛒','Sell'],['stock','📦','Stock'],['saleslog','🧾','Sales']];
+  if((meU().profitPct||0)>0) tabs.push(['mymoney','💰','My $']);
   if(isAdmin()) tabs.push(['admin','⚙️','Admin']);
   $('nav').innerHTML=tabs.map(([v,ic,l])=>
     `<button class="${view===v?'on':''}" onclick="go('${v}')"><span class="ic">${ic}</span>${l}</button>`).join('');
@@ -809,6 +817,82 @@ async function voidSale(id){
   toast('Sale voided — stock restored');
 }
 
+/* ----------------------------- MY MONEY ----------------------------------- */
+let myPreset='today', myFrom=null, myTo=null;
+function myRange(){
+  const now=new Date();
+  if(myPreset==='custom') return [myFrom??today0(), myTo??(today0()+86400000-1)];
+  if(myPreset==='today') return [today0(), today0()+86400000-1];
+  if(myPreset==='week'){ const d=new Date(); const dow=(d.getDay()+6)%7;   // Monday start
+    d.setHours(0,0,0,0); d.setDate(d.getDate()-dow); return [d.getTime(), Date.now()]; }
+  if(myPreset==='month') return [new Date(now.getFullYear(),now.getMonth(),1).getTime(), Date.now()];
+  if(myPreset==='year') return [new Date(now.getFullYear(),0,1).getTime(), Date.now()];
+  return [0, Date.now()];   // all time
+}
+function renderMyMoney(){
+  const u=meU(), myName=u.name;
+  const [from,to]=myRange();
+  const shareOf=s=>{ const prof=s.lines.reduce((a,l)=>a+(l.price-l.cost)*l.qty,0);
+    return prof*(s.sellerPct||0)/100; };
+  const mySales=salesSorted().map(([,s])=>s).filter(s=>!s.voided && s.sellerId===me);
+  const inRange=mySales.filter(s=>s.ts>=from && s.ts<=to);
+  let sold=0, keep=0;
+  inRange.forEach(s=>{ sold+=s.total; keep+=shareOf(s); });
+  // all-time settlement
+  const cash=mySales.filter(s=>s.payment!=='Pay Later');
+  const later=mySales.filter(s=>s.payment==='Pay Later');
+  const cashC=cash.reduce((a,s)=>a+s.total,0);
+  const cashK=cash.reduce((a,s)=>a+shareOf(s),0);
+  const laterK=later.reduce((a,s)=>a+shareOf(s),0);
+  let handed=0, paidOut=0;
+  Object.values(S.payments||{}).forEach(p=>{
+    if(p.from!==myName) return;
+    if(p.kind==='payout') paidOut+=p.amount;
+    else if(p.kind!=='tab') handed+=p.amount;
+  });
+  const oweClub=cashC-cashK-handed;
+  const clubOwes=laterK-paidOut;
+  const presets=[['today','Today'],['week','This week'],['month','This month'],['year','This year'],['all','All time']];
+  $('myMoneyBody').innerHTML= printHead('My Sales & Earnings — '+esc(myName), dstr(from)+' to '+dstr(to)) + `
+    <h2>My sales &amp; earnings</h2>
+    <div class="payrow noprint" style="flex-wrap:wrap">
+      ${presets.map(([v,l])=>`<button class="${myPreset===v?'on':''}" style="flex:1 1 28%"
+        onclick="myPreset='${v}';rerender()">${l}</button>`).join('')}
+    </div>
+    <div class="rowbtns noprint" style="margin:0 0 12px">
+      <input type="date" value="${dstr(from)}" onchange="myPreset='custom';myFrom=new Date(this.value+'T00:00').getTime();rerender()">
+      <input type="date" value="${dstr(to)}" onchange="myPreset='custom';myTo=new Date(this.value+'T23:59:59').getTime();rerender()">
+    </div>
+    <div class="statgrid">
+      <div class="stat"><div class="v">${fmt(sold)}</div><div class="l">You sold (${inRange.length} sales)</div></div>
+      <div class="stat gold"><div class="v">${fmt(keep)}</div><div class="l">You keep (your ${u.profitPct||0}% of profit)</div></div>
+      <div class="stat green"><div class="v">${fmt(sold-keep)}</div><div class="l">Goes to the club</div></div>
+    </div>
+    <h2>Settling up (all-time, not just the dates above)</h2>
+    <div class="card"><table>
+      <tr><td>Cash &amp; e-transfers you collected</td><td class="r">${fmt(cashC)}</td></tr>
+      <tr><td>− your share kept</td><td class="r goldtxt">${fmt(cashK)}</td></tr>
+      <tr><td>− already handed to the club</td><td class="r pos">${fmt(handed)}</td></tr>
+      <tr><td><b>Still to hand in to the club</b></td><td class="r ${oweClub>0.005?'neg':'pos'}"><b>${fmt(Math.max(0,oweClub))}</b></td></tr>
+    </table></div>
+    ${(laterK>0.005||paidOut>0.005)?`<div class="card"><table>
+      <tr><td>Your share from Pay-Later sales (club collects those)</td><td class="r goldtxt">${fmt(laterK)}</td></tr>
+      <tr><td>− already paid out to you</td><td class="r pos">${fmt(paidOut)}</td></tr>
+      <tr><td><b>Club still owes you</b></td><td class="r ${clubOwes>0.005?'goldtxt':'pos'}"><b>${fmt(Math.max(0,clubOwes))}</b></td></tr>
+    </table></div>`:''}
+    <p class="muted">When you hand money in (or get paid your share), an admin records it on the Money screen with the date it actually happened — these numbers update automatically.</p>
+    <h2>Each sale in this period</h2>
+    ${inRange.map(s=>`<div class="card salecard">
+      <div class="hd"><span>${new Date(s.ts).toLocaleDateString('en-CA')}
+        ${new Date(s.ts).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</span><span>${fmt(s.total)}</span></div>
+      <div class="lines">${s.lines.map(l=>`${l.qty}× ${esc(l.item)} ${esc(l.size)}`).join(' · ')}
+        · ${esc(s.payment)}${s.payment==='Pay Later'&&s.buyer?' — '+esc(s.buyer):''}</div>
+      <div class="lines" style="margin-top:4px">You keep <b class="goldtxt">${fmt(shareOf(s))}</b> ·
+        club gets <b class="pos">${fmt(s.total-shareOf(s))}</b>${s.payment==='Pay Later'?' <span class="memberflag">CLUB COLLECTS — YOUR SHARE OWED TO YOU</span>':''}</div>
+    </div>`).join('') || '<div class="empty">No sales in this period.</div>'}
+    <button class="btn gray noprint" style="margin-top:8px" onclick="window.print()">🖨 Print / Save as PDF</button>`;
+}
+
 /* ------------------------------- ADMIN ------------------------------------ */
 function renderAdmin(){
   if(!isAdmin()){ view='sell'; rerender(); return; }
@@ -902,7 +986,18 @@ function moneyHTML(){
   const tabs={};  const trow=n=>tabs[n]=tabs[n]||{charged:0,paid:0};
   tabSales.forEach(s=>{ trow(s.buyer||'Unknown').charged+=s.total; });
   const pays=Object.entries(S.payments||{}).sort((a,b)=>b[1].ts-a[1].ts);
-  pays.forEach(([,p])=>{ if(p.kind==='tab') trow(p.from).paid+=p.amount; else row(p.from).received+=p.amount; });
+  const payoutBy={};   // club -> member profit-share payouts
+  pays.forEach(([,p])=>{
+    if(p.kind==='tab') trow(p.from).paid+=p.amount;
+    else if(p.kind==='payout') payoutBy[p.from]=(payoutBy[p.from]||0)+p.amount;
+    else row(p.from).received+=p.amount;
+  });
+  // profit share the club owes sellers on Pay-Later sales (club collects those in full)
+  const shareOf=s=>{ const prof=s.lines.reduce((a,l)=>a+(l.price-l.cost)*l.qty,0);
+    return prof*(s.sellerPct||0)/100; };
+  const laterShare={};
+  tabSales.forEach(s=>{ const sh=shareOf(s); if(sh>0) laterShare[s.sellerName]=(laterShare[s.sellerName]||0)+sh; });
+  Object.keys(payoutBy).forEach(n=>{ laterShare[n]=laterShare[n]||0; });
   const owedSellers=Object.values(bal).reduce((a,e)=>a+(e.collected-e.keeps),0);
   const recSellers=Object.values(bal).reduce((a,e)=>a+e.received,0);
   const owedTabs=Object.values(tabs).reduce((a,e)=>a+e.charged,0);
@@ -939,13 +1034,21 @@ function moneyHTML(){
         <td class="r ${b>0.005?'neg':'pos'}"><b>${fmt(b)}</b></td></tr>`;}).join('')
       ||'<tr><td colspan="4" class="empty">No pay-later purchases yet.</td></tr>'}
    </table></div>
-   <p class="muted">Sellers' balance = collected − keeps − handed in. Tabs = pay-later purchases − tab payments. $0 means settled up.
-   Note: on a pay-later sale the club receives the full amount when the tab is paid — if the seller has a profit share on
-   that sale, settle their share separately once the money is in.</p>
+   ${Object.keys(laterShare).length?`<h2>Profit share owed BY the club (pay-later sales)</h2>
+   <div class="card"><table>
+    <tr><th>Member</th><th class="r">Share earned</th><th class="r">Paid out</th><th class="r">Club still owes</th></tr>
+    ${Object.entries(laterShare).map(([n,sh])=>{
+      const po=payoutBy[n]||0, o=sh-po;
+      return `<tr><td>${esc(n)}</td><td class="r goldtxt">${fmt(sh)}</td><td class="r pos">${fmt(po)}</td>
+        <td class="r ${o>0.005?'neg':'pos'}"><b>${fmt(o)}</b></td></tr>`;}).join('')}
+   </table></div>
+   <p class="muted">On a pay-later sale the club collects the full amount from the buyer, so the seller's profit share
+   is owed back to them — record it below as a payout when it's paid.</p>`:''}
+   <p class="muted">Sellers' balance = collected − keeps − handed in. Tabs = pay-later purchases − tab payments. $0 means settled up.</p>
    <h2>Payments received</h2>
    ${pays.map(([id,p])=>`<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
-      <div><b>${fmt(p.amount)}</b> from ${esc(p.from)}
-        <span class="memberflag">${p.kind==='tab'?'TAB PAYMENT':'SALES CASH'}</span>
+      <div><b>${fmt(p.amount)}</b> ${p.kind==='payout'?'to':'from'} ${esc(p.from)}
+        <span class="memberflag">${p.kind==='tab'?'TAB PAYMENT':p.kind==='payout'?'PROFIT PAYOUT':'SALES CASH'}</span>
         <div class="muted">${new Date(p.ts).toLocaleDateString('en-CA')}${p.note?' · '+esc(p.note):''} · recorded by ${esc(p.by)}</div></div>
       <button class="btn small red noprint" onclick="delPayment('${id}')">✕</button>
     </div>`).join('')||'<div class="empty">No payments recorded yet.</div>'}
@@ -959,9 +1062,10 @@ function recordPayment(){
   const today=dstr(Date.now());
   openModal(`<h3><button class="x" onclick="closeModal()">✕</button>Record money received by club</h3>
     <label>What is this payment?</label><select id="mp_kind">
-      <option value="handover">Sales cash being handed in (seller reimbursing the club)</option>
-      <option value="tab">A member paying their tab (pay-later purchase)</option></select>
-    <label>From</label><select id="mp_from">${names.map(n=>`<option>${esc(n)}</option>`).join('')}
+      <option value="handover">Sales cash being handed in (seller → club)</option>
+      <option value="tab">A member paying their tab (pay-later purchase → club)</option>
+      <option value="payout">Club paying a member their profit share (club → member)</option></select>
+    <label>Member</label><select id="mp_from">${names.map(n=>`<option>${esc(n)}</option>`).join('')}
       <option>Other</option></select>
     <label>Amount received $</label><input id="mp_amt" type="number" min="0" step="0.01" placeholder="0.00">
     <label>Date they paid (can be a past date)</label><input id="mp_date" type="date" value="${today}">
@@ -1336,7 +1440,8 @@ function exportSalesCSV(){
 function exportPaymentsCSV(){
   const rows=[['Date','Type','From','Amount','Note','Recorded By']];
   Object.values(S.payments||{}).sort((a,b)=>a.ts-b.ts).forEach(p=>
-    rows.push([new Date(p.ts).toLocaleDateString('en-CA'),p.kind==='tab'?'Tab payment':'Sales cash',
+    rows.push([new Date(p.ts).toLocaleDateString('en-CA'),
+      p.kind==='tab'?'Tab payment':p.kind==='payout'?'Profit payout (club → member)':'Sales cash',
       p.from,p.amount,p.note||'',p.by]));
   dl('three-aces-payments.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'));
 }
