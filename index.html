@@ -163,7 +163,7 @@
   .modal h3{margin:0 0 12px;font-size:17px;}
   .modal .x{float:right;background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;padding:0 4px;}
   .sizeedit{display:grid;grid-template-columns:1.1fr 1fr 1fr .9fr .9fr 30px;gap:5px;align-items:center;margin-bottom:6px;}
-  .sizeedit input{padding:8px;font-size:14px;}
+  .sizeedit input,.sizeedit select{padding:8px;font-size:14px;}
   .sizeedit .del{background:none;border:none;color:var(--red);font-size:18px;cursor:pointer;}
   .sehead{display:grid;grid-template-columns:1.1fr 1fr 1fr .9fr .9fr 30px;gap:5px;font-size:10px;
     color:var(--muted);text-transform:uppercase;margin-bottom:4px;}
@@ -497,7 +497,7 @@ const DB = {
 /* ============================== APP STATE ================================= */
 let me=null;            // current user id
 let view='sell', adminTab='report', cart=[], selCat='All', payMethod='Cash', openItem=null, cartBuyer='';
-let stockView='grid', stockSortSize=null;
+let stockView='grid', stockSortSize=null, reorderShowAll=false;
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -994,11 +994,25 @@ function reorderHTML(){
       <td class="r ${x.st===0?'neg':'goldtxt'}">${x.st}</td><td class="r">${x.ro}</td><td class="r">${fmt(x.cost)}</td></tr>`).join('')
       ||'<tr><td colspan="5" class="empty">Nothing here 🎉</td></tr>'}
   </table></div>`;
+  // full tracking table so it's obvious every item (incl. new ones) is watched
+  const all=[];
+  itemsSorted().forEach(([id,it])=>Object.keys(it.sizes||{}).sort(sizeSort).forEach(s=>{
+    const z=it.sizes[s], st=z.stock||0, ro=z.reorder??2;
+    all.push({item:it.name,size:s,st,ro,status: st===0?'OUT':st<=ro?'LOW':'OK'});
+  }));
   return printHead('Reorder List','Items at or below their reorder level') + `
     <button class="btn gray noprint" style="margin-bottom:12px" onclick="window.print()">🖨 Print / Save as PDF</button>
+    <p class="muted">Tracking <b>${all.length} sizes</b> across <b>${itemsSorted().length} items</b> — including anything you added today.
+    An item shows in the lists below the moment its stock falls to its "Re@" level (set per size in Admin → Items).</p>
     <h2>Sold out (${out.length})</h2>${tbl(out)}
     <h2>Running low (${run.length})</h2>${tbl(run)}
-    <p class="muted noprint">Reorder levels are set per size in Admin → Items. When the new order arrives, use Admin → Restock to add it — enter what you actually paid and costs update automatically.</p>`;
+    <button class="btn gray noprint" onclick="reorderShowAll=!reorderShowAll;rerender()">${reorderShowAll?'Hide':'Show'} the full tracking table (every item &amp; size)</button>
+    ${reorderShowAll?`<div class="card" style="margin-top:10px"><table>
+      <tr><th>Item</th><th>Size</th><th class="r">In stock</th><th class="r">Re@</th><th class="r">Status</th></tr>
+      ${all.map(x=>`<tr><td>${esc(x.item)}</td><td>${esc(x.size)}</td><td class="r">${x.st}</td><td class="r">${x.ro}</td>
+        <td class="r ${x.status==='OUT'?'neg':x.status==='LOW'?'goldtxt':'pos'}"><b>${x.status}</b></td></tr>`).join('')}
+      </table></div>`:''}
+    <p class="muted noprint" style="margin-top:10px">When the new order arrives, use Admin → Restock to add it — enter what you actually paid and costs update automatically.</p>`;
 }
 function restockHTML(){
   const hist=Object.entries(S.restocks||{}).sort((a,b)=>b[1].ts-a[1].ts).slice(0,25);
@@ -1125,22 +1139,44 @@ function editItem(id){
     ${id?`<div style="height:8px"></div><button class="btn ${it.active!==false?'red':'gray'}" onclick="toggleItemActive('${id}');closeModal()">
       ${it.active!==false?'Hide this item (not carrying it right now)':'Show this item again'}</button>`:''}`);
 }
-function sizeRowHTML(s,z){ z=z||{cost:'',price:'',stock:0,reorder:2};
-  return `<div class="sizeedit"><input class="se_s" value="${esc(s)}" placeholder="Size">
+function sizeRowHTML(s,z,def){
+  z=z||{cost:(def&&def.cost)||'',price:(def&&def.price)||'',stock:0,reorder:(def&&def.reorder)??2};
+  // Standard sizes get a dropdown; unusual labels (e.g. hat colours) get a text box via "Custom…"
+  const std = !s || SIZE_ORDER.includes(s);
+  const sizeField = std
+    ? `<select class="se_s" onchange="if(this.value==='__custom'){const i=document.createElement('input');i.className='se_s';i.placeholder='Size';this.replaceWith(i);i.focus();}">
+        ${s?'':'<option value="" selected disabled>Size…</option>'}
+        ${SIZE_ORDER.map(o=>`<option ${o===s?'selected':''}>${o}</option>`).join('')}
+        <option value="__custom">Custom…</option></select>`
+    : `<input class="se_s" value="${esc(s)}" placeholder="Size">`;
+  return `<div class="sizeedit">${sizeField}
     <input class="se_c" type="number" step="0.01" min="0" value="${z.cost}">
     <input class="se_p" type="number" step="0.01" min="0" value="${z.price}">
     <input class="se_q" type="number" step="1" min="0" value="${z.stock||0}">
     <input class="se_r" type="number" step="1" min="0" value="${z.reorder??2}">
     <button class="del" onclick="this.parentElement.remove()">✕</button></div>`;
 }
-function addSizeRow(){ $('ei_sizes').insertAdjacentHTML('beforeend', sizeRowHTML('',null)); }
+function addSizeRow(){
+  // Default the new row to the NEXT size up, and copy cost/price from the row above
+  const rows=[...document.querySelectorAll('#ei_sizes .sizeedit')];
+  let next='', def=null;
+  if(rows.length){
+    const last=rows[rows.length-1];
+    const lastSize=(last.querySelector('.se_s')||{}).value||'';
+    const i=SIZE_ORDER.indexOf(lastSize);
+    if(i>=0 && SIZE_ORDER[i+1] && SIZE_ORDER[i+1]!=='One Size') next=SIZE_ORDER[i+1];
+    def={cost:last.querySelector('.se_c').value, price:last.querySelector('.se_p').value,
+         reorder:last.querySelector('.se_r').value||2};
+  }
+  $('ei_sizes').insertAdjacentHTML('beforeend', sizeRowHTML(next,null,def));
+}
 async function saveItem(id){
   const name=$('ei_name').value.trim(), cat=$('ei_cat').value.trim()||'Other';
   if(!name){ toast('Name is required',1); return; }
   const sizes={};
   document.querySelectorAll('#ei_sizes .sizeedit').forEach(r=>{
     let s=r.querySelector('.se_s').value.trim().replace(/[.#$/\[\]]/g,'-'); // chars the database forbids in names
-    if(!s) return;
+    if(!s || s==='__custom') return;
     sizes[s]={cost:+r.querySelector('.se_c').value||0, price:+r.querySelector('.se_p').value||0,
       stock:Math.max(0,Math.round(+r.querySelector('.se_q').value||0)),
       reorder:Math.max(0,Math.round(+r.querySelector('.se_r').value||0))};
