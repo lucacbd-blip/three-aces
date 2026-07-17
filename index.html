@@ -193,6 +193,18 @@
     background:#fff;transition:left .15s;}
   .toggle.on::after{left:25px;}
   .searchbox{margin-bottom:10px;}
+  /* Stock grid (all items × all sizes) */
+  .gridwrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel);}
+  .stockgrid{border-collapse:collapse;min-width:100%;}
+  .stockgrid th,.stockgrid td{padding:8px 9px;border-bottom:1px solid var(--line2);white-space:nowrap;}
+  .stockgrid tr:last-child td{border-bottom:none;}
+  .stockgrid .itc{position:sticky;left:0;background:var(--panel);text-align:left;z-index:1;
+    max-width:190px;overflow:hidden;text-overflow:ellipsis;font-weight:600;}
+  .stockgrid td.c{text-align:center;}
+  .stockgrid .dim{color:var(--line);}
+  .stockgrid .lowc{color:var(--gold);font-weight:700;}
+  .stockgrid th.sz{cursor:pointer;user-select:none;}
+  .stockgrid th.sz.on{color:var(--gold);}
   .muted{color:var(--muted);font-size:13px;}
   .empty{color:var(--muted);text-align:center;padding:30px 10px;font-size:14px;}
   .toast{position:fixed;top:60px;left:50%;transform:translateX(-50%);background:var(--green);color:#fff;
@@ -205,7 +217,7 @@
 <div id="modeBanner" class="mode-banner" style="display:none"></div>
 
 <header id="appHeader" style="display:none">
-  <img class="logo" src="logo.png" onerror="this.style.display='none'">
+  <img class="logo" id="hdrLogo" src="logo.png" onerror="this.style.display='none'">
   <div class="brand">
     <div class="stars"><span class="g">★</span> <span class="w">★</span> <span class="r">★</span></div>
     <h1>THREE ACES</h1>
@@ -218,7 +230,7 @@
 <!-- LOGIN -->
 <div id="login" class="view active">
   <div class="login-logo">
-    <img src="logo.png" onerror="this.style.display='none'">
+    <img id="loginLogo" src="logo.png" onerror="this.style.display='none'">
     <div class="stars"><span class="g">★</span> <span class="w">★</span> <span class="r">★</span></div>
     <h1>THREE ACES</h1>
     <p>ITALIAN CANADIAN CULTURAL CLUB</p>
@@ -485,6 +497,7 @@ const DB = {
 /* ============================== APP STATE ================================= */
 let me=null;            // current user id
 let view='sell', adminTab='report', cart=[], selCat='All', payMethod='Cash', openItem=null, cartBuyer='';
+let stockView='grid', stockSortSize=null;
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -529,6 +542,7 @@ function today0(){ const d=new Date(); d.setHours(0,0,0,0); return d.getTime(); 
 function rerender(){
   updateBanner();
   if(!_ready) return;
+  applyLogo();
   if(me && !S.users[me]) me=null;   // user removed remotely
   if(!me){ showLogin(); return; }
   $('login').classList.remove('active');
@@ -581,6 +595,19 @@ function pinKey(k){
   }
 }
 function logout(){ me=null; cart=[]; sessionStorage.removeItem('ta_me'); rerender(); }
+
+// PC keyboard support on the login page: type digits (main row or number pad),
+// Backspace to erase, Esc/C to clear. Typing in the Name box is unaffected.
+document.addEventListener('keydown', e=>{
+  if(!$('login').classList.contains('active')) return;
+  if(document.activeElement===$('loginName')){
+    if(e.key==='Enter'){ e.preventDefault(); $('loginName').blur(); }
+    return;
+  }
+  if(/^[0-9]$/.test(e.key)){ pinKey(e.key); e.preventDefault(); }
+  else if(e.key==='Backspace'){ pinKey('⌫'); e.preventDefault(); }
+  else if(e.key==='Escape'||e.key.toLowerCase()==='c'){ pinKey('C'); }
+});
 
 function renderNav(){
   const tabs=[['sell','🛒','Sell'],['stock','📦','Stock'],['saleslog','🧾','Sales']];
@@ -709,7 +736,35 @@ async function checkout(){
 /* ------------------------------- STOCK ----------------------------------- */
 function renderStock(){
   const q=($('stockSearch').value||'').toLowerCase();
-  const rows=displayItemsSorted().filter(([,i])=>i.name.toLowerCase().includes(q)).map(([id,it])=>{
+  let items=displayItemsSorted().filter(([,i])=>i.name.toLowerCase().includes(q));
+  const toggle=`<div class="payrow noprint" style="margin-bottom:10px">
+    <button class="${stockView==='grid'?'on':''}" onclick="stockView='grid';rerender()">▦ Everything in one grid</button>
+    <button class="${stockView==='cards'?'on':''}" onclick="stockView='cards';rerender()">☰ By item</button></div>`;
+  if(stockView==='grid'){
+    // one-page matrix: every item down the side, every size across the top
+    const cols=[...new Set(items.flatMap(([,it])=>Object.keys(it.sizes||{})))].sort(sizeSort);
+    if(stockSortSize && !cols.includes(stockSortSize)) stockSortSize=null;
+    if(stockSortSize) items=[...items].sort((a,b)=>
+      (((b[1].sizes||{})[stockSortSize]||{}).stock||0)-(((a[1].sizes||{})[stockSortSize]||{}).stock||0));
+    const grand=items.reduce((n,[,it])=>n+totalStock(it),0);
+    $('stockList').innerHTML= toggle + printHead('Stock Count','All items and sizes — '+grand+' pieces total') +
+      `<p class="muted noprint">Looking for a size? Tap a size column heading (e.g. <b>M</b>) to sort by what's available in that size — tap it again to undo. Gold numbers are running low, — means sold out.</p>
+      <div class="gridwrap"><table class="stockgrid">
+        <tr><th class="itc">Item</th>${cols.map(s=>
+          `<th class="sz ${stockSortSize===s?'on':''}" onclick="stockSortSize=${stockSortSize===s?'null':`'${esc(s)}'`};rerender()">${esc(s)}${stockSortSize===s?' ▼':''}</th>`).join('')}
+          <th class="r">Total</th></tr>
+        ${items.map(([id,it])=>`<tr><td class="itc">${colorDot(it)}${esc(it.name)}</td>${cols.map(s=>{
+            const z=(it.sizes||{})[s];
+            if(!z) return '<td class="c dim">·</td>';
+            const st=z.stock||0;
+            return `<td class="c ${st===0?'dim':st<=(z.reorder??2)?'lowc':''}">${st===0?'—':st}</td>`;
+          }).join('')}<td class="r"><b>${totalStock(it)}</b></td></tr>`).join('')
+          || `<tr><td colspan="${cols.length+2}" class="empty">Nothing matches.</td></tr>`}
+      </table></div>
+      <button class="btn gray noprint" style="margin-top:10px" onclick="window.print()">🖨 Print / Save as PDF</button>`;
+    return;
+  }
+  const rows=items.map(([id,it])=>{
     const sizes=Object.keys(it.sizes||{}).sort(sizeSort);
     const tot=sizes.reduce((n,s)=>n+(it.sizes[s].stock||0),0);
     return `<div class="card"><b>${colorDot(it)}${esc(it.name)}</b>
@@ -719,7 +774,7 @@ function renderStock(){
         return `<span class="sizebtn ${st===0?'out':st<=(z.reorder??2)?'low':''}" style="cursor:default">${esc(s)}<small>${st}</small></span>`;}).join('')}
       </div></div>`;
   }).join('');
-  $('stockList').innerHTML=rows||'<div class="empty">Nothing matches.</div>';
+  $('stockList').innerHTML=toggle+(rows||'<div class="empty">Nothing matches.</div>');
 }
 
 /* ----------------------------- SALES LOG ---------------------------------- */
@@ -997,6 +1052,10 @@ function itemsHTML(){
   const mode=(S.settings&&S.settings.sortMode)||'custom';
   const m=soldMap();
   const custom = mode==='custom';
+  // This list follows the chosen order too (incl. hidden items); arrows only in Custom
+  let ordered=allItemsSorted();
+  if(mode==='alpha') ordered=[...ordered].sort((a,b)=>a[1].name.localeCompare(b[1].name));
+  else if(mode==='bestsellers') ordered=[...ordered].sort((a,b)=>(m[b[0]]||0)-(m[a[0]]||0));
   return `<label>Sell &amp; Stock screen order</label>
     <div class="payrow" style="margin-top:2px">
       ${[['bestsellers','🔥 Best sellers'],['alpha','A–Z'],['custom','↕ Custom']].map(([v,l])=>
@@ -1008,7 +1067,7 @@ function itemsHTML(){
       'Items appear in the order below — use the ▲ ▼ arrows to move them up or down.'}</p>
     <button class="btn" onclick="editItem(null)">＋ Add New Item</button>
     <p class="muted" style="margin:10px 2px">Hidden items don't appear on the Sell or Stock screens or the Reorder list — use Hide for products you're not carrying right now. Nothing is lost; tap Show to bring one back.</p>`+
-    allItemsSorted().map(([id,it],idx,arr)=>{
+    ordered.map(([id,it],idx,arr)=>{
       const hidden=it.active===false;
       const sizes=Object.keys(it.sizes||{}).sort(sizeSort);
       const tot=sizes.reduce((n,s)=>n+(it.sizes[s].stock||0),0);
@@ -1147,6 +1206,16 @@ async function deleteUser(id){
 function settingsHTML(){
   const st=S.settings||{};
   return `<div class="card">
+    <label>Club logo — shows on the login page and header on every phone</label>
+    ${st.logo?`<img src="${st.logo}" style="height:64px;border-radius:10px;display:block;margin:4px 0 10px">`
+             :`<p class="muted" style="margin:4px 0 10px">No logo uploaded yet.</p>`}
+    <div class="rowbtns" style="margin-top:0">
+      <button class="btn gray" onclick="$('logoFile').click()">⬆ Upload logo</button>
+      ${st.logo?`<button class="btn red" onclick="DB.set(['settings','logo'],null).then(()=>{applyLogo();toast('Logo removed')})">Remove logo</button>`:''}
+    </div>
+    <input type="file" id="logoFile" accept="image/*" style="display:none" onchange="uploadLogo(this)">
+    </div>
+    <div class="card">
     <label>Event name (stamped on each sale)</label>
     <input value="${esc(st.eventName||'')}" onchange="DB.set(['settings','eventName'],this.value)">
     <div class="switchrow"><div><div class="t">Sellers can ring up member-at-cost sales</div>
@@ -1168,13 +1237,35 @@ function dataHTML(){
       <button class="btn gray" onclick="exportPaymentsCSV()">⬇ Payments CSV</button>
     </div></div>
     <div class="card">
-    <b style="color:var(--red)">Danger zone</b>
+    <b style="color:var(--red)">Danger zone</b> <span class="muted">— these ask for your admin PIN</span>
     <div class="rowbtns">
-      <button class="btn red" onclick="if(confirm('Replace ALL items with the original starting inventory? Sales history is kept.'))DB.set(['items'],null).then(()=>DB.seedItemsOnly())">Reset items to starting inventory</button>
+      <button class="btn red" onclick="pinConfirm('Replace ALL items with the original starting inventory? Your sales history is kept, but every item, price, cost and stock count goes back to the original list. This cannot be undone.', ()=>DB.set(['items'],null).then(()=>DB.seedItemsOnly()).then(()=>toast('Items reset')))">Reset items to starting inventory</button>
     </div>
     <div class="rowbtns">
-      <button class="btn red" onclick="if(confirm('Delete ALL sales history? Stock is not changed. This cannot be undone.'))DB.set(['sales'],null)">Clear all sales history</button>
+      <button class="btn red" onclick="pinConfirm('Delete ALL sales history? Stock is not changed, but every sale record disappears from reports and the money ledger. This cannot be undone.', ()=>DB.set(['sales'],null).then(()=>toast('Sales history cleared')))">Clear all sales history</button>
     </div></div>`;
+}
+let _pcFn=null;
+function pinConfirm(msg, fn){
+  _pcFn=fn;
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>⚠ Admin PIN required</h3>
+    <p class="muted">${esc(msg)}</p>
+    <label>Enter YOUR 4-digit PIN to confirm</label>
+    <input id="pc_pin" type="password" inputmode="numeric" maxlength="4" autocomplete="off"
+      style="font-size:26px;text-align:center;letter-spacing:10px"
+      onkeydown="if(event.key==='Enter')pinConfirmGo()">
+    <div style="height:12px"></div>
+    <button class="btn red" onclick="pinConfirmGo()">Yes — I'm sure</button>
+    <div style="height:8px"></div>
+    <button class="btn gray" onclick="closeModal()">Cancel</button>`);
+  setTimeout(()=>$('pc_pin').focus(),100);
+}
+async function pinConfirmGo(){
+  if($('pc_pin').value !== meU().pin){ toast('Wrong PIN — nothing was changed',1); $('pc_pin').value=''; return; }
+  closeModal();
+  const fn=_pcFn; _pcFn=null;
+  await fn();
+  rerender();
 }
 DB.seedItemsOnly=function(){
   const items={};
@@ -1210,6 +1301,34 @@ function exportStockCSV(){
     rows.push([it.name,it.cat||'',s,z.cost,z.price,z.stock||0,(z.stock||0)*z.cost,(z.stock||0)*z.price]);
   }));
   dl('three-aces-stock.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'));
+}
+
+/* ------------------------------ LOGO -------------------------------------- */
+function applyLogo(){
+  const l=S.settings&&S.settings.logo;
+  ['hdrLogo','loginLogo'].forEach(id=>{
+    const im=$(id); if(!im) return;
+    if(l){ im.src=l; im.style.display=''; }
+    else if(im.src.startsWith('data:')){ im.src='logo.png'; }  // logo was removed
+  });
+}
+function uploadLogo(inp){
+  const f=inp.files&&inp.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=()=>{
+    const img=new Image();
+    img.onload=()=>{
+      const mx=256, sc=Math.min(1, mx/Math.max(img.width,img.height));
+      const cv=document.createElement('canvas');
+      cv.width=Math.max(1,Math.round(img.width*sc)); cv.height=Math.max(1,Math.round(img.height*sc));
+      cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+      let data=cv.toDataURL('image/png');
+      if(data.length>400000) data=cv.toDataURL('image/jpeg',0.85);
+      DB.set(['settings','logo'],data).then(()=>{ applyLogo(); toast('Logo saved — it now shows on every phone'); rerender(); });
+    };
+    img.src=rd.result;
+  };
+  rd.readAsDataURL(f); inp.value='';
 }
 
 /* ------------------------------ THEME ------------------------------------- */
