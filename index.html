@@ -296,14 +296,15 @@
    };
    ========================================================================== */
 const FIREBASE_CONFIG = {
-     apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
-     authDomain: "three-aces.firebaseapp.com",
-     databaseURL: "https://three-aces-default-rtdb.firebaseio.com",
-     projectId: "three-aces",
-     storageBucket: "three-aces.firebasestorage.app",
-     messagingSenderId: "1078244282125",
-     appId: "1:1078244282125:web:14fa73c7622a41640c6a44"
-   };
+  apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
+  authDomain: "three-aces.firebaseapp.com",
+  databaseURL: "https://three-aces-default-rtdb.firebaseio.com",
+  projectId: "three-aces",
+  storageBucket: "three-aces.firebasestorage.app",
+  messagingSenderId: "1078244282125",
+  appId: "1:1078244282125:web:14fa73c7622a41640c6a44"
+};
+
 /* =========================== STARTING DATA ================================
    Seeded automatically the first time the app runs (from your stock-count
    photos + Sep 25 2024 cost sheet). After that, manage everything in
@@ -359,18 +360,40 @@ let _ref=null, _ready=false, _onChange=()=>{};
 
 function newId(){ return 'k'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 
+let _initErr=null;
+function updateBanner(){
+  const b=$('modeBanner');
+  if(!CLOUD){
+    b.style.display='block'; b.className='mode-banner';
+    b.textContent='⚠ LOCAL TEST MODE — data stays on this device only. Set up Firebase to sync phones (see README).';
+    return;
+  }
+  if(_initErr){ b.style.display='block'; b.className='mode-banner'; b.textContent='⚠ '+_initErr; }
+  else if(!_ready){ b.style.display='block'; b.className='mode-banner online'; b.textContent='Connecting to the club database…'; }
+  else { b.style.display='none'; }
+}
 const DB = {
   async init(onChange){
     _onChange = onChange;
     if(CLOUD){
-      firebase.initializeApp(FIREBASE_CONFIG);
-      await firebase.auth().signInAnonymously();
+      updateBanner();   // show "connecting…" right away
+      try{
+        firebase.initializeApp(FIREBASE_CONFIG);
+        await firebase.auth().signInAnonymously();
+      }catch(e){
+        _initErr='Cannot sign in to the club database ('+(e.code||e.message)+'). Fix in Firebase: Build → Authentication → Sign-in method → enable "Anonymous" → Save, then refresh this page.';
+        updateBanner(); return;
+      }
       _ref = firebase.database().ref('threeaces');
       _ref.on('value', snap=>{
         const v = snap.val();
         if(v===null && !_ready){ this.seed(); return; }
+        _initErr=null;
         S = Object.assign({items:{},users:{},sales:{},settings:{},restocks:{},payments:{}}, v||{});
-        _ready=true; _onChange();
+        _ready=true; updateBanner(); _onChange();
+      }, err=>{
+        _initErr='The database refused access ('+((err&&err.code)||err)+'). Fix in Firebase: Build → Realtime Database → Rules tab → paste the two "auth != null" rules from the guide → Publish, then refresh this page.';
+        updateBanner();
       });
     }else{
       const raw = localStorage.getItem('threeaces');
@@ -384,7 +407,9 @@ const DB = {
     SEED_ITEMS.forEach((it,i)=>{ items[newId()+i]={name:it.name,cat:it.cat,order:i,active:true,sizes:it.sizes}; });
     SEED_USERS.forEach((u,i)=>{ users[newId()+'u'+i]=u; });
     const full={items,users,sales:{},settings:SEED_SETTINGS,restocks:{},payments:{}};
-    if(CLOUD){ _ref.set(full); }
+    if(CLOUD){ _ref.set(full).catch(e=>{
+      _initErr='Could not write the starting data ('+((e&&e.code)||e)+'). Check the database Rules are published (Realtime Database → Rules), then refresh.';
+      updateBanner(); }); }
     else{ S=full; this._persist(); _onChange(); }
   },
   _persist(){ localStorage.setItem('threeaces', JSON.stringify(S)); },
@@ -460,12 +485,8 @@ function today0(){ const d=new Date(); d.setHours(0,0,0,0); return d.getTime(); 
 
 /* ============================== RENDERING ================================= */
 function rerender(){
+  updateBanner();
   if(!_ready) return;
-  // banner
-  const b=$('modeBanner');
-  if(CLOUD){ b.style.display='none'; }
-  else{ b.style.display='block'; b.className='mode-banner';
-        b.textContent='⚠ LOCAL TEST MODE — data stays on this device only. Set up Firebase to sync phones (see README).'; }
   if(me && !S.users[me]) me=null;   // user removed remotely
   if(!me){ showLogin(); return; }
   $('login').classList.remove('active');
@@ -494,6 +515,11 @@ function showLogin(){
 let _pin='';
 function drawPin(){ $('pinDots').textContent='●'.repeat(_pin.length); }
 function pinKey(k){
+  if(CLOUD && !_ready){
+    $('pinErr').textContent=_initErr? 'Fix the issue shown in the banner above, then refresh.'
+      : 'Still connecting to the database — give it a few seconds and try again…';
+    _pin=''; drawPin(); return;
+  }
   if(k==='C') _pin='';
   else if(k==='⌫') _pin=_pin.slice(0,-1);
   else if(_pin.length<4) _pin+=k;
