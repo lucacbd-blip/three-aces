@@ -280,10 +280,6 @@
 </div>
 <div class="toast" id="toast"></div>
 
-<!-- ============ FIREBASE (leave as-is until you set up Firebase — see README) ============ -->
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script>
 /* ==========================================================================
    FIREBASE CONFIG — paste your config object between the braces below and
@@ -340,7 +336,7 @@ const SEED_ITEMS = [
  {name:'Pullover Hoodie (Black)',cat:'Hoodies',  sizes:_std([34,37,39,43,48],[85,90,95],S7,{L:1,'2XL':5,'3XL':2,'4XL':4})},
  {name:'Youth T-Shirt (Black)',cat:'Youth',      sizes:_std([14,14,14,14,14],[30,30,30],['XS','S','M','L'],{XS:7,S:3,M:4})},
  {name:'Youth Zip-Up Hoodie (Black)',cat:'Youth',sizes:_std([29,29,29,29,29],[60,60,60],['S','M','L','XL'],{S:8,M:10,L:3})},
- {name:'Flex Fit Hat',         cat:'Hats & More',sizes:{'Red S/M':{cost:32,price:45,stock:7,reorder:2},'Red L/XL':{cost:32,price:45,stock:2,reorder:2},'Black S/M':{cost:32,price:45,stock:1,reorder:2},'White S/M':{cost:32,price:45,stock:4,reorder:2},'White L/XL':{cost:32,price:45,stock:16,reorder:2}}},
+ {name:'Flex Fit Hat',         cat:'Hats & More',sizes:{'Red S-M':{cost:32,price:45,stock:7,reorder:2},'Red L-XL':{cost:32,price:45,stock:2,reorder:2},'Black S-M':{cost:32,price:45,stock:1,reorder:2},'White S-M':{cost:32,price:45,stock:4,reorder:2},'White L-XL':{cost:32,price:45,stock:16,reorder:2}}},
  {name:'Snapback (Black)',     cat:'Hats & More',sizes:{'One Size':{cost:32,price:45,stock:5,reorder:2}}},
  {name:'Toque',                cat:'Hats & More',sizes:{'One Size':{cost:9,price:25,stock:4,reorder:2}}},
  {name:'Ski Mask',             cat:'Hats & More',sizes:{'One Size':{cost:10,price:20,stock:8,reorder:2}}},
@@ -372,38 +368,31 @@ function updateBanner(){
   else if(!_ready){ b.style.display='block'; b.className='mode-banner online'; b.textContent='Connecting to the club database…'; }
   else { b.style.display='none'; }
 }
+/* Cloud mode talks to the Firebase Realtime Database over plain HTTPS (its REST
+   API) — no SDK, no sign-in service, nothing for corporate networks to choke on.
+   Requires the database rules to be public (".read": true, ".write": true).   */
+let _lastJson='', _pollTimer=null;
+function _restUrl(pathArr){
+  const base=FIREBASE_CONFIG.databaseURL.replace(/\/+$/,'')+'/threeaces';
+  return base + (pathArr&&pathArr.length ? '/'+pathArr.map(encodeURIComponent).join('/') : '') + '.json';
+}
+function _applyLocal(path, val){   // mirror a write into local state instantly
+  let o=S;
+  for(let i=0;i<path.length-1;i++){ o[path[i]] = o[path[i]]||{}; o=o[path[i]]; }
+  if(val===null) delete o[path[path.length-1]]; else o[path[path.length-1]]=val;
+}
 const DB = {
   async init(onChange){
     _onChange = onChange;
     if(CLOUD){
       updateBanner();   // show "connecting…" right away
-      firebase.initializeApp(FIREBASE_CONFIG);
-      // Try to sign in, but don't get stuck if a work/corporate network blocks
-      // Google's sign-in service — continue without it (works with public rules).
-      try{
-        await Promise.race([
-          firebase.auth().signInAnonymously(),
-          new Promise((res,rej)=>setTimeout(()=>rej(new Error('sign-in timed out')),8000))
-        ]);
-      }catch(e){ /* proceed without sign-in */ }
-      // Watchdog: if nothing has arrived after 20s, say so instead of spinning forever.
-      setTimeout(()=>{
-        if(!_ready && !_initErr){
-          _initErr='Still cannot reach the club database after 20 seconds. Check: (1) Firebase → Realtime Database → Rules — both ".read" and ".write" should be set to true, then Publish. (2) If rules are already true, this network is blocking firebaseio.com.';
-          updateBanner();
-        }
-      },20000);
-      _ref = firebase.database().ref('threeaces');
-      _ref.on('value', snap=>{
-        const v = snap.val();
-        if(v===null && !_ready){ this.seed(); return; }
-        _initErr=null;
-        S = Object.assign({items:{},users:{},sales:{},settings:{},restocks:{},payments:{}}, v||{});
-        _ready=true; updateBanner(); _onChange();
-      }, err=>{
-        _initErr='The database refused access ('+((err&&err.code)||err)+'). Fix in Firebase: Realtime Database → Rules tab → set both ".read" and ".write" to true → Publish, then refresh this page.';
-        updateBanner();
-      });
+      setTimeout(()=>{ if(!_ready && !_initErr){
+        _initErr='Still cannot reach the club database after 20 seconds. Check in Firebase: Realtime Database → Rules — both ".read" and ".write" must be exactly true (then Publish). If they already are, this network is blocking '+FIREBASE_CONFIG.databaseURL.replace('https://','')+'.';
+        updateBanner(); } },20000);
+      await this._refresh();
+      // live sync: re-check every 3 seconds, plus instantly when the app regains focus
+      _pollTimer=setInterval(()=>{ if(!document.hidden) this._refresh(); },3000);
+      window.addEventListener('focus',()=>this._refresh());
     }else{
       const raw = localStorage.getItem('threeaces');
       if(raw){ S = JSON.parse(raw); }
@@ -411,36 +400,80 @@ const DB = {
       _ready=true; setTimeout(_onChange,0);
     }
   },
-  seed(){
+  async _refresh(){
+    try{
+      const r=await fetch(_restUrl([]),{cache:'no-store'});
+      if(!r.ok) throw new Error('HTTP '+r.status+(r.status===401||r.status===403?' — the database Rules are not public. In Firebase: Realtime Database → Rules → set ".read" and ".write" to true → Publish.':''));
+      const txt=await r.text();
+      if(txt==='null'){ if(!_ready){ await this.seed(); } return true; }
+      if(txt!==_lastJson){
+        _lastJson=txt;
+        S=Object.assign({items:{},users:{},sales:{},settings:{},restocks:{},payments:{}}, JSON.parse(txt)||{});
+        _initErr=null; _ready=true; updateBanner(); _onChange();
+      }
+      return true;
+    }catch(e){
+      if(!_ready){ _initErr='Cannot reach the club database ('+(e.message||e)+').'; updateBanner(); }
+      return false;
+    }
+  },
+  async seed(){
     const items={}, users={};
     SEED_ITEMS.forEach((it,i)=>{ items[newId()+i]={name:it.name,cat:it.cat,order:i,active:true,sizes:it.sizes}; });
     SEED_USERS.forEach((u,i)=>{ users[newId()+'u'+i]=u; });
     const full={items,users,sales:{},settings:SEED_SETTINGS,restocks:{},payments:{}};
-    if(CLOUD){ _ref.set(full).catch(e=>{
-      _initErr='Could not write the starting data ('+((e&&e.code)||e)+'). Check the database Rules are published (Realtime Database → Rules), then refresh.';
-      updateBanner(); }); }
+    if(CLOUD){
+      try{
+        const r=await fetch(_restUrl([]),{method:'PUT',body:JSON.stringify(full)});
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        _lastJson=JSON.stringify(full); S=full; _initErr=null; _ready=true; updateBanner(); _onChange();
+      }catch(e){
+        _initErr='Could not write the starting data ('+(e.message||e)+'). Check the database Rules are public and published, then refresh.';
+        updateBanner();
+      }
+    }
     else{ S=full; this._persist(); _onChange(); }
   },
   _persist(){ localStorage.setItem('threeaces', JSON.stringify(S)); },
-  set(path, val){          // path: array e.g. ['items', id, 'name']
-    if(CLOUD){ return _ref.child(path.join('/')).set(val); }
-    let o=S; for(let i=0;i<path.length-1;i++){ o[path[i]] = o[path[i]]||{}; o=o[path[i]]; }
-    if(val===null) delete o[path[path.length-1]]; else o[path[path.length-1]]=val;
+  async set(path, val){          // path: array e.g. ['items', id, 'name']
+    if(CLOUD){
+      const r=await fetch(_restUrl(path),{method: val===null?'DELETE':'PUT', body: val===null?undefined:JSON.stringify(val)});
+      if(!r.ok){ toast('Save failed — check connection',1); throw new Error('save failed'); }
+      _applyLocal(path,val); _lastJson=''; _onChange();
+      return;
+    }
+    _applyLocal(path,val);
     this._persist(); _onChange(); return Promise.resolve();
   },
   push(path, val){
     const id=newId();
     return this.set(path.concat(id), val).then(()=>id);
   },
-  // atomic-ish stock change; resolves false if it would go negative
-  txnStock(itemId, size, delta){
+  // atomic-ish stock change; resolves false if it would go negative.
+  // Cloud mode uses the database's ETag compare-and-set so two phones can't
+  // both sell the last piece.
+  async txnStock(itemId, size, delta){
     if(CLOUD){
-      return _ref.child('items/'+itemId+'/sizes/'+size+'/stock')
-        .transaction(cur=>{
-          const c = cur||0;
-          if(c+delta < 0) return;          // abort
-          return c+delta;
-        }).then(r=>r.committed);
+      const u=_restUrl(['items',itemId,'sizes',size,'stock']);
+      for(let attempt=0; attempt<6; attempt++){
+        try{
+          const g=await fetch(u,{headers:{'X-Firebase-ETag':'true'},cache:'no-store'});
+          if(!g.ok) return false;
+          const etag=g.headers.get('ETag');
+          const cur=(await g.json())||0;
+          if(cur+delta<0) return false;
+          const p=await fetch(u,{method:'PUT',
+            headers: etag? {'if-match':etag} : {},
+            body: JSON.stringify(cur+delta)});
+          if(p.ok){
+            _applyLocal(['items',itemId,'sizes',size,'stock'],cur+delta);
+            _lastJson=''; _onChange();
+            return true;
+          }
+          if(p.status!==412) return false;   // 412 = someone beat us; retry
+        }catch(e){ return false; }
+      }
+      return false;
     }
     const sz = S.items[itemId] && S.items[itemId].sizes[size];
     if(!sz || (sz.stock||0)+delta < 0) return Promise.resolve(false);
@@ -1047,7 +1080,7 @@ async function saveItem(id){
   if(!name){ toast('Name is required',1); return; }
   const sizes={};
   document.querySelectorAll('#ei_sizes .sizeedit').forEach(r=>{
-    const s=r.querySelector('.se_s').value.trim();
+    let s=r.querySelector('.se_s').value.trim().replace(/[.#$/\[\]]/g,'-'); // chars the database forbids in names
     if(!s) return;
     sizes[s]={cost:+r.querySelector('.se_c').value||0, price:+r.querySelector('.se_p').value||0,
       stock:Math.max(0,Math.round(+r.querySelector('.se_q').value||0)),
