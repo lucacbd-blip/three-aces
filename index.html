@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0d0d0d">
+<title>Three Aces — Clothing Sales</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80'>🂡</text></svg>">
+<style>
+  :root{ /* LIGHT theme (default) */
+    --green:#00813e; --red:#ce2b37; --white:#f4f4f4;
+    --bg:#f6f6f3; --panel:#ffffff; --panel2:#efefec; --line:#d6d6d0; --line2:#e8e8e3;
+    --text:#1c1c1c; --muted:#63636b; --gold:#9a7300; --star-w:#b7b7b7;
+    --hdrbg:#ffffff; --navbg:#ffffff; --togoff:#c9c9c9;
+    --pos:#0d7a3e; --neg:#c62828; --memberbg:#d9f2e4; --membertx:#0d6832;
+  }
+  body.dark{
+    --green:#009246;
+    --bg:#0d0d0d; --panel:#1a1a1a; --panel2:#242424; --line:#333; --line2:#222;
+    --text:#f2f2f2; --muted:#9a9a9a; --gold:#e8c34a; --star-w:#f4f4f4;
+    --hdrbg:#000; --navbg:#000; --togoff:#444;
+    --pos:#7ee2a8; --neg:#ff8a80; --memberbg:#00331b; --membertx:#7ee2a8;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  body{padding-bottom:calc(70px + env(safe-area-inset-bottom));}
+  button{font-family:inherit;}
+  input,select{font-family:inherit;font-size:16px;background:var(--panel2);color:var(--text);
+    border:1px solid var(--line);border-radius:8px;padding:10px;width:100%;}
+  input:focus,select:focus{outline:2px solid var(--green);}
+  label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px;text-transform:uppercase;letter-spacing:.5px;}
+
+  /* Header */
+  header{position:sticky;top:0;z-index:50;background:var(--hdrbg);
+    border-bottom:2px solid var(--line);padding:10px 14px calc(8px);display:flex;align-items:center;gap:10px;}
+  .tricolor{height:4px;background:linear-gradient(90deg,var(--green) 33%,var(--white) 33% 66%,var(--red) 66%);
+    position:fixed;top:0;left:0;right:0;z-index:60;}
+  header img.logo{height:44px;width:44px;object-fit:contain;border-radius:8px;}
+  .brand{flex:1;line-height:1.1;}
+  .brand .stars{font-size:11px;letter-spacing:3px;}
+  .stars .g{color:var(--green);} .stars .w{color:var(--star-w);} .stars .r{color:var(--red);}
+  .brand h1{margin:0;font-size:17px;letter-spacing:2px;font-weight:800;}
+  .brand small{color:var(--muted);font-size:10px;letter-spacing:.5px;display:block;}
+  .userchip{background:var(--panel2);border:1px solid var(--line);border-radius:20px;
+    padding:6px 12px;font-size:13px;color:var(--text);display:flex;align-items:center;gap:6px;}
+  .userchip b{color:var(--gold);}
+  .mode-banner{background:#3a2f00;color:#ffd54f;text-align:center;font-size:12px;padding:5px;}
+  .mode-banner.online{background:#00331b;color:#7ee2a8;}
+
+  /* Views */
+  .view{display:none;padding:14px;max-width:760px;margin:0 auto;}
+  .view.active{display:block;}
+  h2{font-size:15px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);margin:18px 0 10px;}
+  h2:first-child{margin-top:4px;}
+
+  /* Login */
+  #login{max-width:420px;margin:0 auto;padding:24px 18px;}
+  .login-logo{text-align:center;margin:18px 0 26px;}
+  .login-logo img{max-width:170px;border-radius:14px;}
+  .login-logo .stars{font-size:22px;letter-spacing:10px;margin-top:8px;}
+  .login-logo h1{margin:6px 0 0;font-size:26px;letter-spacing:4px;}
+  .login-logo p{color:var(--muted);margin:4px 0 0;font-size:12px;letter-spacing:1px;}
+  /* PIN pad */
+  .pinpad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px;}
+  .pinpad button{padding:16px;font-size:22px;border-radius:12px;border:1px solid var(--line);
+    background:var(--panel2);color:var(--text);cursor:pointer;}
+  .pinpad button:active{background:var(--line);}
+  .pindots{text-align:center;font-size:28px;letter-spacing:12px;min-height:40px;color:var(--gold);}
+  .pinerr{color:var(--red);text-align:center;font-size:13px;min-height:18px;}
+
+  /* Sell screen */
+  .catbar{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px;margin-bottom:6px;}
+  .catbar button{flex:0 0 auto;background:var(--panel);border:1px solid var(--line);color:var(--muted);
+    border-radius:18px;padding:8px 14px;font-size:13px;cursor:pointer;white-space:nowrap;}
+  .catbar button.on{background:var(--green);border-color:var(--green);color:#fff;font-weight:700;}
+  .itemcard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:10px;}
+  .itemcard .top{display:flex;justify-content:space-between;align-items:center;cursor:pointer;}
+  .itemcard .nm{font-size:16px;font-weight:700;}
+  .itemcard .meta{font-size:12px;color:var(--muted);margin-top:2px;}
+  .itemcard .price{color:var(--gold);font-weight:700;font-size:15px;}
+  .sizerow{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;}
+  .sizebtn{min-width:64px;padding:10px 8px;border-radius:10px;border:1px solid var(--line);
+    background:var(--panel2);color:var(--text);font-size:14px;font-weight:700;cursor:pointer;text-align:center;}
+  .sizebtn small{display:block;font-weight:400;font-size:11px;color:var(--muted);}
+  .sizebtn.out{opacity:.35;}
+  .sizebtn.low small{color:var(--gold);}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;vertical-align:baseline;border:1px solid #555;}
+
+  /* Cart */
+  #cartbar{position:fixed;bottom:calc(62px + env(safe-area-inset-bottom));left:0;right:0;z-index:40;
+    background:var(--green);color:#fff;padding:12px 18px;display:none;justify-content:space-between;
+    align-items:center;font-size:16px;font-weight:700;cursor:pointer;}
+  #cartbar .n{background:#fff;color:var(--green);border-radius:50%;width:26px;height:26px;
+    display:inline-flex;align-items:center;justify-content:center;margin-right:10px;}
+  .cartline{display:flex;justify-content:space-between;align-items:center;gap:8px;
+    border-bottom:1px solid var(--line);padding:10px 0;}
+  .cartline .d{flex:1;}
+  .cartline .nm{font-weight:700;}
+  .cartline .sub{font-size:12px;color:var(--muted);}
+  .memberflag{display:inline-block;background:var(--memberbg);color:var(--membertx);border-radius:6px;
+    font-size:11px;padding:2px 6px;margin-left:6px;}
+  .qtyctl{display:flex;align-items:center;gap:8px;}
+  .qtyctl button{width:32px;height:32px;border-radius:8px;border:1px solid var(--line);
+    background:var(--panel2);color:var(--text);font-size:18px;cursor:pointer;}
+  .cart-total{display:flex;justify-content:space-between;font-size:20px;font-weight:800;margin:14px 0;}
+  .payrow{display:flex;gap:10px;margin:10px 0 16px;}
+  .payrow button{flex:1;padding:12px;border-radius:10px;border:1px solid var(--line);
+    background:var(--panel2);color:var(--text);font-size:15px;cursor:pointer;}
+  .payrow button.on{background:var(--green);border-color:var(--green);color:#fff;font-weight:700;}
+
+  /* Generic buttons */
+  .btn{display:block;width:100%;padding:14px;border-radius:12px;border:none;font-size:16px;
+    font-weight:700;cursor:pointer;background:var(--green);color:#fff;}
+  .btn.red{background:var(--red);} .btn.gray{background:var(--panel2);color:var(--text);border:1px solid var(--line);}
+  .btn.small{width:auto;display:inline-block;padding:8px 14px;font-size:13px;border-radius:8px;}
+  .btn:disabled{opacity:.5;}
+  .rowbtns{display:flex;gap:10px;margin-top:10px;}
+  .rowbtns .btn{flex:1;}
+
+  /* Tables */
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th{color:var(--muted);text-align:left;font-weight:600;font-size:11px;text-transform:uppercase;
+    letter-spacing:.5px;padding:8px 6px;border-bottom:1px solid var(--line);}
+  td{padding:9px 6px;border-bottom:1px solid var(--line2);}
+  td.r,th.r{text-align:right;}
+  .pos{color:var(--pos);} .neg{color:var(--neg);} .goldtxt{color:var(--gold);}
+
+  /* Cards / stats */
+  .statgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px;}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;}
+  .stat .v{font-size:22px;font-weight:800;}
+  .stat .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-top:2px;}
+  .stat.green .v{color:var(--pos);} .stat.gold .v{color:var(--gold);} .stat.red .v{color:var(--neg);}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;}
+  .salecard{border-left:4px solid var(--green);}
+  .salecard.voided{border-left-color:var(--red);opacity:.55;}
+  .salecard .hd{display:flex;justify-content:space-between;font-weight:700;}
+  .salecard .lines{font-size:13px;color:var(--muted);margin-top:6px;}
+  .voidtag{color:var(--red);font-weight:700;font-size:11px;text-transform:uppercase;}
+
+  /* Admin tabs */
+  .tabbar{display:flex;gap:6px;overflow-x:auto;margin-bottom:14px;}
+  .tabbar button{flex:0 0 auto;background:var(--panel);border:1px solid var(--line);color:var(--muted);
+    border-radius:8px;padding:9px 13px;font-size:13px;cursor:pointer;}
+  .tabbar button.on{background:var(--panel2);color:var(--gold);border-color:var(--gold);font-weight:700;}
+
+  /* Bottom nav */
+  nav{position:fixed;bottom:0;left:0;right:0;z-index:50;background:var(--navbg);border-top:1px solid var(--line);
+    display:none;justify-content:space-around;padding:6px 0 calc(6px + env(safe-area-inset-bottom));}
+  nav button{background:none;border:none;color:var(--muted);font-size:11px;cursor:pointer;
+    display:flex;flex-direction:column;align-items:center;gap:3px;padding:4px 14px;}
+  nav button .ic{font-size:20px;}
+  nav button.on{color:var(--gold);}
+
+  /* Modal */
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:100;display:none;
+    align-items:flex-end;justify-content:center;}
+  .modal-bg.open{display:flex;}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:18px 18px 0 0;
+    width:100%;max-width:560px;max-height:88vh;overflow-y:auto;padding:18px 16px calc(24px + env(safe-area-inset-bottom));}
+  .modal h3{margin:0 0 12px;font-size:17px;}
+  .modal .x{float:right;background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;padding:0 4px;}
+  .sizeedit{display:grid;grid-template-columns:1.1fr 1fr 1fr .9fr .9fr 30px;gap:5px;align-items:center;margin-bottom:6px;}
+  .sizeedit input{padding:8px;font-size:14px;}
+  .sizeedit .del{background:none;border:none;color:var(--red);font-size:18px;cursor:pointer;}
+  .sehead{display:grid;grid-template-columns:1.1fr 1fr 1fr .9fr .9fr 30px;gap:5px;font-size:10px;
+    color:var(--muted);text-transform:uppercase;margin-bottom:4px;}
+  .rsrow{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;align-items:center;margin-bottom:6px;font-size:13px;}
+  .rsrow input{padding:8px;font-size:14px;}
+  .rshead{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;font-size:10px;color:var(--muted);text-transform:uppercase;margin-bottom:4px;}
+
+  /* Print (Save as PDF) */
+  .printhead{display:none;}
+  @media print{
+    body{background:#fff !important;color:#000;padding:0;}
+    .tricolor,header,nav,#cartbar,#modeBanner,.tabbar,.noprint,.btn,button{display:none !important;}
+    .view{display:none;} .view.active{display:block;padding:0;max-width:none;}
+    .printhead{display:block;text-align:center;margin-bottom:14px;color:#000;}
+    .printhead h1{margin:0;font-size:20px;letter-spacing:2px;}
+    .printhead p{margin:2px 0;font-size:12px;color:#333;}
+    .card,.stat{background:#fff !important;border:1px solid #bbb !important;color:#000;break-inside:avoid;}
+    .stat .v,.stat .l,td,th,h2,b,.goldtxt,.pos,.neg,.muted{color:#000 !important;}
+    td,th{border-bottom:1px solid #ddd;}
+    h2{color:#000;}
+  }
+  .switchrow{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #222;}
+  .switchrow .t{font-size:14px;} .switchrow .s{font-size:12px;color:var(--muted);}
+  .toggle{width:52px;height:30px;border-radius:15px;background:var(--togoff);border:none;position:relative;cursor:pointer;flex:0 0 auto;}
+  .toggle.on{background:var(--green);}
+  .toggle::after{content:'';position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;
+    background:#fff;transition:left .15s;}
+  .toggle.on::after{left:25px;}
+  .searchbox{margin-bottom:10px;}
+  .muted{color:var(--muted);font-size:13px;}
+  .empty{color:var(--muted);text-align:center;padding:30px 10px;font-size:14px;}
+  .toast{position:fixed;top:60px;left:50%;transform:translateX(-50%);background:var(--green);color:#fff;
+    padding:12px 22px;border-radius:24px;font-weight:700;z-index:200;display:none;box-shadow:0 4px 18px rgba(0,0,0,.5);}
+  .toast.err{background:var(--red);}
+</style>
+</head>
+<body>
+<div class="tricolor"></div>
+<div id="modeBanner" class="mode-banner" style="display:none"></div>
+
+<header id="appHeader" style="display:none">
+  <img class="logo" src="logo.png" onerror="this.style.display='none'">
+  <div class="brand">
+    <div class="stars"><span class="g">★</span> <span class="w">★</span> <span class="r">★</span></div>
+    <h1>THREE ACES</h1>
+    <small>ITALIAN CANADIAN CULTURAL CLUB</small>
+  </div>
+  <button class="userchip themeIco" onclick="toggleTheme()" title="Light/dark mode">🌙</button>
+  <button class="userchip" onclick="logout()"><b id="chipName"></b> ⎋</button>
+</header>
+
+<!-- LOGIN -->
+<div id="login" class="view active">
+  <div class="login-logo">
+    <img src="logo.png" onerror="this.style.display='none'">
+    <div class="stars"><span class="g">★</span> <span class="w">★</span> <span class="r">★</span></div>
+    <h1>THREE ACES</h1>
+    <p>ITALIAN CANADIAN CULTURAL CLUB</p>
+    <p style="color:var(--gold);margin-top:10px">Clothing Sales &amp; Inventory</p>
+  </div>
+  <div style="max-width:340px;margin:0 auto">
+    <label>Name</label>
+    <input id="loginName" autocomplete="off" autocapitalize="words" placeholder="Type your name"
+      oninput="$('pinErr').textContent=''">
+    <label>PIN</label>
+    <div class="pindots" id="pinDots"></div>
+    <div class="pinerr" id="pinErr"></div>
+    <div class="pinpad">
+      <button onclick="pinKey('1')">1</button><button onclick="pinKey('2')">2</button><button onclick="pinKey('3')">3</button>
+      <button onclick="pinKey('4')">4</button><button onclick="pinKey('5')">5</button><button onclick="pinKey('6')">6</button>
+      <button onclick="pinKey('7')">7</button><button onclick="pinKey('8')">8</button><button onclick="pinKey('9')">9</button>
+      <button onclick="pinKey('C')">C</button><button onclick="pinKey('0')">0</button><button onclick="pinKey('⌫')">⌫</button>
+    </div>
+  </div>
+  <div style="text-align:center;margin-top:22px">
+    <button class="btn gray small themeIco" onclick="toggleTheme()">🌙</button>
+  </div>
+</div>
+
+<!-- SELL -->
+<div id="sell" class="view">
+  <div class="catbar" id="catBar"></div>
+  <div id="itemList"></div>
+</div>
+
+<!-- STOCK -->
+<div id="stock" class="view">
+  <h2>Current Stock</h2>
+  <input class="searchbox" id="stockSearch" placeholder="Search items…" oninput="renderStock()">
+  <div id="stockList"></div>
+</div>
+
+<!-- SALES LOG -->
+<div id="saleslog" class="view">
+  <h2>Sales — Today</h2>
+  <div id="salesList"></div>
+</div>
+
+<!-- ADMIN -->
+<div id="admin" class="view">
+  <div class="tabbar" id="adminTabs"></div>
+  <div id="adminBody"></div>
+</div>
+
+<div id="cartbar" onclick="openCart()">
+  <span><span class="n" id="cartN">0</span>View Sale</span>
+  <span id="cartT">$0</span>
+</div>
+
+<nav id="nav"></nav>
+
+<div class="modal-bg" id="modalBg" onclick="if(event.target===this)closeModal()">
+  <div class="modal" id="modalBox"></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<!-- ============ FIREBASE (leave as-is until you set up Firebase — see README) ============ -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+/* ==========================================================================
+   FIREBASE CONFIG — paste your config object between the braces below and
+   the app switches from "Local test mode" to live multi-phone sync.
+   Example:
+   const FIREBASE_CONFIG = {
+     apiKey: "AIza....", authDomain: "three-aces.firebaseapp.com",
+     databaseURL: "https://three-aces-default-rtdb.firebaseio.com",
+     projectId: "three-aces", appId: "1:1234:web:abcd"
+   };
+   ========================================================================== */
+const FIREBASE_CONFIG = null;   // ← replace null with your config to go live
+
+/* =========================== STARTING DATA ================================
+   Seeded automatically the first time the app runs (from your stock-count
+   photos + Sep 25 2024 cost sheet). After that, manage everything in
+   Admin → Items. NOTE: Ski Mask cost/price were not on the cost sheet —
+   placeholder $10 cost / $20 price. Fix in Admin → Items!
+   ========================================================================== */
+const SIZE_ORDER = ['XS','S','M','L','XL','2XL','3XL','4XL','5XL','One Size'];
+function _std(costs, prices, sizeList, stock){
+  // costs=[base,2xl,3xl,4xl,5xl]  prices=[S-XL,2-3XL,4-5XL]
+  const cFor = s=>({'2XL':costs[1],'3XL':costs[2],'4XL':costs[3],'5XL':costs[4]}[s] ?? costs[0]);
+  const pFor = s=>({'2XL':prices[1],'3XL':prices[1],'4XL':prices[2],'5XL':prices[2]}[s] ?? prices[0]);
+  const out={};
+  sizeList.forEach(s=>{ out[s]={cost:cFor(s), price:pFor(s), stock:(stock[s]||0), reorder:2}; });
+  return out;
+}
+const S6=['S','M','L','XL','2XL','3XL'], S7=S6.concat(['4XL']), S8=S7.concat(['5XL']);
+const SEED_ITEMS = [
+ {name:'Sleeveless T (Red)',   cat:'Sleeveless', sizes:_std([13,14,15,16,17],[35,40,45],S6,{S:5,M:1,L:7,'2XL':5,'3XL':1})},
+ {name:'Sleeveless T (White)', cat:'Sleeveless', sizes:_std([13,14,15,16,17],[35,40,45],S6,{S:1,M:4,L:3,XL:1,'2XL':2,'3XL':2})},
+ {name:'Sleeveless T (Black)', cat:'Sleeveless', sizes:_std([13,14,15,16,17],[35,40,45],S6,{S:2,M:4,L:1,'3XL':1})},
+ {name:'Ladies T (Black)',     cat:'Ladies',     sizes:_std([14,15,16,17,18],[40,45,50],S6,{M:1,XL:4,'2XL':6})},
+ {name:'Mens T-Shirt (Red)',   cat:'T-Shirts',   sizes:_std([16,17,18,19,20],[40,45,50],S7,{S:1,M:2,L:6,XL:3,'2XL':8,'3XL':9,'4XL':8})},
+ {name:'Mens T-Shirt (Black)', cat:'T-Shirts',   sizes:_std([15,16,17,18,20],[40,45,50],S7,{M:1,'2XL':3})},
+ {name:'Long Sleeve T (Black)',cat:'Long Sleeve',sizes:_std([22,24,26,28,30],[50,55,60],S8,{S:9,XL:4,'2XL':4,'3XL':3,'4XL':10,'5XL':2})},
+ {name:'Long Sleeve T (Red)',  cat:'Long Sleeve',sizes:_std([22,24,26,28,30],[50,55,60],S6,{S:7,M:1,L:2,XL:4,'2XL':3,'3XL':3})},
+ {name:'Long Sleeve T (White)',cat:'Long Sleeve',sizes:_std([22,24,26,28,30],[50,55,60],['L','XL'],{L:1,XL:2})},
+ {name:'Ladies Leggings',      cat:'Ladies',     sizes:_std([25,25,25,25,25],[50,55,60],['XS'].concat(S6),{XS:13,S:6,L:7,XL:2,'2XL':6})},
+ {name:'Shorts (Black)',       cat:'Bottoms',    sizes:_std([20,20,20,20,20],[30,30,30],S6,{XL:3,'2XL':5,'3XL':6})},
+ {name:'Shorts (Champion)',    cat:'Bottoms',    sizes:_std([20,20,20,20,20],[30,30,30],S6,{S:2,M:3,L:1,XL:10,'2XL':9,'3XL':5})},
+ {name:'Track Pants (Black)',  cat:'Bottoms',    sizes:_std([23,25,27,29,31],[45,50,55],S6,{S:3,M:4,L:2,XL:4,'2XL':3,'3XL':1})},
+ {name:'Zip-Up Hoodie (Black)',cat:'Hoodies',    sizes:_std([35,37,39,51,55],[85,90,95],S7,{'2XL':3,'3XL':3,'4XL':2})},
+ {name:'Zip-Up Hoodie (Red)',  cat:'Hoodies',    sizes:_std([35,37,39,51,55],[85,90,95],S7,{S:3,M:2,L:4,'2XL':2,'3XL':5,'4XL':1})},
+ {name:'Pullover Hoodie (Black)',cat:'Hoodies',  sizes:_std([34,37,39,43,48],[85,90,95],S7,{L:1,'2XL':5,'3XL':2,'4XL':4})},
+ {name:'Youth T-Shirt (Black)',cat:'Youth',      sizes:_std([14,14,14,14,14],[30,30,30],['XS','S','M','L'],{XS:7,S:3,M:4})},
+ {name:'Youth Zip-Up Hoodie (Black)',cat:'Youth',sizes:_std([29,29,29,29,29],[60,60,60],['S','M','L','XL'],{S:8,M:10,L:3})},
+ {name:'Flex Fit Hat',         cat:'Hats & More',sizes:{'Red S/M':{cost:32,price:45,stock:7,reorder:2},'Red L/XL':{cost:32,price:45,stock:2,reorder:2},'Black S/M':{cost:32,price:45,stock:1,reorder:2},'White S/M':{cost:32,price:45,stock:4,reorder:2},'White L/XL':{cost:32,price:45,stock:16,reorder:2}}},
+ {name:'Snapback (Black)',     cat:'Hats & More',sizes:{'One Size':{cost:32,price:45,stock:5,reorder:2}}},
+ {name:'Toque',                cat:'Hats & More',sizes:{'One Size':{cost:9,price:25,stock:4,reorder:2}}},
+ {name:'Ski Mask',             cat:'Hats & More',sizes:{'One Size':{cost:10,price:20,stock:8,reorder:2}}},
+ {name:'Sticker',              cat:'Hats & More',sizes:{'One Size':{cost:3,price:5,stock:0,reorder:10}}},
+];
+const SEED_USERS = [
+ {name:'Luca',      pin:'1234', role:'admin',  profitPct:0,   active:true},
+ {name:'President', pin:'2222', role:'seller', profitPct:100, active:true},
+ {name:'Picnic',    pin:'1111', role:'seller', profitPct:0,   active:true},
+];
+const SEED_SETTINGS = {allowMemberSales:true, eventName:'', sortMode:'custom'};
+
+/* ============================ STORAGE LAYER =============================== */
+const CLOUD = !!FIREBASE_CONFIG;
+let S = {items:{}, users:{}, sales:{}, settings:{}, restocks:{}, payments:{}};   // live state
+let _ref=null, _ready=false, _onChange=()=>{};
+
+function newId(){ return 'k'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+
+const DB = {
+  async init(onChange){
+    _onChange = onChange;
+    if(CLOUD){
+      firebase.initializeApp(FIREBASE_CONFIG);
+      await firebase.auth().signInAnonymously();
+      _ref = firebase.database().ref('threeaces');
+      _ref.on('value', snap=>{
+        const v = snap.val();
+        if(v===null && !_ready){ this.seed(); return; }
+        S = Object.assign({items:{},users:{},sales:{},settings:{},restocks:{},payments:{}}, v||{});
+        _ready=true; _onChange();
+      });
+    }else{
+      const raw = localStorage.getItem('threeaces');
+      if(raw){ S = JSON.parse(raw); }
+      else{ this.seed(); }
+      _ready=true; setTimeout(_onChange,0);
+    }
+  },
+  seed(){
+    const items={}, users={};
+    SEED_ITEMS.forEach((it,i)=>{ items[newId()+i]={name:it.name,cat:it.cat,order:i,active:true,sizes:it.sizes}; });
+    SEED_USERS.forEach((u,i)=>{ users[newId()+'u'+i]=u; });
+    const full={items,users,sales:{},settings:SEED_SETTINGS,restocks:{},payments:{}};
+    if(CLOUD){ _ref.set(full); }
+    else{ S=full; this._persist(); _onChange(); }
+  },
+  _persist(){ localStorage.setItem('threeaces', JSON.stringify(S)); },
+  set(path, val){          // path: array e.g. ['items', id, 'name']
+    if(CLOUD){ return _ref.child(path.join('/')).set(val); }
+    let o=S; for(let i=0;i<path.length-1;i++){ o[path[i]] = o[path[i]]||{}; o=o[path[i]]; }
+    if(val===null) delete o[path[path.length-1]]; else o[path[path.length-1]]=val;
+    this._persist(); _onChange(); return Promise.resolve();
+  },
+  push(path, val){
+    const id=newId();
+    return this.set(path.concat(id), val).then(()=>id);
+  },
+  // atomic-ish stock change; resolves false if it would go negative
+  txnStock(itemId, size, delta){
+    if(CLOUD){
+      return _ref.child('items/'+itemId+'/sizes/'+size+'/stock')
+        .transaction(cur=>{
+          const c = cur||0;
+          if(c+delta < 0) return;          // abort
+          return c+delta;
+        }).then(r=>r.committed);
+    }
+    const sz = S.items[itemId] && S.items[itemId].sizes[size];
+    if(!sz || (sz.stock||0)+delta < 0) return Promise.resolve(false);
+    sz.stock=(sz.stock||0)+delta; this._persist(); _onChange();
+    return Promise.resolve(true);
+  }
+};
+
+/* ============================== APP STATE ================================= */
+let me=null;            // current user id
+let view='sell', adminTab='report', cart=[], selCat='All', payMethod='Cash', openItem=null, cartBuyer='';
+
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=n=>'$'+(Math.round(n*100)/100).toLocaleString('en-CA',{minimumFractionDigits:(n%1?2:0),maximumFractionDigits:2});
+const meU=()=>S.users[me];
+const isAdmin=()=>me && meU() && meU().role==='admin';
+function toast(msg,err){ const t=$('toast'); t.textContent=msg; t.className='toast'+(err?' err':''); t.style.display='block';
+  clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none',2200); }
+function sizeSort(a,b){ const ia=SIZE_ORDER.indexOf(a), ib=SIZE_ORDER.indexOf(b);
+  if(ia<0&&ib<0) return a.localeCompare(b); if(ia<0) return 1; if(ib<0) return -1; return ia-ib; }
+function itemsSorted(){ return Object.entries(S.items||{}).filter(([,i])=>i.active!==false)
+  .sort((a,b)=>(a[1].order??99)-(b[1].order??99)||a[1].name.localeCompare(b[1].name)); }
+function allItemsSorted(){ return Object.entries(S.items||{})
+  .sort((a,b)=>(a[1].order??99)-(b[1].order??99)||a[1].name.localeCompare(b[1].name)); }
+function totalStock(it){ return Object.values(it.sizes||{}).reduce((n,z)=>n+(z.stock||0),0); }
+function soldMap(){ // units sold per item (non-void, all time) — powers "best sellers" order
+  const m={};
+  Object.values(S.sales||{}).forEach(s=>{ if(s.voided) return;
+    (s.lines||[]).forEach(l=>{ m[l.itemId]=(m[l.itemId]||0)+l.qty; }); });
+  return m;
+}
+function displayItemsSorted(){ // order used on the Sell + Stock screens
+  const mode=(S.settings&&S.settings.sortMode)||'custom';
+  const list=itemsSorted();                       // custom order baseline
+  if(mode==='alpha') return [...list].sort((a,b)=>a[1].name.localeCompare(b[1].name));
+  if(mode==='bestsellers'){ const m=soldMap();
+    return [...list].sort((a,b)=>(m[b[0]]||0)-(m[a[0]]||0)); }
+  return list;
+}
+function colorDot(it){
+  if(it.color==='none') return '';
+  if(it.color) return `<span class="dot" style="background:${esc(it.color)}"></span>`;
+  const n=(it.name||'').toLowerCase();   // fallback: guess from the name
+  if(n.includes('(red)')||n.startsWith('red')) return '<span class="dot" style="background:#c0392b"></span>';
+  if(n.includes('(white)')) return '<span class="dot" style="background:#eee"></span>';
+  if(n.includes('(black)')) return '<span class="dot" style="background:#111"></span>';
+  return '';
+}
+function today0(){ const d=new Date(); d.setHours(0,0,0,0); return d.getTime(); }
+
+/* ============================== RENDERING ================================= */
+function rerender(){
+  if(!_ready) return;
+  // banner
+  const b=$('modeBanner');
+  if(CLOUD){ b.style.display='none'; }
+  else{ b.style.display='block'; b.className='mode-banner';
+        b.textContent='⚠ LOCAL TEST MODE — data stays on this device only. Set up Firebase to sync phones (see README).'; }
+  if(me && !S.users[me]) me=null;   // user removed remotely
+  if(!me){ showLogin(); return; }
+  $('login').classList.remove('active');
+  $('appHeader').style.display='flex';
+  $('nav').style.display='flex';
+  $('chipName').textContent=meU().name;
+  renderNav();
+  ['sell','stock','saleslog','admin'].forEach(v=>$(v).classList.toggle('active', v===view));
+  if(view==='sell') renderSell();
+  if(view==='stock') renderStock();
+  if(view==='saleslog') renderSales();
+  if(view==='admin') renderAdmin();
+  renderCartBar();
+}
+function showLogin(){
+  $('appHeader').style.display='none'; $('nav').style.display='none';
+  ['sell','stock','saleslog','admin'].forEach(v=>$(v).classList.remove('active'));
+  $('login').classList.add('active');
+  // convenience: prefill the last name used on this device (never shows anyone else's name)
+  if(!$('loginName').value){
+    const last=localStorage.getItem('ta_lastname');
+    if(last) $('loginName').value=last;
+  }
+  drawPin();
+}
+let _pin='';
+function drawPin(){ $('pinDots').textContent='●'.repeat(_pin.length); }
+function pinKey(k){
+  if(k==='C') _pin='';
+  else if(k==='⌫') _pin=_pin.slice(0,-1);
+  else if(_pin.length<4) _pin+=k;
+  drawPin();
+  if(_pin.length===4){
+    const name=$('loginName').value.trim().toLowerCase();
+    const hit=Object.entries(S.users||{}).find(([,u])=>
+      u.active!==false && (u.name||'').trim().toLowerCase()===name && u.pin===_pin);
+    if(hit){
+      me=hit[0]; sessionStorage.setItem('ta_me',me);
+      localStorage.setItem('ta_lastname',hit[1].name);
+      _pin=''; $('pinErr').textContent=''; view='sell'; rerender();
+    }else{
+      $('pinErr').textContent='Wrong name or PIN — try again';
+      _pin=''; setTimeout(drawPin,250);
+    }
+  }
+}
+function logout(){ me=null; cart=[]; sessionStorage.removeItem('ta_me'); rerender(); }
+
+function renderNav(){
+  const tabs=[['sell','🛒','Sell'],['stock','📦','Stock'],['saleslog','🧾','Sales']];
+  if(isAdmin()) tabs.push(['admin','⚙️','Admin']);
+  $('nav').innerHTML=tabs.map(([v,ic,l])=>
+    `<button class="${view===v?'on':''}" onclick="go('${v}')"><span class="ic">${ic}</span>${l}</button>`).join('');
+}
+function go(v){ view=v; window.scrollTo(0,0); rerender(); }
+
+/* ------------------------------- SELL ------------------------------------ */
+function renderSell(){
+  const cats=['All',...new Set(displayItemsSorted().map(([,i])=>i.cat||'Other'))];
+  if(!cats.includes(selCat)) selCat='All';
+  $('catBar').innerHTML=cats.map(c=>
+    `<button class="${selCat===c?'on':''}" onclick="selCat='${esc(c)}';rerender()">${esc(c)}</button>`).join('');
+  // Only items we actually have on hand appear on the sale list, in the admin-chosen order.
+  const list=displayItemsSorted().filter(([,i])=>(selCat==='All'||i.cat===selCat) && totalStock(i)>0);
+  $('itemList').innerHTML=list.map(([id,it])=>{
+    const sizes=Object.keys(it.sizes||{}).sort(sizeSort);
+    const total=sizes.reduce((n,s)=>n+(it.sizes[s].stock||0),0);
+    const prices=[...new Set(sizes.map(s=>it.sizes[s].price))];
+    const pTxt=prices.length===1?fmt(prices[0]):fmt(Math.min(...prices))+'–'+fmt(Math.max(...prices));
+    const open=openItem===id;
+    return `<div class="itemcard">
+      <div class="top" onclick="openItem=${open?'null':`'${id}'`};rerender()">
+        <div><div class="nm">${colorDot(it)}${esc(it.name)}</div>
+        <div class="meta">${esc(it.cat||'')} · ${total} in stock</div></div>
+        <div class="price">${pTxt}</div>
+      </div>
+      ${open?`<div class="sizerow">${sizes.map(s=>{
+          const z=it.sizes[s]; const st=z.stock||0;
+          return `<button class="sizebtn ${st===0?'out':st<=(z.reorder??2)?'low':''}" ${st===0?'disabled':''}
+            onclick="addToCart('${id}','${esc(s)}')">${esc(s)}<small>${st===0?'sold out':st+' left · '+fmt(z.price)}</small></button>`;
+        }).join('')}</div>`:''}
+    </div>`;
+  }).join('') || '<div class="empty">Nothing in stock in this category.</div>';
+}
+function addToCart(itemId,size){
+  const it=S.items[itemId], z=it.sizes[size];
+  const inCart=cart.filter(l=>l.itemId===itemId&&l.size===size).reduce((n,l)=>n+l.qty,0);
+  if(inCart+1 > (z.stock||0)){ toast('Only '+(z.stock||0)+' left in stock',1); return; }
+  const ex=cart.find(l=>l.itemId===itemId&&l.size===size&&!l.member);
+  if(ex) ex.qty++;
+  else cart.push({itemId, item:it.name, size, qty:1, price:z.price, cost:z.cost, member:false});
+  toast(it.name+' '+size+' added');
+  renderCartBar();
+}
+function renderCartBar(){
+  const n=cart.reduce((a,l)=>a+l.qty,0);
+  $('cartbar').style.display = n&&me ? 'flex':'none';
+  $('cartN').textContent=n;
+  $('cartT').textContent=fmt(cart.reduce((a,l)=>a+l.qty*(l.member?l.cost:l.price),0));
+}
+function openCart(){
+  if(!cart.length) return;
+  const memberOK = isAdmin() || (S.settings&&S.settings.allowMemberSales!==false);
+  const total=cart.reduce((a,l)=>a+l.qty*(l.member?l.cost:l.price),0);
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>Current Sale</h3>
+    ${cart.map((l,i)=>`<div class="cartline">
+      <div class="d"><div class="nm">${esc(l.item)} — ${esc(l.size)}${l.member?'<span class="memberflag">MEMBER @ COST</span>':''}</div>
+        <div class="sub">${fmt(l.member?l.cost:l.price)} each
+          ${memberOK?`· <a href="#" style="color:var(--gold)" onclick="toggleMember(${i});return false">${l.member?'regular price':'member price'}</a>`:''}
+        </div></div>
+      <div class="qtyctl">
+        <button onclick="qty(${i},-1)">−</button><b>${l.qty}</b><button onclick="qty(${i},1)">+</button>
+      </div></div>`).join('')}
+    <div class="cart-total"><span>Total to collect</span><span class="goldtxt">${fmt(total)}</span></div>
+    <label>Payment</label>
+    <div class="payrow">
+      ${['Cash','E-Transfer','Pay Later'].map(p=>`<button class="${payMethod===p?'on':''}" onclick="payMethod='${p}';openCart()">${p}</button>`).join('')}
+    </div>
+    ${payMethod==='Pay Later'?`
+      <label>Who owes this? (tracked on their tab until they pay)</label>
+      <select id="buyerSel" onchange="cartBuyer=this.value">
+        <option value="">— pick the member —</option>
+        ${Object.values(S.users||{}).filter(u=>u.active!==false).map(u=>
+          `<option ${cartBuyer===u.name?'selected':''}>${esc(u.name)}</option>`).join('')}
+      </select><div style="height:10px"></div>`:''}
+    <button class="btn" onclick="checkout()">✓ Complete Sale — ${fmt(total)}</button>
+    <div class="rowbtns"><button class="btn gray" onclick="closeModal()">Keep Selling</button>
+    <button class="btn red" onclick="cart=[];closeModal();renderCartBar()">Cancel Sale</button></div>`);
+}
+function toggleMember(i){
+  cart[i].member=!cart[i].member; openCart(); renderCartBar();
+}
+function qty(i,d){
+  const l=cart[i];
+  if(d>0){
+    const z=S.items[l.itemId].sizes[l.size];
+    const inCart=cart.filter(x=>x.itemId===l.itemId&&x.size===l.size).reduce((n,x)=>n+x.qty,0);
+    if(inCart+1>(z.stock||0)){ toast('No more stock',1); return; }
+  }
+  l.qty+=d; if(l.qty<=0) cart.splice(i,1);
+  if(!cart.length){ closeModal(); } else openCart();
+  renderCartBar();
+}
+let _busy=false;
+async function checkout(){
+  if(_busy||!cart.length) return;
+  if(payMethod==='Pay Later' && !cartBuyer){ toast('Pick which member owes this',1); return; }
+  _busy=true;
+  const done=[];
+  try{
+    for(const l of cart){
+      const ok=await DB.txnStock(l.itemId,l.size,-l.qty);
+      if(!ok){ for(const d of done) await DB.txnStock(d.itemId,d.size,d.qty);
+        toast('Not enough stock for '+l.item+' '+l.size+' — sale cancelled',1); _busy=false; return; }
+      done.push(l);
+    }
+    const u=meU();
+    const sale={ts:Date.now(), sellerId:me, sellerName:u.name, sellerPct:u.profitPct||0,
+      payment:payMethod, buyer:payMethod==='Pay Later'?cartBuyer:null,
+      voided:false, eventName:(S.settings&&S.settings.eventName)||'',
+      lines:cart.map(l=>({itemId:l.itemId,item:l.item,size:l.size,qty:l.qty,
+        price:l.member?l.cost:l.price, cost:l.cost, member:!!l.member})),
+      total:cart.reduce((a,l)=>a+l.qty*(l.member?l.cost:l.price),0)};
+    await DB.push(['sales'], sale);
+    const msg = sale.payment==='Pay Later'
+      ? 'Sale recorded — '+fmt(sale.total)+' on '+sale.buyer+"'s tab"
+      : 'Sale recorded — '+fmt(sale.total)+' '+sale.payment;
+    cart=[]; cartBuyer=''; payMethod='Cash'; closeModal(); renderCartBar();
+    toast(msg);
+  }finally{ _busy=false; }
+}
+
+/* ------------------------------- STOCK ----------------------------------- */
+function renderStock(){
+  const q=($('stockSearch').value||'').toLowerCase();
+  const rows=displayItemsSorted().filter(([,i])=>i.name.toLowerCase().includes(q)).map(([id,it])=>{
+    const sizes=Object.keys(it.sizes||{}).sort(sizeSort);
+    const tot=sizes.reduce((n,s)=>n+(it.sizes[s].stock||0),0);
+    return `<div class="card"><b>${colorDot(it)}${esc(it.name)}</b>
+      <span class="muted" style="float:right">${tot} total</span>
+      <div class="sizerow" style="margin-top:8px">${sizes.map(s=>{
+        const z=it.sizes[s]; const st=z.stock||0;
+        return `<span class="sizebtn ${st===0?'out':st<=(z.reorder??2)?'low':''}" style="cursor:default">${esc(s)}<small>${st}</small></span>`;}).join('')}
+      </div></div>`;
+  }).join('');
+  $('stockList').innerHTML=rows||'<div class="empty">Nothing matches.</div>';
+}
+
+/* ----------------------------- SALES LOG ---------------------------------- */
+function salesSorted(){ return Object.entries(S.sales||{}).sort((a,b)=>b[1].ts-a[1].ts); }
+function renderSales(){
+  const t0=today0();
+  const list=salesSorted().filter(([,s])=>s.ts>=t0);
+  const tot=list.filter(([,s])=>!s.voided).reduce((a,[,s])=>a+s.total,0);
+  const mine=list.filter(([,s])=>!s.voided&&s.sellerId===me).reduce((a,[,s])=>a+s.total,0);
+  $('salesList').innerHTML= printHead('Daily Sales', new Date().toLocaleDateString('en-CA'))+
+    `<button class="btn gray noprint" style="margin-bottom:12px" onclick="window.print()">🖨 Print / Save as PDF</button>
+    <div class="statgrid">
+      <div class="stat green"><div class="v">${fmt(tot)}</div><div class="l">Today — everyone</div></div>
+      <div class="stat gold"><div class="v">${fmt(mine)}</div><div class="l">Today — ${esc(meU().name)}</div></div>
+    </div>`+
+    (list.map(([id,s])=>`<div class="card salecard ${s.voided?'voided':''}">
+      <div class="hd"><span>${new Date(s.ts).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}
+        · ${esc(s.sellerName)} ${s.voided?'<span class="voidtag">VOIDED</span>':''}</span>
+        <span>${fmt(s.total)}</span></div>
+      <div class="lines">${s.lines.map(l=>`${l.qty}× ${esc(l.item)} ${esc(l.size)}${l.member?' (member)':''}`).join(' · ')}
+        · ${esc(s.payment)}${s.payment==='Pay Later'&&s.buyer?` — <b>${esc(s.buyer)} owes</b>`:''}</div>
+      ${isAdmin()&&!s.voided?`<button class="btn small red" style="margin-top:8px" onclick="voidSale('${id}')">Void &amp; restock</button>`:''}
+    </div>`).join('')||'<div class="empty">No sales yet today. 🤞</div>');
+}
+async function voidSale(id){
+  if(!confirm('Void this sale and put the items back in stock?')) return;
+  const s=S.sales[id];
+  for(const l of s.lines){ await DB.txnStock(l.itemId,l.size,l.qty); }
+  await DB.set(['sales',id,'voided'],true);
+  toast('Sale voided — stock restored');
+}
+
+/* ------------------------------- ADMIN ------------------------------------ */
+function renderAdmin(){
+  if(!isAdmin()){ view='sell'; rerender(); return; }
+  const tabs=[['report','Report'],['money','Money'],['reorder','Reorder'],['restock','Restock'],['items','Items'],['users','Users'],['settings','Settings'],['data','Data']];
+  $('adminTabs').innerHTML=tabs.map(([t,l])=>
+    `<button class="${adminTab===t?'on':''}" onclick="adminTab='${t}';rerender()">${l}</button>`).join('');
+  const b=$('adminBody');
+  if(adminTab==='report') b.innerHTML=reportHTML();
+  if(adminTab==='money') b.innerHTML=moneyHTML();
+  if(adminTab==='reorder') b.innerHTML=reorderHTML();
+  if(adminTab==='restock') b.innerHTML=restockHTML();
+  if(adminTab==='items') b.innerHTML=itemsHTML();
+  if(adminTab==='users') b.innerHTML=usersHTML();
+  if(adminTab==='settings') b.innerHTML=settingsHTML();
+  if(adminTab==='data') b.innerHTML=dataHTML();
+}
+function printHead(title,sub){
+  return `<div class="printhead"><h1>★ THREE ACES ★</h1>
+    <p>Italian Canadian Cultural Club — ${esc(title)}</p>
+    <p>${esc(sub)} · printed ${new Date().toLocaleString('en-CA')}</p></div>`;
+}
+let repFrom=null, repTo=null;
+function dstr(t){ const d=new Date(t); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function reportHTML(){
+  const from=repFrom??today0();
+  const to=repTo??(today0()+86400000-1);
+  const sales=salesSorted().map(([id,s])=>s).filter(s=>!s.voided&&s.ts>=from&&s.ts<=to);
+  let rev=0,cogs=0,units=0;
+  const bySeller={}, byItem={};
+  sales.forEach(s=>{
+    const pct=(s.sellerPct||0)/100;
+    let sRev=0,sProf=0;
+    s.lines.forEach(l=>{
+      const r=l.price*l.qty, c=l.cost*l.qty;
+      rev+=r; cogs+=c; units+=l.qty; sRev+=r; sProf+=(r-c);
+      const k=l.item+' — '+l.size;
+      byItem[k]=byItem[k]||{qty:0,rev:0}; byItem[k].qty+=l.qty; byItem[k].rev+=r;
+    });
+    const e=bySeller[s.sellerName]=bySeller[s.sellerName]||{n:0,rev:0,prof:0,toSeller:0};
+    e.n++; e.rev+=sRev; e.prof+=sProf; e.toSeller+=sProf*pct;
+  });
+  const profit=rev-cogs;
+  const toSellers=Object.values(bySeller).reduce((a,e)=>a+e.toSeller,0);
+  return printHead('Sales Report', dstr(from)+' to '+dstr(to)) + `
+   <label class="noprint">Report period</label>
+   <div class="rowbtns noprint" style="margin:0 0 12px">
+     <input type="date" value="${dstr(from)}" onchange="repFrom=new Date(this.value+'T00:00').getTime();rerender()">
+     <input type="date" value="${dstr(to)}" onchange="repTo=new Date(this.value+'T23:59:59').getTime();rerender()">
+   </div>
+   <button class="btn gray noprint" style="margin-bottom:12px" onclick="window.print()">🖨 Print / Save as PDF</button>
+   <div class="statgrid">
+     <div class="stat green"><div class="v">${fmt(rev)}</div><div class="l">Revenue (${sales.length} sales, ${units} items)</div></div>
+     <div class="stat red"><div class="v">${fmt(cogs)}</div><div class="l">Cost of goods sold</div></div>
+     <div class="stat gold"><div class="v">${fmt(profit)}</div><div class="l">Profit</div></div>
+     <div class="stat"><div class="v">${fmt(rev-toSellers)}</div><div class="l">Net to club (rev − seller share)</div></div>
+   </div>
+   <h2>By seller</h2>
+   <div class="card"><table><tr><th>Seller</th><th class="r">Sales</th><th class="r">Revenue</th><th class="r">Profit</th><th class="r">Seller keeps</th><th class="r">To club</th></tr>
+   ${Object.entries(bySeller).map(([n,e])=>`<tr><td>${esc(n)}</td><td class="r">${e.n}</td>
+     <td class="r">${fmt(e.rev)}</td><td class="r">${fmt(e.prof)}</td>
+     <td class="r goldtxt">${fmt(e.toSeller)}</td><td class="r pos">${fmt(e.rev-e.toSeller)}</td></tr>`).join('')
+     ||'<tr><td colspan="6" class="empty">No sales in this period.</td></tr>'}
+   </table></div>
+   <h2>By item</h2>
+   <div class="card"><table><tr><th>Item</th><th class="r">Qty</th><th class="r">Revenue</th></tr>
+   ${Object.entries(byItem).sort((a,b)=>b[1].rev-a[1].rev).map(([k,e])=>
+     `<tr><td>${esc(k)}</td><td class="r">${e.qty}</td><td class="r">${fmt(e.rev)}</td></tr>`).join('')
+     ||'<tr><td colspan="3" class="empty">—</td></tr>'}
+   </table></div>
+   <h2>Inventory value (current stock)</h2>
+   <div class="card">${(()=>{ let c=0,r=0;
+      itemsSorted().forEach(([,it])=>Object.values(it.sizes||{}).forEach(z=>{c+=(z.stock||0)*z.cost; r+=(z.stock||0)*z.price;}));
+      return `<table><tr><td>At cost</td><td class="r">${fmt(c)}</td></tr>
+        <tr><td>At retail</td><td class="r">${fmt(r)}</td></tr>
+        <tr><td><b>Potential profit</b></td><td class="r goldtxt"><b>${fmt(r-c)}</b></td></tr></table>`;})()}
+   </div>`;
+}
+function moneyHTML(){
+  // All-time settlement view.
+  //  - Cash/E-Transfer sales: the SELLER is holding the money → seller owes club (minus their profit share).
+  //  - Pay Later sales: nobody collected money → the BUYER owes the club (their "tab").
+  const sales=salesSorted().map(([,s])=>s).filter(s=>!s.voided);
+  const cashSales=sales.filter(s=>s.payment!=='Pay Later');
+  const tabSales=sales.filter(s=>s.payment==='Pay Later');
+  const bal={};  const row=n=>bal[n]=bal[n]||{collected:0,keeps:0,received:0};
+  cashSales.forEach(s=>{
+    const pct=(s.sellerPct||0)/100;
+    const prof=s.lines.reduce((a,l)=>a+(l.price-l.cost)*l.qty,0);
+    const e=row(s.sellerName); e.collected+=s.total; e.keeps+=prof*pct;
+  });
+  const tabs={};  const trow=n=>tabs[n]=tabs[n]||{charged:0,paid:0};
+  tabSales.forEach(s=>{ trow(s.buyer||'Unknown').charged+=s.total; });
+  const pays=Object.entries(S.payments||{}).sort((a,b)=>b[1].ts-a[1].ts);
+  pays.forEach(([,p])=>{ if(p.kind==='tab') trow(p.from).paid+=p.amount; else row(p.from).received+=p.amount; });
+  const owedSellers=Object.values(bal).reduce((a,e)=>a+(e.collected-e.keeps),0);
+  const recSellers=Object.values(bal).reduce((a,e)=>a+e.received,0);
+  const owedTabs=Object.values(tabs).reduce((a,e)=>a+e.charged,0);
+  const paidTabs=Object.values(tabs).reduce((a,e)=>a+e.paid,0);
+  const outstanding=(owedSellers-recSellers)+(owedTabs-paidTabs);
+  return printHead('Money In / Reimbursements & Tabs','All-time up to '+new Date().toLocaleDateString('en-CA')) + `
+   <p class="muted noprint">Cash &amp; e-transfer sales: whoever rang it up is holding that money and owes the club everything
+   they collected minus the profit share they keep. Pay-later sales go on the buyer's tab instead. When any money is
+   handed to the club, record it below — with the date it was actually paid.</p>
+   <button class="btn noprint" onclick="recordPayment()">＋ Record money received by club</button>
+   <div style="height:12px"></div>
+   <div class="statgrid">
+     <div class="stat gold"><div class="v">${fmt(owedSellers)}</div><div class="l">Owed by sellers (cash sales)</div></div>
+     <div class="stat gold"><div class="v">${fmt(owedTabs-paidTabs)}</div><div class="l">Owed on member tabs</div></div>
+     <div class="stat green"><div class="v">${fmt(recSellers+paidTabs)}</div><div class="l">Received by club</div></div>
+     <div class="stat ${outstanding>0.005?'red':'green'}"><div class="v">${fmt(outstanding)}</div><div class="l">Still outstanding (total)</div></div>
+   </div>
+   <h2>Sellers — cash to hand in</h2>
+   <div class="card"><table>
+    <tr><th>Member</th><th class="r">Collected</th><th class="r">Keeps</th><th class="r">Owes club</th><th class="r">Paid in</th><th class="r">Balance</th></tr>
+    ${Object.entries(bal).map(([n,e])=>{
+      const owes=e.collected-e.keeps, b=owes-e.received;
+      return `<tr><td>${esc(n)}</td><td class="r">${fmt(e.collected)}</td><td class="r goldtxt">${fmt(e.keeps)}</td>
+        <td class="r">${fmt(owes)}</td><td class="r pos">${fmt(e.received)}</td>
+        <td class="r ${b>0.005?'neg':'pos'}"><b>${fmt(b)}</b></td></tr>`;}).join('')
+      ||'<tr><td colspan="6" class="empty">No cash sales or hand-ins yet.</td></tr>'}
+   </table></div>
+   <h2>Member tabs — pay later</h2>
+   <div class="card"><table>
+    <tr><th>Member</th><th class="r">Charged</th><th class="r">Paid</th><th class="r">Still owes</th></tr>
+    ${Object.entries(tabs).map(([n,e])=>{
+      const b=e.charged-e.paid;
+      return `<tr><td>${esc(n)}</td><td class="r">${fmt(e.charged)}</td><td class="r pos">${fmt(e.paid)}</td>
+        <td class="r ${b>0.005?'neg':'pos'}"><b>${fmt(b)}</b></td></tr>`;}).join('')
+      ||'<tr><td colspan="4" class="empty">No pay-later purchases yet.</td></tr>'}
+   </table></div>
+   <p class="muted">Sellers' balance = collected − keeps − handed in. Tabs = pay-later purchases − tab payments. $0 means settled up.
+   Note: on a pay-later sale the club receives the full amount when the tab is paid — if the seller has a profit share on
+   that sale, settle their share separately once the money is in.</p>
+   <h2>Payments received</h2>
+   ${pays.map(([id,p])=>`<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <div><b>${fmt(p.amount)}</b> from ${esc(p.from)}
+        <span class="memberflag">${p.kind==='tab'?'TAB PAYMENT':'SALES CASH'}</span>
+        <div class="muted">${new Date(p.ts).toLocaleDateString('en-CA')}${p.note?' · '+esc(p.note):''} · recorded by ${esc(p.by)}</div></div>
+      <button class="btn small red noprint" onclick="delPayment('${id}')">✕</button>
+    </div>`).join('')||'<div class="empty">No payments recorded yet.</div>'}
+   <button class="btn gray noprint" style="margin-top:8px" onclick="window.print()">🖨 Print / Save as PDF</button>`;
+}
+function recordPayment(){
+  const names=[...new Set([
+    ...Object.values(S.users||{}).map(u=>u.name),
+    ...salesSorted().map(([,s])=>s.sellerName),
+    ...salesSorted().map(([,s])=>s.buyer).filter(Boolean)])];
+  const today=dstr(Date.now());
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>Record money received by club</h3>
+    <label>What is this payment?</label><select id="mp_kind">
+      <option value="handover">Sales cash being handed in (seller reimbursing the club)</option>
+      <option value="tab">A member paying their tab (pay-later purchase)</option></select>
+    <label>From</label><select id="mp_from">${names.map(n=>`<option>${esc(n)}</option>`).join('')}
+      <option>Other</option></select>
+    <label>Amount received $</label><input id="mp_amt" type="number" min="0" step="0.01" placeholder="0.00">
+    <label>Date they paid (can be a past date)</label><input id="mp_date" type="date" value="${today}">
+    <label>Note (optional — e.g. "e-transfer" or "cash at meeting")</label><input id="mp_note">
+    <div style="height:10px"></div>
+    <button class="btn" onclick="savePayment()">✓ Record Payment</button>`);
+}
+async function savePayment(){
+  const amt=+$('mp_amt').value||0;
+  if(amt<=0){ toast('Enter an amount',1); return; }
+  const d=$('mp_date').value;
+  const ts=d? new Date(d+'T12:00').getTime() : Date.now();
+  await DB.push(['payments'],{ts, kind:$('mp_kind').value, from:$('mp_from').value,
+    amount:Math.round(amt*100)/100, note:$('mp_note').value.trim(), by:meU().name});
+  closeModal(); toast('Payment recorded'); rerender();
+}
+async function delPayment(id){
+  const p=S.payments[id];
+  if(!confirm('Delete this payment ('+fmt(p.amount)+' from '+p.from+')?')) return;
+  await DB.set(['payments',id],null); toast('Payment deleted'); rerender();
+}
+function reorderHTML(){
+  const low=[];
+  itemsSorted().forEach(([id,it])=>Object.keys(it.sizes||{}).sort(sizeSort).forEach(s=>{
+    const z=it.sizes[s], st=z.stock||0, ro=z.reorder??2;
+    if(st<=ro) low.push({item:it.name,size:s,st,ro,cost:z.cost});
+  }));
+  const out=low.filter(x=>x.st===0), run=low.filter(x=>x.st>0);
+  const tbl=list=>`<div class="card"><table>
+    <tr><th>Item</th><th>Size</th><th class="r">In stock</th><th class="r">Reorder at</th><th class="r">Last cost</th></tr>
+    ${list.map(x=>`<tr><td>${esc(x.item)}</td><td>${esc(x.size)}</td>
+      <td class="r ${x.st===0?'neg':'goldtxt'}">${x.st}</td><td class="r">${x.ro}</td><td class="r">${fmt(x.cost)}</td></tr>`).join('')
+      ||'<tr><td colspan="5" class="empty">Nothing here 🎉</td></tr>'}
+  </table></div>`;
+  return printHead('Reorder List','Items at or below their reorder level') + `
+    <button class="btn gray noprint" style="margin-bottom:12px" onclick="window.print()">🖨 Print / Save as PDF</button>
+    <h2>Sold out (${out.length})</h2>${tbl(out)}
+    <h2>Running low (${run.length})</h2>${tbl(run)}
+    <p class="muted noprint">Reorder levels are set per size in Admin → Items. When the new order arrives, use Admin → Restock to add it — enter what you actually paid and costs update automatically.</p>`;
+}
+function restockHTML(){
+  const hist=Object.entries(S.restocks||{}).sort((a,b)=>b[1].ts-a[1].ts).slice(0,25);
+  return `<p class="muted">Received a new order? Pick the item, enter how many came in and the unit cost you paid. Stock goes up and the item's cost becomes the weighted average of old + new stock.</p>`+
+    itemsSorted().map(([id,it])=>`<div class="card" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer"
+      onclick="openRestock('${id}')"><b>${colorDot(it)}${esc(it.name)}</b><div class="goldtxt">receive ›</div></div>`).join('')+
+    `<h2>Recent restocks</h2>`+
+    (hist.map(([,r])=>`<div class="card"><b>${esc(r.item)} — ${esc(r.size)}</b>
+      <span style="float:right" class="pos">+${r.qty}</span>
+      <div class="muted">${new Date(r.ts).toLocaleDateString('en-CA')} · paid ${fmt(r.unitCost)}/unit · by ${esc(r.by)}</div></div>`).join('')
+      ||'<div class="empty">No restocks recorded yet.</div>');
+}
+function openRestock(id){
+  const it=S.items[id];
+  const sizes=Object.keys(it.sizes||{}).sort(sizeSort);
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>Receive stock — ${esc(it.name)}</h3>
+    <div class="rshead"><span>Size (in stock)</span><span>Qty received</span><span>Unit cost paid $</span><span>New avg cost</span></div>
+    ${sizes.map(s=>{const z=it.sizes[s];
+      return `<div class="rsrow" data-size="${esc(s)}"><span>${esc(s)} (${z.stock||0})</span>
+        <input class="rs_q" type="number" min="0" step="1" placeholder="0" oninput="rsPreview(this,'${id}')">
+        <input class="rs_c" type="number" min="0" step="0.01" value="${z.cost}" oninput="rsPreview(this,'${id}')">
+        <span class="rs_avg muted">${fmt(z.cost)}</span></div>`;}).join('')}
+    <div style="height:10px"></div>
+    <button class="btn" onclick="saveRestock('${id}')">✓ Add to Inventory</button>`);
+}
+function rsPreview(el,id){
+  const row=el.closest('.rsrow'); const s=row.dataset.size; const z=S.items[id].sizes[s];
+  const q=+row.querySelector('.rs_q').value||0, c=+row.querySelector('.rs_c').value||0;
+  const st=z.stock||0;
+  const avg=q>0 ? ((st*z.cost)+(q*c))/(st+q) : z.cost;
+  row.querySelector('.rs_avg').textContent=fmt(Math.round(avg*100)/100);
+}
+async function saveRestock(id){
+  const it=S.items[id]; let any=false;
+  for(const row of document.querySelectorAll('#modalBox .rsrow')){
+    const s=row.dataset.size;
+    const q=Math.round(+row.querySelector('.rs_q').value||0);
+    const c=+row.querySelector('.rs_c').value||0;
+    if(q<=0) continue;
+    any=true;
+    const z=it.sizes[s]; const st=z.stock||0;
+    const avg=Math.round((((st*z.cost)+(q*c))/(st+q))*100)/100;
+    await DB.set(['items',id,'sizes',s,'cost'],avg);
+    await DB.txnStock(id,s,q);
+    await DB.push(['restocks'],{ts:Date.now(),itemId:id,item:it.name,size:s,qty:q,unitCost:c,newAvgCost:avg,by:meU().name});
+  }
+  if(!any){ toast('Enter a quantity for at least one size',1); return; }
+  closeModal(); toast('Stock received — costs updated'); rerender();
+}
+function itemsHTML(){
+  const mode=(S.settings&&S.settings.sortMode)||'custom';
+  const m=soldMap();
+  const custom = mode==='custom';
+  return `<label>Sell &amp; Stock screen order</label>
+    <div class="payrow" style="margin-top:2px">
+      ${[['bestsellers','🔥 Best sellers'],['alpha','A–Z'],['custom','↕ Custom']].map(([v,l])=>
+        `<button class="${mode===v?'on':''}" onclick="DB.set(['settings','sortMode'],'${v}')">${l}</button>`).join('')}
+    </div>
+    <p class="muted" style="margin:2px 2px 12px">${
+      mode==='bestsellers' ? 'Items that have sold the most units appear first on every phone — updates automatically as sales come in.' :
+      mode==='alpha' ? 'Items are listed alphabetically on every phone.' :
+      'Items appear in the order below — use the ▲ ▼ arrows to move them up or down.'}</p>
+    <button class="btn" onclick="editItem(null)">＋ Add New Item</button>
+    <p class="muted" style="margin:10px 2px">Hidden items don't appear on the Sell or Stock screens or the Reorder list — use Hide for products you're not carrying right now. Nothing is lost; tap Show to bring one back.</p>`+
+    allItemsSorted().map(([id,it],idx,arr)=>{
+      const hidden=it.active===false;
+      const sizes=Object.keys(it.sizes||{}).sort(sizeSort);
+      const tot=sizes.reduce((n,s)=>n+(it.sizes[s].stock||0),0);
+      return `<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:10px;${hidden?'opacity:.55':''}">
+        ${custom?`<div style="display:flex;flex-direction:column;gap:4px">
+          <button class="btn small gray" style="padding:4px 10px" ${idx===0?'disabled':''} onclick="moveItem('${id}',-1)">▲</button>
+          <button class="btn small gray" style="padding:4px 10px" ${idx===arr.length-1?'disabled':''} onclick="moveItem('${id}',1)">▼</button>
+        </div>`:''}
+        <div style="flex:1;cursor:pointer" onclick="editItem('${id}')">
+          <b>${colorDot(it)}${esc(it.name)}</b>${hidden?' <span class="voidtag">HIDDEN</span>':''}
+          <div class="muted">${esc(it.cat||'')} · ${sizes.length} sizes · ${tot} in stock · ${m[id]||0} sold · <span class="goldtxt">edit ›</span></div></div>
+        <button class="btn small ${hidden?'':'gray'}" onclick="toggleItemActive('${id}')">${hidden?'Show':'Hide'}</button>
+      </div>`;
+    }).join('');
+}
+async function moveItem(id,dir){
+  const list=allItemsSorted();
+  const i=list.findIndex(([k])=>k===id), j=i+dir;
+  if(i<0||j<0||j>=list.length) return;
+  [list[i],list[j]]=[list[j],list[i]];
+  await Promise.all(list.map(([k],idx)=>DB.set(['items',k,'order'],idx)));
+  rerender();
+}
+async function toggleItemActive(id){
+  const nowActive = S.items[id].active!==false;
+  await DB.set(['items',id,'active'], !nowActive);
+  toast(nowActive?'Item hidden':'Item visible again'); rerender();
+}
+function editItem(id){
+  const it = id? S.items[id] : {name:'',cat:'',sizes:{}};
+  const sizes=Object.keys(it.sizes||{}).sort(sizeSort);
+  const cats=[...new Set(itemsSorted().map(([,i])=>i.cat||''))];
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>${id?'Edit':'New'} Item</h3>
+    <label>Name</label><input id="ei_name" value="${esc(it.name)}" placeholder="e.g. Mens T-Shirt (Green)">
+    <label>Category</label><input id="ei_cat" list="catlist" value="${esc(it.cat||'')}" placeholder="e.g. T-Shirts">
+    <datalist id="catlist">${cats.map(c=>`<option value="${esc(c)}">`).join('')}</datalist>
+    <label>Colour dot — the little circle sellers see beside the item name</label>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <input type="color" id="ei_color" value="${it.color&&it.color!=='none'?esc(it.color):'#009246'}"
+        style="width:70px;height:44px;padding:3px;flex:0 0 auto" oninput="$('ei_dot').checked=true">
+      <span style="display:flex;gap:6px;flex-wrap:wrap">
+        ${['#c0392b','#111111','#eeeeee','#009246','#1565c0','#f4c20d','#e67e22','#8e44ad']
+          .map(c=>`<button type="button" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--line);background:${c};cursor:pointer"
+            onclick="$('ei_color').value='${c}';$('ei_dot').checked=true"></button>`).join('')}
+      </span>
+      <label style="display:flex;align-items:center;gap:6px;margin:0;font-size:13px;text-transform:none;letter-spacing:0">
+        <input type="checkbox" id="ei_dot" style="width:auto" ${it.color!=='none'?'checked':''}> show dot</label>
+    </div>
+    <label>Sizes — cost is what the club paid (hidden from sellers), price is what customers pay. "Re@" = flag for reorder when stock falls to this number.</label>
+    <div class="sehead"><span>Size</span><span>Cost $</span><span>Price $</span><span>Stock</span><span>Re@</span><span></span></div>
+    <div id="ei_sizes">${sizes.map(s=>sizeRowHTML(s,it.sizes[s])).join('')}</div>
+    <button class="btn gray small" onclick="addSizeRow()">＋ add size</button>
+    <div style="height:14px"></div>
+    <button class="btn" onclick="saveItem(${id?`'${id}'`:'null'})">Save Item</button>
+    ${id?`<div style="height:8px"></div><button class="btn ${it.active!==false?'red':'gray'}" onclick="toggleItemActive('${id}');closeModal()">
+      ${it.active!==false?'Hide this item (not carrying it right now)':'Show this item again'}</button>`:''}`);
+}
+function sizeRowHTML(s,z){ z=z||{cost:'',price:'',stock:0,reorder:2};
+  return `<div class="sizeedit"><input class="se_s" value="${esc(s)}" placeholder="Size">
+    <input class="se_c" type="number" step="0.01" min="0" value="${z.cost}">
+    <input class="se_p" type="number" step="0.01" min="0" value="${z.price}">
+    <input class="se_q" type="number" step="1" min="0" value="${z.stock||0}">
+    <input class="se_r" type="number" step="1" min="0" value="${z.reorder??2}">
+    <button class="del" onclick="this.parentElement.remove()">✕</button></div>`;
+}
+function addSizeRow(){ $('ei_sizes').insertAdjacentHTML('beforeend', sizeRowHTML('',null)); }
+async function saveItem(id){
+  const name=$('ei_name').value.trim(), cat=$('ei_cat').value.trim()||'Other';
+  if(!name){ toast('Name is required',1); return; }
+  const sizes={};
+  document.querySelectorAll('#ei_sizes .sizeedit').forEach(r=>{
+    const s=r.querySelector('.se_s').value.trim();
+    if(!s) return;
+    sizes[s]={cost:+r.querySelector('.se_c').value||0, price:+r.querySelector('.se_p').value||0,
+      stock:Math.max(0,Math.round(+r.querySelector('.se_q').value||0)),
+      reorder:Math.max(0,Math.round(+r.querySelector('.se_r').value||0))};
+  });
+  if(!Object.keys(sizes).length){ toast('Add at least one size',1); return; }
+  const color = $('ei_dot').checked ? $('ei_color').value : 'none';
+  if(id){ const it=S.items[id];
+    await DB.set(['items',id],{...it,name,cat,sizes,color});
+  }else{
+    const order=Math.max(0,...itemsSorted().map(([,i])=>i.order??0))+1;
+    await DB.set(['items',newId()],{name,cat,sizes,color,order,active:true});
+  }
+  closeModal(); toast('Item saved'); rerender();
+}
+function usersHTML(){
+  return `<button class="btn" onclick="editUser(null)">＋ Add Member</button>
+    <div style="height:12px"></div>`+
+    Object.entries(S.users||{}).map(([id,u])=>`
+     <div class="card" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;${u.active===false?'opacity:.5':''}"
+       onclick="editUser('${id}')">
+       <div><b>${esc(u.name)}</b>
+        <div class="muted">${u.role==='admin'?'⭐ Admin — full access':'Club member — sales only'} · keeps ${u.profitPct||0}% of profit${u.active===false?' · disabled':''}</div></div>
+       <div class="goldtxt">edit ›</div></div>`).join('');
+}
+function editUser(id){
+  const u=id? S.users[id] : {name:'',pin:'',role:'seller',profitPct:0,active:true};
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>${id?'Edit':'New'} Member</h3>
+    <label>Name</label><input id="eu_name" value="${esc(u.name)}">
+    <label>4-digit PIN</label><input id="eu_pin" inputmode="numeric" maxlength="4" value="${esc(u.pin)}">
+    <label>Permission level</label><select id="eu_role">
+      <option value="seller" ${u.role!=='admin'?'selected':''}>Club member — can sell, never sees costs or profit</option>
+      <option value="admin" ${u.role==='admin'?'selected':''}>Admin — full access (costs, profit, reports, users)</option></select>
+    <label>% of profit this member keeps on their own sales
+      <span style="text-transform:none">(0 = everything to club, 100 = e.g. President)</span></label>
+    <input id="eu_pct" type="number" min="0" max="100" value="${u.profitPct||0}">
+    <div class="switchrow"><div><div class="t">Active</div><div class="s">Inactive members can't log in</div></div>
+      <button class="toggle ${u.active!==false?'on':''}" id="eu_act" onclick="this.classList.toggle('on')"></button></div>
+    <div style="height:10px"></div>
+    <button class="btn" onclick="saveUser(${id?`'${id}'`:'null'})">Save Member</button>
+    ${id?`<div style="height:8px"></div><button class="btn red" onclick="deleteUser('${id}')">🗑 Delete this member permanently</button>`:''}`);
+}
+function otherActiveAdminExists(exceptId){
+  return Object.entries(S.users||{}).some(([uid,u])=>uid!==exceptId && u.role==='admin' && u.active!==false);
+}
+async function saveUser(id){
+  const name=$('eu_name').value.trim(), pin=$('eu_pin').value.trim();
+  if(!name||!/^\d{4}$/.test(pin)){ toast('Need a name and a 4-digit PIN',1); return; }
+  const u={name,pin,role:$('eu_role').value,profitPct:Math.min(100,Math.max(0,+$('eu_pct').value||0)),
+    active:$('eu_act').classList.contains('on')};
+  if(id && (u.role!=='admin'||!u.active) && !otherActiveAdminExists(id)){
+    toast('You need at least one active admin',1); return; }
+  await DB.set(['users', id||newId()], u);
+  closeModal(); toast('Member saved'); rerender();
+}
+async function deleteUser(id){
+  const u=S.users[id];
+  if(id===me){ toast("You can't delete yourself while logged in",1); return; }
+  if(u.role==='admin' && !otherActiveAdminExists(id)){ toast('You need at least one active admin',1); return; }
+  if(!confirm('Delete '+u.name+' permanently? They can no longer log in. Their past sales stay in the history.')) return;
+  await DB.set(['users',id], null);
+  closeModal(); toast('Member deleted'); rerender();
+}
+function settingsHTML(){
+  const st=S.settings||{};
+  return `<div class="card">
+    <label>Event name (stamped on each sale)</label>
+    <input value="${esc(st.eventName||'')}" onchange="DB.set(['settings','eventName'],this.value)">
+    <div class="switchrow"><div><div class="t">Sellers can ring up member-at-cost sales</div>
+      <div class="s">If off, only admins can apply the member price. Note: the member price a seller sees IS the cost of that item.</div></div>
+      <button class="toggle ${st.allowMemberSales!==false?'on':''}"
+        onclick="DB.set(['settings','allowMemberSales'],!this.classList.contains('on'))"></button></div>
+    </div>
+    <div class="card muted">Mode: <b>${CLOUD?'🟢 Live sync (Firebase)':'🟡 Local test mode'}</b><br><br>
+    ${CLOUD?'All phones using this page see the same live data.':'Data lives only in this browser. To go live for the event, follow the Firebase steps in the README, paste the config into index.html, and re-upload to GitHub.'}</div>`;
+}
+function dataHTML(){
+  return `<div class="card">
+    <b>Export</b>
+    <div class="rowbtns">
+      <button class="btn gray" onclick="exportSalesCSV()">⬇ Sales CSV</button>
+      <button class="btn gray" onclick="exportStockCSV()">⬇ Stock CSV</button>
+    </div>
+    <div class="rowbtns">
+      <button class="btn gray" onclick="exportPaymentsCSV()">⬇ Payments CSV</button>
+    </div></div>
+    <div class="card">
+    <b style="color:var(--red)">Danger zone</b>
+    <div class="rowbtns">
+      <button class="btn red" onclick="if(confirm('Replace ALL items with the original starting inventory? Sales history is kept.'))DB.set(['items'],null).then(()=>DB.seedItemsOnly())">Reset items to starting inventory</button>
+    </div>
+    <div class="rowbtns">
+      <button class="btn red" onclick="if(confirm('Delete ALL sales history? Stock is not changed. This cannot be undone.'))DB.set(['sales'],null)">Clear all sales history</button>
+    </div></div>`;
+}
+DB.seedItemsOnly=function(){
+  const items={};
+  SEED_ITEMS.forEach((it,i)=>{ items[newId()+i]={name:it.name,cat:it.cat,order:i,active:true,sizes:it.sizes}; });
+  return DB.set(['items'],items);
+};
+function dl(name,text){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([text],{type:'text/csv'})); a.download=name; a.click();
+}
+function csvCell(v){ v=String(v??''); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+function exportSalesCSV(){
+  const rows=[['Date','Time','Event','Seller','Item','Size','Qty','Unit Price','Unit Cost','Line Total','Line Profit','Member Sale','Payment','Owed By','Voided']];
+  salesSorted().reverse().forEach(([,s])=>{
+    const d=new Date(s.ts);
+    s.lines.forEach(l=>rows.push([d.toLocaleDateString('en-CA'),d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}),
+      s.eventName||'',s.sellerName,l.item,l.size,l.qty,l.price,l.cost,l.price*l.qty,(l.price-l.cost)*l.qty,
+      l.member?'Y':'',s.payment,s.buyer||'',s.voided?'Y':'']));
+  });
+  dl('three-aces-sales.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'));
+}
+function exportPaymentsCSV(){
+  const rows=[['Date','Type','From','Amount','Note','Recorded By']];
+  Object.values(S.payments||{}).sort((a,b)=>a.ts-b.ts).forEach(p=>
+    rows.push([new Date(p.ts).toLocaleDateString('en-CA'),p.kind==='tab'?'Tab payment':'Sales cash',
+      p.from,p.amount,p.note||'',p.by]));
+  dl('three-aces-payments.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'));
+}
+function exportStockCSV(){
+  const rows=[['Item','Category','Size','Cost','Price','In Stock','Stock Value (cost)','Stock Value (retail)']];
+  itemsSorted().forEach(([,it])=>Object.keys(it.sizes).sort(sizeSort).forEach(s=>{
+    const z=it.sizes[s];
+    rows.push([it.name,it.cat||'',s,z.cost,z.price,z.stock||0,(z.stock||0)*z.cost,(z.stock||0)*z.price]);
+  }));
+  dl('three-aces-stock.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'));
+}
+
+/* ------------------------------ THEME ------------------------------------- */
+function applyTheme(){
+  const t=localStorage.getItem('ta_theme')||'light';
+  document.body.classList.toggle('dark', t==='dark');
+  document.querySelectorAll('.themeIco').forEach(b=>b.textContent = t==='dark'?'☀️ Light mode':'🌙 Dark mode');
+  const hb=document.querySelector('header .themeIco'); if(hb) hb.textContent = t==='dark'?'☀️':'🌙';
+  const m=document.querySelector('meta[name="theme-color"]');
+  if(m) m.setAttribute('content', t==='dark'?'#0d0d0d':'#ffffff');
+}
+function toggleTheme(){
+  const cur=localStorage.getItem('ta_theme')||'light';
+  localStorage.setItem('ta_theme', cur==='dark'?'light':'dark');
+  applyTheme();
+}
+applyTheme();
+
+/* ------------------------------ MODAL ------------------------------------- */
+function openModal(html){ $('modalBox').innerHTML=html; $('modalBg').classList.add('open'); }
+function closeModal(){ $('modalBg').classList.remove('open'); }
+
+/* ------------------------------- BOOT -------------------------------------- */
+DB.init(()=>{
+  const saved=sessionStorage.getItem('ta_me');
+  if(saved && S.users[saved] && !me) me=saved;
+  rerender();
+});
+</script>
+</body>
+</html>
