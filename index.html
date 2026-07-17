@@ -377,13 +377,22 @@ const DB = {
     _onChange = onChange;
     if(CLOUD){
       updateBanner();   // show "connecting…" right away
+      firebase.initializeApp(FIREBASE_CONFIG);
+      // Try to sign in, but don't get stuck if a work/corporate network blocks
+      // Google's sign-in service — continue without it (works with public rules).
       try{
-        firebase.initializeApp(FIREBASE_CONFIG);
-        await firebase.auth().signInAnonymously();
-      }catch(e){
-        _initErr='Cannot sign in to the club database ('+(e.code||e.message)+'). Fix in Firebase: Build → Authentication → Sign-in method → enable "Anonymous" → Save, then refresh this page.';
-        updateBanner(); return;
-      }
+        await Promise.race([
+          firebase.auth().signInAnonymously(),
+          new Promise((res,rej)=>setTimeout(()=>rej(new Error('sign-in timed out')),8000))
+        ]);
+      }catch(e){ /* proceed without sign-in */ }
+      // Watchdog: if nothing has arrived after 20s, say so instead of spinning forever.
+      setTimeout(()=>{
+        if(!_ready && !_initErr){
+          _initErr='Still cannot reach the club database after 20 seconds. Check: (1) Firebase → Realtime Database → Rules — both ".read" and ".write" should be set to true, then Publish. (2) If rules are already true, this network is blocking firebaseio.com.';
+          updateBanner();
+        }
+      },20000);
       _ref = firebase.database().ref('threeaces');
       _ref.on('value', snap=>{
         const v = snap.val();
@@ -392,7 +401,7 @@ const DB = {
         S = Object.assign({items:{},users:{},sales:{},settings:{},restocks:{},payments:{}}, v||{});
         _ready=true; updateBanner(); _onChange();
       }, err=>{
-        _initErr='The database refused access ('+((err&&err.code)||err)+'). Fix in Firebase: Build → Realtime Database → Rules tab → paste the two "auth != null" rules from the guide → Publish, then refresh this page.';
+        _initErr='The database refused access ('+((err&&err.code)||err)+'). Fix in Firebase: Realtime Database → Rules tab → set both ".read" and ".write" to true → Publish, then refresh this page.';
         updateBanner();
       });
     }else{
