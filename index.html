@@ -205,6 +205,7 @@
   .stockgrid .lowc{color:var(--gold);font-weight:700;}
   .stockgrid th.sz{cursor:pointer;user-select:none;}
   .stockgrid th.sz.on{color:var(--gold);}
+  .stockgrid .totrow td{border-top:2px solid var(--line);background:var(--panel2);font-weight:800;}
   .muted{color:var(--muted);font-size:13px;}
   .empty{color:var(--muted);text-align:center;padding:30px 10px;font-size:14px;}
   .toast{position:fixed;top:60px;left:50%;transform:translateX(-50%);background:var(--green);color:#fff;
@@ -309,7 +310,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v2.9';
+const APP_VERSION = 'v3.0';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -472,6 +473,7 @@ const DB = {
   // Cloud mode uses the database's ETag compare-and-set so two phones can't
   // both sell the last piece.
   async txnStock(itemId, size, delta){
+    if(!S.items[itemId] || !S.items[itemId].sizes || !S.items[itemId].sizes[size]) return false; // item deleted
     if(CLOUD){
       const u=_restUrl(['items',itemId,'sizes',size,'stock']);
       for(let attempt=0; attempt<6; attempt++){
@@ -633,8 +635,8 @@ function renderSell(){
   if(!cats.includes(selCat)) selCat='All';
   $('catBar').innerHTML=cats.map(c=>
     `<button class="${selCat===c?'on':''}" onclick="selCat='${esc(c)}';rerender()">${esc(c)}</button>`).join('');
-  // Only items we actually have on hand appear on the sale list, in the admin-chosen order.
-  const list=displayItemsSorted().filter(([,i])=>(selCat==='All'||i.cat===selCat) && totalStock(i)>0);
+  // Items with stock appear on the sale list; ad-hoc items (raffle tickets…) are always available.
+  const list=displayItemsSorted().filter(([,i])=>(selCat==='All'||i.cat===selCat) && (i.adhoc || totalStock(i)>0));
   $('itemList').innerHTML=list.map(([id,it])=>{
     const sizes=Object.keys(it.sizes||{}).sort(sizeSort);
     const total=sizes.reduce((n,s)=>n+(it.sizes[s].stock||0),0);
@@ -644,11 +646,12 @@ function renderSell(){
     return `<div class="itemcard">
       <div class="top" onclick="openItem=${open?'null':`'${id}'`};rerender()">
         <div><div class="nm">${colorDot(it)}${esc(it.name)}</div>
-        <div class="meta">${esc(it.cat||'')} · ${total} in stock</div></div>
+        <div class="meta">${esc(it.cat||'')} · ${it.adhoc?'always available':total+' in stock'}</div></div>
         <div class="price">${pTxt}</div>
       </div>
       ${open?`<div class="sizerow">${sizes.map(s=>{
           const z=it.sizes[s]; const st=z.stock||0;
+          if(it.adhoc) return `<button class="sizebtn" onclick="addToCart('${id}','${esc(s)}')">${esc(s)}<small>${fmt(z.price)}</small></button>`;
           return `<button class="sizebtn ${st===0?'out':st<=(z.reorder??2)?'low':''}" ${st===0?'disabled':''}
             onclick="addToCart('${id}','${esc(s)}')">${esc(s)}<small>${st===0?'sold out':st+' left · '+fmt(z.price)}</small></button>`;
         }).join('')}</div>`:''}
@@ -657,11 +660,13 @@ function renderSell(){
 }
 function addToCart(itemId,size){
   const it=S.items[itemId], z=it.sizes[size];
-  const inCart=cart.filter(l=>l.itemId===itemId&&l.size===size).reduce((n,l)=>n+l.qty,0);
-  if(inCart+1 > (z.stock||0)){ toast('Only '+(z.stock||0)+' left in stock',1); return; }
+  if(!it.adhoc){
+    const inCart=cart.filter(l=>l.itemId===itemId&&l.size===size).reduce((n,l)=>n+l.qty,0);
+    if(inCart+1 > (z.stock||0)){ toast('Only '+(z.stock||0)+' left in stock',1); return; }
+  }
   const ex=cart.find(l=>l.itemId===itemId&&l.size===size&&!l.member);
   if(ex) ex.qty++;
-  else cart.push({itemId, item:it.name, size, qty:1, price:z.price, cost:z.cost, member:false});
+  else cart.push({itemId, item:it.name, size, qty:1, price:z.price, cost:z.cost, member:false, adhoc:!!it.adhoc});
   toast(it.name+' '+size+' added');
   renderCartBar();
 }
@@ -687,7 +692,7 @@ function openCart(){
     <div class="cart-total"><span>Total to collect</span><span class="goldtxt">${fmt(total)}</span></div>
     <label>Payment</label>
     <div class="payrow">
-      ${['Cash','E-Transfer','Pay Later'].map(p=>`<button class="${payMethod===p?'on':''}" onclick="payMethod='${p}';openCart()">${p}</button>`).join('')}
+      ${['Cash','Pay Later'].map(p=>`<button class="${payMethod===p?'on':''}" onclick="payMethod='${p}';openCart()">${p}</button>`).join('')}
     </div>
     ${payMethod==='Pay Later'?`
       <label>Who owes this? (tracked on their tab until they pay)</label>
@@ -705,7 +710,7 @@ function toggleMember(i){
 }
 function qty(i,d){
   const l=cart[i];
-  if(d>0){
+  if(d>0 && !l.adhoc){
     const z=S.items[l.itemId].sizes[l.size];
     const inCart=cart.filter(x=>x.itemId===l.itemId&&x.size===l.size).reduce((n,x)=>n+x.qty,0);
     if(inCart+1>(z.stock||0)){ toast('No more stock',1); return; }
@@ -722,6 +727,7 @@ async function checkout(){
   const done=[];
   try{
     for(const l of cart){
+      if(l.adhoc) continue;   // ad-hoc items don't touch stock
       const ok=await DB.txnStock(l.itemId,l.size,-l.qty);
       if(!ok){ for(const d of done) await DB.txnStock(d.itemId,d.size,d.qty);
         toast('Not enough stock for '+l.item+' '+l.size+' — sale cancelled',1); _busy=false; return; }
@@ -732,7 +738,7 @@ async function checkout(){
       payment:payMethod, buyer:payMethod==='Pay Later'?cartBuyer:null,
       voided:false, eventName:(S.settings&&S.settings.eventName)||'',
       lines:cart.map(l=>({itemId:l.itemId,item:l.item,size:l.size,qty:l.qty,
-        price:l.member?l.cost:l.price, cost:l.cost, member:!!l.member})),
+        price:l.member?l.cost:l.price, cost:l.cost, member:!!l.member, adhoc:!!l.adhoc})),
       total:cart.reduce((a,l)=>a+l.qty*(l.member?l.cost:l.price),0)};
     await DB.push(['sales'], sale);
     const msg = sale.payment==='Pay Later'
@@ -746,7 +752,7 @@ async function checkout(){
 /* ------------------------------- STOCK ----------------------------------- */
 function renderStock(){
   const q=($('stockSearch').value||'').toLowerCase();
-  let items=displayItemsSorted().filter(([,i])=>i.name.toLowerCase().includes(q));
+  let items=displayItemsSorted().filter(([,i])=>!i.adhoc && i.name.toLowerCase().includes(q));
   const toggle=`<div class="payrow noprint" style="margin-bottom:10px">
     <button class="${stockView==='grid'?'on':''}" onclick="stockView='grid';rerender()">▦ Everything in one grid</button>
     <button class="${stockView==='cards'?'on':''}" onclick="stockView='cards';rerender()">☰ By item</button></div>`;
@@ -770,10 +776,14 @@ function renderStock(){
             return `<td class="c ${st===0?'dim':st<=(z.reorder??2)?'lowc':''}">${st===0?'—':st}</td>`;
           }).join('')}<td class="r"><b>${totalStock(it)}</b></td></tr>`).join('')
           || `<tr><td colspan="${cols.length+2}" class="empty">Nothing matches.</td></tr>`}
+        ${items.length?`<tr class="totrow"><td class="itc">TOTAL</td>${cols.map(s=>
+          `<td class="c">${items.reduce((n,[,it])=>n+((((it.sizes||{})[s])||{}).stock||0),0)}</td>`).join('')}
+          <td class="r">${grand}</td></tr>`:''}
       </table></div>
       <button class="btn gray noprint" style="margin-top:10px" onclick="window.print()">🖨 Print / Save as PDF</button>`;
     return;
   }
+  const grandC=items.reduce((n,[,it])=>n+totalStock(it),0);
   const rows=items.map(([id,it])=>{
     const sizes=Object.keys(it.sizes||{}).sort(sizeSort);
     const tot=sizes.reduce((n,s)=>n+(it.sizes[s].stock||0),0);
@@ -784,7 +794,7 @@ function renderStock(){
         return `<span class="sizebtn ${st===0?'out':st<=(z.reorder??2)?'low':''}" style="cursor:default">${esc(s)}<small>${st}</small></span>`;}).join('')}
       </div></div>`;
   }).join('');
-  $('stockList').innerHTML=toggle+(rows||'<div class="empty">Nothing matches.</div>');
+  $('stockList').innerHTML=toggle+(rows? rows+`<div class="card"><b>TOTAL — ${grandC} pieces</b></div>` :'<div class="empty">Nothing matches.</div>');
 }
 
 /* ----------------------------- SALES LOG ---------------------------------- */
@@ -802,19 +812,89 @@ function renderSales(){
     </div>`+
     (list.map(([id,s])=>`<div class="card salecard ${s.voided?'voided':''}">
       <div class="hd"><span>${new Date(s.ts).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}
-        · ${esc(s.sellerName)} ${s.voided?'<span class="voidtag">VOIDED</span>':''}</span>
+        · ${esc(s.sellerName)} ${s.voided?'<span class="voidtag">VOIDED</span>':''}${s.edited?' <span class="voidtag" style="color:var(--gold)">EDITED</span>':''}</span>
         <span>${fmt(s.total)}</span></div>
       <div class="lines">${s.lines.map(l=>`${l.qty}× ${esc(l.item)} ${esc(l.size)}${l.member?' (member)':''}`).join(' · ')}
         · ${esc(s.payment)}${s.payment==='Pay Later'&&s.buyer?` — <b>${esc(s.buyer)} owes</b>`:''}</div>
-      ${isAdmin()&&!s.voided?`<button class="btn small red" style="margin-top:8px" onclick="voidSale('${id}')">Void &amp; restock</button>`:''}
+      ${isAdmin()&&!s.voided?`<div class="rowbtns">
+        <button class="btn small gray" onclick="pinConfirm('Edit this sale? Quantities, prices and payment can be changed — stock adjusts automatically.',()=>editSale('${id}'))">✎ Edit sale</button>
+        <button class="btn small red" onclick="voidSale('${id}')">Void &amp; restock</button></div>`:''}
     </div>`).join('')||'<div class="empty">No sales yet today. 🤞</div>');
 }
 async function voidSale(id){
   if(!confirm('Void this sale and put the items back in stock?')) return;
   const s=S.sales[id];
-  for(const l of s.lines){ await DB.txnStock(l.itemId,l.size,l.qty); }
+  for(const l of s.lines){ if(!l.adhoc && S.items[l.itemId]) await DB.txnStock(l.itemId,l.size,l.qty); }
   await DB.set(['sales',id,'voided'],true);
   toast('Sale voided — stock restored');
+}
+
+/* --------------------------- EDIT A SALE ---------------------------------- */
+let _es=null;
+function editSale(id){
+  const s=S.sales[id];
+  _es={id, payment: s.payment==='Pay Later'?'Pay Later':'Cash', buyer: s.buyer||''};
+  const users=Object.values(S.users||{}).filter(u=>u.active!==false).map(u=>u.name);
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>✎ Edit Sale</h3>
+    <p class="muted">${new Date(s.ts).toLocaleString('en-CA')} · sold by ${esc(s.sellerName)}</p>
+    <div class="sehead" style="grid-template-columns:2.2fr .9fr 1fr">
+      <span>Item</span><span>Qty</span><span>Unit $</span></div>
+    ${s.lines.map((l,i)=>`<div class="sizeedit" style="grid-template-columns:2.2fr .9fr 1fr" data-i="${i}">
+      <span style="font-size:13px;align-self:center">${esc(l.item)} — ${esc(l.size)}${l.member?' (member)':''}</span>
+      <input class="es_q" type="number" min="0" step="1" value="${l.qty}">
+      <input class="es_p" type="number" min="0" step="0.01" value="${l.price}">
+    </div>`).join('')}
+    <label>Payment</label>
+    <div class="payrow">
+      <button id="esPayCash" class="${_es.payment==='Cash'?'on':''}" onclick="esSetPay('Cash')">Cash</button>
+      <button id="esPayLater" class="${_es.payment==='Pay Later'?'on':''}" onclick="esSetPay('Pay Later')">Pay Later</button>
+    </div>
+    <div id="esBuyerWrap" style="display:${_es.payment==='Pay Later'?'block':'none'}">
+      <label>Who owes this?</label>
+      <select id="es_buyer"><option value="">— pick the member —</option>
+        ${users.map(n=>`<option ${_es.buyer===n?'selected':''}>${esc(n)}</option>`).join('')}</select>
+      <div style="height:8px"></div>
+    </div>
+    <p class="muted">Set a quantity to 0 to remove that line — removing every line voids the whole sale. Stock adjusts automatically either way.</p>
+    <button class="btn" onclick="saveSaleEdit()">✓ Save Changes</button>`);
+}
+function esSetPay(p){
+  _es.payment=p;
+  $('esPayCash').classList.toggle('on',p==='Cash');
+  $('esPayLater').classList.toggle('on',p==='Pay Later');
+  $('esBuyerWrap').style.display = p==='Pay Later'?'block':'none';
+}
+async function saveSaleEdit(){
+  const s=S.sales[_es.id];
+  if(_es.payment==='Pay Later'){
+    _es.buyer=$('es_buyer').value;
+    if(!_es.buyer){ toast('Pick which member owes this',1); return; }
+  }
+  const rows=[...document.querySelectorAll('#modalBox .sizeedit')];
+  const newLines=[], applied=[];
+  for(const r of rows){
+    const i=+r.dataset.i, l=s.lines[i];
+    const q=Math.max(0,Math.round(+r.querySelector('.es_q').value||0));
+    const p=Math.max(0,+r.querySelector('.es_p').value||0);
+    const delta=q-l.qty;                      // extra units sold consume stock
+    if(delta!==0 && !l.adhoc && S.items[l.itemId]){
+      const ok=await DB.txnStock(l.itemId,l.size,-delta);
+      if(!ok){
+        for(const a of applied) await DB.txnStock(a.itemId,a.size,a.d);   // roll back
+        toast('Not enough stock for '+l.item+' '+l.size,1); return;
+      }
+      applied.push({itemId:l.itemId,size:l.size,d:delta});
+    }
+    if(q>0) newLines.push({...l,qty:q,price:p});
+  }
+  const total=newLines.reduce((a,l)=>a+l.qty*l.price,0);
+  await DB.set(['sales',_es.id],{...s, lines:newLines, total,
+    payment:_es.payment, buyer:_es.payment==='Pay Later'?_es.buyer:null,
+    voided:newLines.length===0? true : (s.voided||false),
+    edited:{ts:Date.now(), by:meU().name}});
+  closeModal();
+  toast(newLines.length? 'Sale updated — '+fmt(total) : 'All lines removed — sale voided');
+  rerender();
 }
 
 /* ----------------------------- MY MONEY ----------------------------------- */
@@ -870,7 +950,7 @@ function renderMyMoney(){
     </div>
     <h2>Settling up (all-time, not just the dates above)</h2>
     <div class="card"><table>
-      <tr><td>Cash &amp; e-transfers you collected</td><td class="r">${fmt(cashC)}</td></tr>
+      <tr><td>Cash sales you collected</td><td class="r">${fmt(cashC)}</td></tr>
       <tr><td>− your share kept</td><td class="r goldtxt">${fmt(cashK)}</td></tr>
       <tr><td>− already handed to the club</td><td class="r pos">${fmt(handed)}</td></tr>
       <tr><td><b>Still to hand in to the club</b></td><td class="r ${oweClub>0.005?'neg':'pos'}"><b>${fmt(Math.max(0,oweClub))}</b></td></tr>
@@ -962,9 +1042,9 @@ function reportHTML(){
      `<tr><td>${esc(k)}</td><td class="r">${e.qty}</td><td class="r">${fmt(e.rev)}</td></tr>`).join('')
      ||'<tr><td colspan="3" class="empty">—</td></tr>'}
    </table></div>
-   <h2>Inventory value (current stock)</h2>
+   <h2>Inventory value (current stock — ad-hoc items like raffle tickets excluded)</h2>
    <div class="card">${(()=>{ let c=0,r=0;
-      itemsSorted().forEach(([,it])=>Object.values(it.sizes||{}).forEach(z=>{c+=(z.stock||0)*z.cost; r+=(z.stock||0)*z.price;}));
+      itemsSorted().filter(([,i])=>!i.adhoc).forEach(([,it])=>Object.values(it.sizes||{}).forEach(z=>{c+=(z.stock||0)*z.cost; r+=(z.stock||0)*z.price;}));
       return `<table><tr><td>At cost</td><td class="r">${fmt(c)}</td></tr>
         <tr><td>At retail</td><td class="r">${fmt(r)}</td></tr>
         <tr><td><b>Potential profit</b></td><td class="r goldtxt"><b>${fmt(r-c)}</b></td></tr></table>`;})()}
@@ -1089,7 +1169,7 @@ async function delPayment(id){
 }
 function reorderHTML(){
   const low=[];
-  itemsSorted().forEach(([id,it])=>Object.keys(it.sizes||{}).sort(sizeSort).forEach(s=>{
+  itemsSorted().filter(([,i])=>!i.adhoc).forEach(([id,it])=>Object.keys(it.sizes||{}).sort(sizeSort).forEach(s=>{
     const z=it.sizes[s], st=z.stock||0, ro=z.reorder??2;
     if(st<=ro) low.push({item:it.name,size:s,st,ro,cost:z.cost});
   }));
@@ -1102,7 +1182,7 @@ function reorderHTML(){
   </table></div>`;
   // full tracking table so it's obvious every item (incl. new ones) is watched
   const all=[];
-  itemsSorted().forEach(([id,it])=>Object.keys(it.sizes||{}).sort(sizeSort).forEach(s=>{
+  itemsSorted().filter(([,i])=>!i.adhoc).forEach(([id,it])=>Object.keys(it.sizes||{}).sort(sizeSort).forEach(s=>{
     const z=it.sizes[s], st=z.stock||0, ro=z.reorder??2;
     all.push({item:it.name,size:s,st,ro,status: st===0?'OUT':st<=ro?'LOW':'OK'});
   }));
@@ -1123,7 +1203,7 @@ function reorderHTML(){
 function restockHTML(){
   const hist=Object.entries(S.restocks||{}).sort((a,b)=>b[1].ts-a[1].ts).slice(0,25);
   return `<p class="muted">Received a new order? Pick the item, enter how many came in and the unit cost you paid. Stock goes up and the item's cost becomes the weighted average of old + new stock.</p>`+
-    itemsSorted().map(([id,it])=>`<div class="card" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer"
+    itemsSorted().filter(([,i])=>!i.adhoc).map(([id,it])=>`<div class="card" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer"
       onclick="openRestock('${id}')"><b>${colorDot(it)}${esc(it.name)}</b><div class="goldtxt">receive ›</div></div>`).join('')+
     `<h2>Recent restocks</h2>`+
     (hist.map(([,r])=>`<div class="card"><b>${esc(r.item)} — ${esc(r.size)}</b>
@@ -1241,6 +1321,9 @@ function editItem(id){
       <label style="display:flex;align-items:center;gap:6px;margin:0;font-size:13px;text-transform:none;letter-spacing:0">
         <input type="checkbox" id="ei_dot" style="width:auto" ${it.color!=='none'?'checked':''}> show dot</label>
     </div>
+    <div class="switchrow"><div><div class="t">Ad-hoc item (e.g. raffle tickets)</div>
+      <div class="s">Just records the sale — no stock counting, always available on the Sell screen, excluded from the Stock grid, Reorder list and inventory value.</div></div>
+      <button class="toggle ${it.adhoc?'on':''}" id="ei_adhoc" onclick="this.classList.toggle('on')"></button></div>
     <label>Sizes — cost is what the club paid (hidden from sellers), price is what customers pay. "Re@" = flag for reorder when stock falls to this number.</label>
     <div class="sehead"><span>Size</span><span>Cost $</span><span>Price $</span><span>Stock</span><span>Re@</span><span></span></div>
     <div id="ei_sizes">${sizes.map(s=>sizeRowHTML(s,it.sizes[s])).join('')}</div>
@@ -1248,7 +1331,13 @@ function editItem(id){
     <div style="height:14px"></div>
     <button class="btn" onclick="saveItem(${id?`'${id}'`:'null'})">Save Item</button>
     ${id?`<div style="height:8px"></div><button class="btn ${it.active!==false?'red':'gray'}" onclick="toggleItemActive('${id}');closeModal()">
-      ${it.active!==false?'Hide this item (not carrying it right now)':'Show this item again'}</button>`:''}`);
+      ${it.active!==false?'Hide this item (not carrying it right now)':'Show this item again'}</button>
+    <div style="height:8px"></div>
+    <button class="btn red" onclick="pinConfirm('Delete this item PERMANENTLY? It disappears from every screen and cannot be brought back (past sales keep their history). If you might carry it again, use Hide instead.',()=>deleteItemForever('${id}'))">🗑 Delete this item permanently</button>`:''}`);
+}
+async function deleteItemForever(id){
+  await DB.set(['items',id],null);
+  toast('Item deleted'); rerender();
 }
 function sizeRowHTML(s,z,def){
   z=z||{cost:(def&&def.cost)||'',price:(def&&def.price)||'',stock:0,reorder:(def&&def.reorder)??2};
@@ -1297,11 +1386,12 @@ async function saveItem(id){
   });
   if(!Object.keys(sizes).length){ toast('Add at least one size',1); return; }
   const color = $('ei_dot').checked ? $('ei_color').value : 'none';
+  const adhoc = $('ei_adhoc').classList.contains('on');
   if(id){ const it=S.items[id];
-    await DB.set(['items',id],{...it,name,cat,sizes,color});
+    await DB.set(['items',id],{...it,name,cat,sizes,color,adhoc});
   }else{
     const order=Math.max(0,...itemsSorted().map(([,i])=>i.order??0))+1;
-    await DB.set(['items',newId()],{name,cat,sizes,color,order,active:true});
+    await DB.set(['items',newId()],{name,cat,sizes,color,adhoc,order,active:true});
   }
   closeModal(); toast('Item saved'); rerender();
 }
@@ -1387,9 +1477,17 @@ function dataHTML(){
       <button class="btn gray" onclick="exportPaymentsCSV()">⬇ Payments CSV</button>
     </div></div>
     <div class="card">
+    <b>📌 Stock reset point</b>
+    <p class="muted">${S.snapshot && S.snapshot.items
+      ? 'Locked in '+new Date(S.snapshot.ts).toLocaleString('en-CA')+' by '+esc(S.snapshot.by)+' — the reset button below restores items and stock to exactly that moment.'
+      : 'Not set yet — the reset button below would restore the original July 2026 starting list. Lock in your real stock first!'}</p>
+    <div class="rowbtns">
+      <button class="btn" onclick="pinConfirm('Lock in the CURRENT items, prices, costs and stock counts as the new reset point? From then on, the reset button restores to exactly this moment.', lockSnapshot)">📌 Lock in current stock as the reset point</button>
+    </div></div>
+    <div class="card">
     <b style="color:var(--red)">Danger zone</b> <span class="muted">— these ask for your admin PIN</span>
     <div class="rowbtns">
-      <button class="btn red" onclick="pinConfirm('Replace ALL items with the original starting inventory? Your sales history is kept, but every item, price, cost and stock count goes back to the original list. This cannot be undone.', ()=>DB.set(['items'],null).then(()=>DB.seedItemsOnly()).then(()=>toast('Items reset')))">Reset items to starting inventory</button>
+      <button class="btn red" onclick="pinConfirm('Reset ALL items to the ${S.snapshot&&S.snapshot.items?'locked-in reset point':'original starting inventory'}? Sales history is kept, but every item, price, cost and stock count goes back. This cannot be undone.', resetItems)">Reset items to the ${S.snapshot&&S.snapshot.items?'locked-in reset point':'original starting inventory'}</button>
     </div>
     <div class="rowbtns">
       <button class="btn red" onclick="pinConfirm('Delete ALL sales history? Stock is not changed, but every sale record disappears from reports and the money ledger. This cannot be undone.', ()=>DB.set(['sales'],null).then(()=>toast('Sales history cleared')))">Clear all sales history</button>
@@ -1408,7 +1506,7 @@ function pinConfirm(msg, fn){
     <button class="btn red" onclick="pinConfirmGo()">Yes — I'm sure</button>
     <div style="height:8px"></div>
     <button class="btn gray" onclick="closeModal()">Cancel</button>`);
-  setTimeout(()=>$('pc_pin').focus(),100);
+  setTimeout(()=>{ const el=$('pc_pin'); if(el) el.focus(); },100);
 }
 async function pinConfirmGo(){
   if($('pc_pin').value !== meU().pin){ toast('Wrong PIN — nothing was changed',1); $('pc_pin').value=''; return; }
@@ -1416,6 +1514,19 @@ async function pinConfirmGo(){
   const fn=_pcFn; _pcFn=null;
   await fn();
   rerender();
+}
+async function lockSnapshot(){
+  await DB.set(['snapshot'],{ts:Date.now(), by:meU().name,
+    items: JSON.parse(JSON.stringify(S.items||{}))});
+  toast('Reset point locked in — resets now restore to right now'); rerender();
+}
+async function resetItems(){
+  if(S.snapshot && S.snapshot.items){
+    await DB.set(['items'], JSON.parse(JSON.stringify(S.snapshot.items)));
+  }else{
+    await DB.set(['items'],null); await DB.seedItemsOnly();
+  }
+  toast('Items reset'); rerender();
 }
 DB.seedItemsOnly=function(){
   const items={};
@@ -1447,7 +1558,7 @@ function exportPaymentsCSV(){
 }
 function exportStockCSV(){
   const rows=[['Item','Category','Size','Cost','Price','In Stock','Stock Value (cost)','Stock Value (retail)']];
-  itemsSorted().forEach(([,it])=>Object.keys(it.sizes).sort(sizeSort).forEach(s=>{
+  itemsSorted().filter(([,i])=>!i.adhoc).forEach(([,it])=>Object.keys(it.sizes).sort(sizeSort).forEach(s=>{
     const z=it.sizes[s];
     rows.push([it.name,it.cat||'',s,z.cost,z.price,z.stock||0,(z.stock||0)*z.cost,(z.stock||0)*z.price]);
   }));
