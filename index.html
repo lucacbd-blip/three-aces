@@ -310,7 +310,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.0';
+const APP_VERSION = 'v3.1';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -994,52 +994,85 @@ function printHead(title,sub){
     <p>Italian Canadian Cultural Club — ${esc(title)}</p>
     <p>${esc(sub)} · printed ${new Date().toLocaleString('en-CA')}</p></div>`;
 }
-let repFrom=null, repTo=null;
+let repFrom=null, repTo=null, repPreset='today', repSeller='', repItem='';
+function repRange(){
+  const now=new Date();
+  if(repPreset==='custom') return [repFrom??today0(), repTo??(today0()+86400000-1)];
+  if(repPreset==='today') return [today0(), today0()+86400000-1];
+  if(repPreset==='week'){ const d=new Date(); const dow=(d.getDay()+6)%7;
+    d.setHours(0,0,0,0); d.setDate(d.getDate()-dow); return [d.getTime(), Date.now()]; }
+  if(repPreset==='month') return [new Date(now.getFullYear(),now.getMonth(),1).getTime(), Date.now()];
+  if(repPreset==='year') return [new Date(now.getFullYear(),0,1).getTime(), Date.now()];
+  return [0, Date.now()];   // all time
+}
 function dstr(t){ const d=new Date(t); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function reportHTML(){
-  const from=repFrom??today0();
-  const to=repTo??(today0()+86400000-1);
-  const sales=salesSorted().map(([id,s])=>s).filter(s=>!s.voided&&s.ts>=from&&s.ts<=to);
-  let rev=0,cogs=0,units=0;
+  const [from,to]=repRange();
+  let sales=salesSorted().map(([id,s])=>s).filter(s=>!s.voided&&s.ts>=from&&s.ts<=to);
+  if(repSeller) sales=sales.filter(s=>s.sellerName===repSeller);
+  let rev=0,cogs=0,units=0,nSales=0;
   const bySeller={}, byItem={};
   sales.forEach(s=>{
+    const lines = repItem ? s.lines.filter(l=>l.item===repItem) : s.lines;
+    if(!lines.length) return;
+    nSales++;
     const pct=(s.sellerPct||0)/100;
-    let sRev=0,sProf=0;
-    s.lines.forEach(l=>{
+    let sRev=0,sProf=0,sUnits=0;
+    lines.forEach(l=>{
       const r=l.price*l.qty, c=l.cost*l.qty;
-      rev+=r; cogs+=c; units+=l.qty; sRev+=r; sProf+=(r-c);
+      rev+=r; cogs+=c; units+=l.qty; sRev+=r; sProf+=(r-c); sUnits+=l.qty;
       const k=l.item+' — '+l.size;
       byItem[k]=byItem[k]||{qty:0,rev:0}; byItem[k].qty+=l.qty; byItem[k].rev+=r;
     });
-    const e=bySeller[s.sellerName]=bySeller[s.sellerName]||{n:0,rev:0,prof:0,toSeller:0};
-    e.n++; e.rev+=sRev; e.prof+=sProf; e.toSeller+=sProf*pct;
+    const e=bySeller[s.sellerName]=bySeller[s.sellerName]||{n:0,units:0,rev:0,prof:0,toSeller:0};
+    e.n++; e.units+=sUnits; e.rev+=sRev; e.prof+=sProf; e.toSeller+=sProf*pct;
   });
   const profit=rev-cogs;
   const toSellers=Object.values(bySeller).reduce((a,e)=>a+e.toSeller,0);
-  return printHead('Sales Report', dstr(from)+' to '+dstr(to)) + `
-   <label class="noprint">Report period</label>
+  const sellerNames=[...new Set(salesSorted().map(([,s])=>s.sellerName)
+    .concat(Object.values(S.users||{}).map(u=>u.name)))].sort((a,b)=>a.localeCompare(b));
+  const itemNames=[...new Set(salesSorted().flatMap(([,s])=>s.lines.map(l=>l.item))
+    .concat(allItemsSorted().map(([,i])=>i.name)))].sort((a,b)=>a.localeCompare(b));
+  const presets=[['today','Today'],['week','This week'],['month','This month'],['year','This year'],['all','All time']];
+  const filterSub=(repSeller?'seller: '+repSeller+' · ':'')+(repItem?'item: '+repItem+' · ':'');
+  return printHead('Sales Report', filterSub + dstr(from)+' to '+dstr(to)) + `
+   <div class="payrow noprint" style="flex-wrap:wrap">
+     ${presets.map(([v,l])=>`<button class="${repPreset===v?'on':''}" style="flex:1 1 28%"
+       onclick="repPreset='${v}';rerender()">${l}</button>`).join('')}
+   </div>
+   <div class="rowbtns noprint" style="margin:0 0 8px">
+     <input type="date" value="${dstr(from)}" onchange="repPreset='custom';repFrom=new Date(this.value+'T00:00').getTime();rerender()">
+     <input type="date" value="${dstr(to)}" onchange="repPreset='custom';repTo=new Date(this.value+'T23:59:59').getTime();rerender()">
+   </div>
    <div class="rowbtns noprint" style="margin:0 0 12px">
-     <input type="date" value="${dstr(from)}" onchange="repFrom=new Date(this.value+'T00:00').getTime();rerender()">
-     <input type="date" value="${dstr(to)}" onchange="repTo=new Date(this.value+'T23:59:59').getTime();rerender()">
+     <select id="repSellerSel" onchange="repSeller=this.value;rerender()">
+       <option value="">👤 All sellers</option>
+       ${sellerNames.map(n=>`<option ${repSeller===n?'selected':''}>${esc(n)}</option>`).join('')}
+     </select>
+     <select id="repItemSel" onchange="repItem=this.value;rerender()">
+       <option value="">🏷 All items</option>
+       ${itemNames.map(n=>`<option ${repItem===n?'selected':''}>${esc(n)}</option>`).join('')}
+     </select>
    </div>
    <button class="btn gray noprint" style="margin-bottom:12px" onclick="window.print()">🖨 Print / Save as PDF</button>
    <div class="statgrid">
-     <div class="stat green"><div class="v">${fmt(rev)}</div><div class="l">Revenue (${sales.length} sales, ${units} items)</div></div>
+     <div class="stat green"><div class="v">${fmt(rev)}</div><div class="l">Revenue (${nSales} sales)</div></div>
+     <div class="stat gold"><div class="v">${units}</div><div class="l">Units sold${repItem?' — '+esc(repItem):''}</div></div>
      <div class="stat red"><div class="v">${fmt(cogs)}</div><div class="l">Cost of goods sold</div></div>
      <div class="stat gold"><div class="v">${fmt(profit)}</div><div class="l">Profit</div></div>
      <div class="stat"><div class="v">${fmt(rev-toSellers)}</div><div class="l">Net to club (rev − seller share)</div></div>
    </div>
-   <h2>By seller</h2>
-   <div class="card"><table><tr><th>Seller</th><th class="r">Sales</th><th class="r">Revenue</th><th class="r">Profit</th><th class="r">Seller keeps</th><th class="r">To club</th></tr>
-   ${Object.entries(bySeller).map(([n,e])=>`<tr><td>${esc(n)}</td><td class="r">${e.n}</td>
+   <h2>By seller${repItem?' — '+esc(repItem)+' only':''}</h2>
+   <div class="card"><table><tr><th>Seller</th><th class="r">Sales</th><th class="r">Units</th><th class="r">Revenue</th><th class="r">Profit</th><th class="r">Seller keeps</th><th class="r">To club</th></tr>
+   ${Object.entries(bySeller).map(([n,e])=>`<tr><td>${esc(n)}</td><td class="r">${e.n}</td><td class="r"><b>${e.units}</b></td>
      <td class="r">${fmt(e.rev)}</td><td class="r">${fmt(e.prof)}</td>
      <td class="r goldtxt">${fmt(e.toSeller)}</td><td class="r pos">${fmt(e.rev-e.toSeller)}</td></tr>`).join('')
-     ||'<tr><td colspan="6" class="empty">No sales in this period.</td></tr>'}
+     ||'<tr><td colspan="7" class="empty">No sales match these filters.</td></tr>'}
    </table></div>
-   <h2>By item</h2>
-   <div class="card"><table><tr><th>Item</th><th class="r">Qty</th><th class="r">Revenue</th></tr>
+   <h2>By item${repSeller?' — sold by '+esc(repSeller):''}</h2>
+   <div class="card"><table><tr><th>Item</th><th class="r">Units sold</th><th class="r">Revenue</th></tr>
    ${Object.entries(byItem).sort((a,b)=>b[1].rev-a[1].rev).map(([k,e])=>
-     `<tr><td>${esc(k)}</td><td class="r">${e.qty}</td><td class="r">${fmt(e.rev)}</td></tr>`).join('')
+     `<tr><td>${esc(k)}</td><td class="r"><b>${e.qty}</b></td><td class="r">${fmt(e.rev)}</td></tr>`).join('')
      ||'<tr><td colspan="3" class="empty">—</td></tr>'}
    </table></div>
    <h2>Inventory value (current stock — ad-hoc items like raffle tickets excluded)</h2>
