@@ -310,7 +310,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.1';
+const APP_VERSION = 'v3.2.1';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -506,6 +506,7 @@ const DB = {
 /* ============================== APP STATE ================================= */
 let me=null;            // current user id
 let view='sell', adminTab='report', cart=[], selCat='All', payMethod='Cash', openItem=null, cartBuyer='';
+let cartDisc=null;   // {type:'pct'|'amt', value:n} — volume discount on the current sale
 let stockView='grid', stockSortSize=null, reorderShowAll=false;
 
 const $=id=>document.getElementById(id);
@@ -670,16 +671,42 @@ function addToCart(itemId,size){
   toast(it.name+' '+size+' added');
   renderCartBar();
 }
+// Effective prices with the volume discount spread across lines in proportion
+// to their value — so per-item profit stays correct.
+function discountedLines(){
+  const base=cart.map(l=>{
+    const unit=l.member?l.cost:l.price;
+    return {l, unit, tot:unit*l.qty, newTot:unit*l.qty};
+  });
+  const subtotal=Math.round(base.reduce((a,x)=>a+x.tot,0)*100)/100;
+  let discAmt=0;
+  if(cartDisc && subtotal>0){
+    discAmt = cartDisc.type==='pct'
+      ? subtotal*Math.min(100,cartDisc.value)/100
+      : Math.min(cartDisc.value, subtotal);
+    discAmt=Math.round(discAmt*100)/100;
+    let remaining=Math.round(discAmt*100);
+    base.forEach((x,i)=>{
+      const share = i===base.length-1 ? remaining
+        : Math.round(discAmt*100 * x.tot/subtotal);
+      remaining-=share;
+      x.newTot=(Math.round(x.tot*100)-share)/100;
+      x.unit=Math.round(x.newTot/x.l.qty*10000)/10000;
+    });
+  }
+  const total=Math.round(base.reduce((a,x)=>a+x.newTot,0)*100)/100;
+  return {base, subtotal, discAmt, total};
+}
 function renderCartBar(){
   const n=cart.reduce((a,l)=>a+l.qty,0);
   $('cartbar').style.display = n&&me ? 'flex':'none';
   $('cartN').textContent=n;
-  $('cartT').textContent=fmt(cart.reduce((a,l)=>a+l.qty*(l.member?l.cost:l.price),0));
+  $('cartT').textContent=fmt(n?discountedLines().total:0);
 }
 function openCart(){
   if(!cart.length) return;
   const memberOK = isAdmin() || (S.settings&&S.settings.allowMemberSales!==false);
-  const total=cart.reduce((a,l)=>a+l.qty*(l.member?l.cost:l.price),0);
+  const {subtotal, discAmt, total}=discountedLines();
   openModal(`<h3><button class="x" onclick="closeModal()">✕</button>Current Sale</h3>
     ${cart.map((l,i)=>`<div class="cartline">
       <div class="d"><div class="nm">${esc(l.item)} — ${esc(l.size)}${l.member?'<span class="memberflag">MEMBER @ COST</span>':''}</div>
@@ -689,7 +716,13 @@ function openCart(){
       <div class="qtyctl">
         <button onclick="qty(${i},-1)">−</button><b>${l.qty}</b><button onclick="qty(${i},1)">+</button>
       </div></div>`).join('')}
+    ${cartDisc?`<div class="cartline">
+      <div class="d"><div class="nm">Volume discount — ${cartDisc.type==='pct'?cartDisc.value+'%':fmt(cartDisc.value)+' off'}</div>
+        <div class="sub"><a href="#" style="color:var(--red)" onclick="cartDisc=null;openCart();renderCartBar();return false">remove discount</a></div></div>
+      <div class="neg"><b>−${fmt(discAmt)}</b></div></div>
+      <div class="cart-total" style="font-size:15px;color:var(--muted)"><span>Subtotal</span><span>${fmt(subtotal)}</span></div>`:''}
     <div class="cart-total"><span>Total to collect</span><span class="goldtxt">${fmt(total)}</span></div>
+    <button class="btn gray" style="margin-bottom:10px" onclick="discountModal()">％ Volume discount ${cartDisc?'(change)':''}</button>
     <label>Payment</label>
     <div class="payrow">
       ${['Cash','Pay Later'].map(p=>`<button class="${payMethod===p?'on':''}" onclick="payMethod='${p}';openCart()">${p}</button>`).join('')}
@@ -703,7 +736,40 @@ function openCart(){
       </select><div style="height:10px"></div>`:''}
     <button class="btn" onclick="checkout()">✓ Complete Sale — ${fmt(total)}</button>
     <div class="rowbtns"><button class="btn gray" onclick="closeModal()">Keep Selling</button>
-    <button class="btn red" onclick="cart=[];closeModal();renderCartBar()">Cancel Sale</button></div>`);
+    <button class="btn red" onclick="cart=[];cartDisc=null;closeModal();renderCartBar()">Cancel Sale</button></div>`);
+}
+let _dmType='pct';
+function discountModal(){
+  _dmType=cartDisc?cartDisc.type:'pct';
+  openModal(`<h3><button class="x" onclick="openCart()">✕</button>％ Volume Discount</h3>
+    <p class="muted">Applies to the whole sale, spread across every item so profit tracking stays accurate. Enter YOUR PIN to authorize it — the discount is recorded under your name.</p>
+    <label>Discount type</label>
+    <div class="payrow">
+      <button type="button" id="dmPct" class="${_dmType==='pct'?'on':''}" onclick="_dmType='pct';this.classList.add('on');$('dmAmt').classList.remove('on');$('dmValLab').textContent='Percent off (e.g. 10 = 10%)'">Percent %</button>
+      <button type="button" id="dmAmt" class="${_dmType==='amt'?'on':''}" onclick="_dmType='amt';this.classList.add('on');$('dmPct').classList.remove('on');$('dmValLab').textContent='Dollars off the total (e.g. 5 or 5.50)'">Dollars $</button>
+    </div>
+    <label id="dmValLab">${_dmType==='pct'?'Percent off (e.g. 10 = 10%)':'Dollars off the total (e.g. 5 or 5.50)'}</label>
+    <input id="dm_val" type="text" inputmode="decimal" autocomplete="off"
+      value="${cartDisc?cartDisc.value:''}" placeholder="0">
+    <label>Your PIN (authorizes the discount — recorded under your name)</label>
+    <input id="dm_pin" type="password" inputmode="numeric" maxlength="4" autocomplete="off"
+      style="font-size:22px;text-align:center;letter-spacing:8px">
+    <div style="height:12px"></div>
+    <button class="btn" onclick="applyDiscount()">✓ Apply Discount</button>
+    <div style="height:8px"></div>
+    <button class="btn gray" onclick="openCart()">Back to sale</button>`);
+  setTimeout(()=>{ const el=$('dm_val'); if(el) el.focus(); },100);
+}
+function applyDiscount(){
+  const pin=$('dm_pin').value;
+  if(pin!==meU().pin){ toast('That\'s not your PIN — discount not applied',1); $('dm_pin').value=''; return; }
+  // forgiving parse: accepts "5", "5.50", "$5", "10%"…
+  const v=parseFloat(String($('dm_val').value).replace(/[^0-9.]/g,''))||0;
+  if(v<=0){ toast('Enter the discount amount',1); return; }
+  if(_dmType==='pct' && v>100){ toast('Percent can\'t be over 100',1); return; }
+  cartDisc={type:_dmType, value:Math.round(v*100)/100, by:meU().name};
+  toast('Discount applied');
+  openCart(); renderCartBar();
 }
 function toggleMember(i){
   cart[i].member=!cart[i].member; openCart(); renderCartBar();
@@ -734,17 +800,20 @@ async function checkout(){
       done.push(l);
     }
     const u=meU();
+    const {base, discAmt, total}=discountedLines();
     const sale={ts:Date.now(), sellerId:me, sellerName:u.name, sellerPct:u.profitPct||0,
       payment:payMethod, buyer:payMethod==='Pay Later'?cartBuyer:null,
       voided:false, eventName:(S.settings&&S.settings.eventName)||'',
-      lines:cart.map(l=>({itemId:l.itemId,item:l.item,size:l.size,qty:l.qty,
-        price:l.member?l.cost:l.price, cost:l.cost, member:!!l.member, adhoc:!!l.adhoc})),
-      total:cart.reduce((a,l)=>a+l.qty*(l.member?l.cost:l.price),0)};
+      discount: cartDisc? {type:cartDisc.type, value:cartDisc.value, amount:discAmt, by:cartDisc.by||u.name} : null,
+      lines:base.map(x=>({itemId:x.l.itemId,item:x.l.item,size:x.l.size,qty:x.l.qty,
+        price:x.unit, orig:cartDisc?(x.l.member?x.l.cost:x.l.price):null,
+        cost:x.l.cost, member:!!x.l.member, adhoc:!!x.l.adhoc})),
+      total};
     await DB.push(['sales'], sale);
     const msg = sale.payment==='Pay Later'
       ? 'Sale recorded — '+fmt(sale.total)+' on '+sale.buyer+"'s tab"
       : 'Sale recorded — '+fmt(sale.total)+' '+sale.payment;
-    cart=[]; cartBuyer=''; payMethod='Cash'; closeModal(); renderCartBar();
+    cart=[]; cartBuyer=''; cartDisc=null; payMethod='Cash'; closeModal(); renderCartBar();
     toast(msg);
   }finally{ _busy=false; }
 }
@@ -815,7 +884,7 @@ function renderSales(){
         · ${esc(s.sellerName)} ${s.voided?'<span class="voidtag">VOIDED</span>':''}${s.edited?' <span class="voidtag" style="color:var(--gold)">EDITED</span>':''}</span>
         <span>${fmt(s.total)}</span></div>
       <div class="lines">${s.lines.map(l=>`${l.qty}× ${esc(l.item)} ${esc(l.size)}${l.member?' (member)':''}`).join(' · ')}
-        · ${esc(s.payment)}${s.payment==='Pay Later'&&s.buyer?` — <b>${esc(s.buyer)} owes</b>`:''}</div>
+        · ${esc(s.payment)}${s.payment==='Pay Later'&&s.buyer?` — <b>${esc(s.buyer)} owes</b>`:''}${s.discount?` · <b class="neg">−${fmt(s.discount.amount)} discount</b> <span class="muted">(by ${esc(s.discount.by||s.sellerName)})</span>`:''}</div>
       ${isAdmin()&&!s.voided?`<div class="rowbtns">
         <button class="btn small gray" onclick="pinConfirm('Edit this sale? Quantities, prices and payment can be changed — stock adjusts automatically.',()=>editSale('${id}'))">✎ Edit sale</button>
         <button class="btn small red" onclick="voidSale('${id}')">Void &amp; restock</button></div>`:''}
@@ -994,7 +1063,7 @@ function printHead(title,sub){
     <p>Italian Canadian Cultural Club — ${esc(title)}</p>
     <p>${esc(sub)} · printed ${new Date().toLocaleString('en-CA')}</p></div>`;
 }
-let repFrom=null, repTo=null, repPreset='today', repSeller='', repItem='';
+let repFrom=null, repTo=null, repPreset='today', repSeller='', repItem='', repDisc='';
 function repRange(){
   const now=new Date();
   if(repPreset==='custom') return [repFrom??today0(), repTo??(today0()+86400000-1)];
@@ -1010,6 +1079,8 @@ function reportHTML(){
   const [from,to]=repRange();
   let sales=salesSorted().map(([id,s])=>s).filter(s=>!s.voided&&s.ts>=from&&s.ts<=to);
   if(repSeller) sales=sales.filter(s=>s.sellerName===repSeller);
+  if(repDisc==='only') sales=sales.filter(s=>s.discount);
+  const discTotal=sales.reduce((a,s)=>a+((s.discount&&s.discount.amount)||0),0);
   let rev=0,cogs=0,units=0,nSales=0;
   const bySeller={}, byItem={};
   sales.forEach(s=>{
@@ -1034,7 +1105,7 @@ function reportHTML(){
   const itemNames=[...new Set(salesSorted().flatMap(([,s])=>s.lines.map(l=>l.item))
     .concat(allItemsSorted().map(([,i])=>i.name)))].sort((a,b)=>a.localeCompare(b));
   const presets=[['today','Today'],['week','This week'],['month','This month'],['year','This year'],['all','All time']];
-  const filterSub=(repSeller?'seller: '+repSeller+' · ':'')+(repItem?'item: '+repItem+' · ':'');
+  const filterSub=(repSeller?'seller: '+repSeller+' · ':'')+(repItem?'item: '+repItem+' · ':'')+(repDisc==='only'?'discounted sales only · ':'');
   return printHead('Sales Report', filterSub + dstr(from)+' to '+dstr(to)) + `
    <div class="payrow noprint" style="flex-wrap:wrap">
      ${presets.map(([v,l])=>`<button class="${repPreset===v?'on':''}" style="flex:1 1 28%"
@@ -1054,10 +1125,17 @@ function reportHTML(){
        ${itemNames.map(n=>`<option ${repItem===n?'selected':''}>${esc(n)}</option>`).join('')}
      </select>
    </div>
+   <div class="rowbtns noprint" style="margin:0 0 12px">
+     <select id="repDiscSel" onchange="repDisc=this.value;rerender()">
+       <option value="">All sales — with or without discount</option>
+       <option value="only" ${repDisc==='only'?'selected':''}>💸 Discounted sales only</option>
+     </select>
+   </div>
    <button class="btn gray noprint" style="margin-bottom:12px" onclick="window.print()">🖨 Print / Save as PDF</button>
    <div class="statgrid">
      <div class="stat green"><div class="v">${fmt(rev)}</div><div class="l">Revenue (${nSales} sales)</div></div>
      <div class="stat gold"><div class="v">${units}</div><div class="l">Units sold${repItem?' — '+esc(repItem):''}</div></div>
+     ${discTotal>0.005?`<div class="stat red"><div class="v">−${fmt(discTotal)}</div><div class="l">Discounts given (${sales.filter(s=>s.discount).length} sales)</div></div>`:''}
      <div class="stat red"><div class="v">${fmt(cogs)}</div><div class="l">Cost of goods sold</div></div>
      <div class="stat gold"><div class="v">${fmt(profit)}</div><div class="l">Profit</div></div>
      <div class="stat"><div class="v">${fmt(rev-toSellers)}</div><div class="l">Net to club (rev − seller share)</div></div>
@@ -1572,12 +1650,14 @@ function dl(name,text){
 }
 function csvCell(v){ v=String(v??''); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
 function exportSalesCSV(){
-  const rows=[['Date','Time','Event','Seller','Item','Size','Qty','Unit Price','Unit Cost','Line Total','Line Profit','Member Sale','Payment','Owed By','Voided']];
+  const rows=[['Date','Time','Event','Seller','Item','Size','Qty','Unit Price','Orig Price','Unit Cost','Line Total','Line Profit','Member Sale','Payment','Owed By','Order Discount','Discount By','Voided']];
   salesSorted().reverse().forEach(([,s])=>{
     const d=new Date(s.ts);
     s.lines.forEach(l=>rows.push([d.toLocaleDateString('en-CA'),d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}),
-      s.eventName||'',s.sellerName,l.item,l.size,l.qty,l.price,l.cost,l.price*l.qty,(l.price-l.cost)*l.qty,
-      l.member?'Y':'',s.payment,s.buyer||'',s.voided?'Y':'']));
+      s.eventName||'',s.sellerName,l.item,l.size,l.qty,l.price,l.orig||'',l.cost,
+      Math.round(l.price*l.qty*100)/100,Math.round((l.price-l.cost)*l.qty*100)/100,
+      l.member?'Y':'',s.payment,s.buyer||'',s.discount?s.discount.amount:'',
+      s.discount?(s.discount.by||s.sellerName):'',s.voided?'Y':'']));
   });
   dl('three-aces-sales.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'));
 }
