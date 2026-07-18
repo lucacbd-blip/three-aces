@@ -98,6 +98,9 @@
   .cartline .d{flex:1;}
   .cartline .nm{font-weight:700;}
   .cartline .sub{font-size:12px;color:var(--muted);}
+  .saleflag{display:inline-block;background:#ffe1e1;color:#a31515;border-radius:6px;
+    font-size:11px;font-weight:800;padding:2px 6px;margin-left:6px;}
+  body.dark .saleflag{background:#4a1010;color:#ff9c9c;}
   .memberflag{display:inline-block;background:var(--memberbg);color:var(--membertx);border-radius:6px;
     font-size:11px;padding:2px 6px;margin-left:6px;}
   .qtyctl{display:flex;align-items:center;gap:8px;}
@@ -310,7 +313,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.2.1';
+const APP_VERSION = 'v3.2.2';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -523,6 +526,10 @@ function itemsSorted(){ return Object.entries(S.items||{}).filter(([,i])=>i.acti
 function allItemsSorted(){ return Object.entries(S.items||{})
   .sort((a,b)=>(a[1].order??99)-(b[1].order??99)||a[1].name.localeCompare(b[1].name)); }
 function totalStock(it){ return Object.values(it.sizes||{}).reduce((n,z)=>n+(z.stock||0),0); }
+function salePriceOf(it,z){  // item-level "% off" sale price, rounded to cents
+  const p=it.salePct||0;
+  return p>0 ? Math.round(z.price*(100-p))/100 : z.price;
+}
 function soldMap(){ // units sold per item (non-void, all time) — powers "best sellers" order
   const m={};
   Object.values(S.sales||{}).forEach(s=>{ if(s.voided) return;
@@ -641,20 +648,23 @@ function renderSell(){
   $('itemList').innerHTML=list.map(([id,it])=>{
     const sizes=Object.keys(it.sizes||{}).sort(sizeSort);
     const total=sizes.reduce((n,s)=>n+(it.sizes[s].stock||0),0);
-    const prices=[...new Set(sizes.map(s=>it.sizes[s].price))];
+    const prices=[...new Set(sizes.map(s=>salePriceOf(it,it.sizes[s])))];
     const pTxt=prices.length===1?fmt(prices[0]):fmt(Math.min(...prices))+'–'+fmt(Math.max(...prices));
     const open=openItem===id;
+    const saleTag=it.salePct?`<span class="saleflag">${it.salePct}% OFF</span>`:'';
     return `<div class="itemcard">
       <div class="top" onclick="openItem=${open?'null':`'${id}'`};rerender()">
-        <div><div class="nm">${colorDot(it)}${esc(it.name)}</div>
+        <div><div class="nm">${colorDot(it)}${esc(it.name)}${saleTag}</div>
         <div class="meta">${esc(it.cat||'')} · ${it.adhoc?'always available':total+' in stock'}</div></div>
         <div class="price">${pTxt}</div>
       </div>
       ${open?`<div class="sizerow">${sizes.map(s=>{
           const z=it.sizes[s]; const st=z.stock||0;
-          if(it.adhoc) return `<button class="sizebtn" onclick="addToCart('${id}','${esc(s)}')">${esc(s)}<small>${fmt(z.price)}</small></button>`;
+          const sp=salePriceOf(it,z);
+          const pLbl=it.salePct?`<s>${fmt(z.price)}</s> ${fmt(sp)}`:fmt(sp);
+          if(it.adhoc) return `<button class="sizebtn" onclick="addToCart('${id}','${esc(s)}')">${esc(s)}<small>${pLbl}</small></button>`;
           return `<button class="sizebtn ${st===0?'out':st<=(z.reorder??2)?'low':''}" ${st===0?'disabled':''}
-            onclick="addToCart('${id}','${esc(s)}')">${esc(s)}<small>${st===0?'sold out':st+' left · '+fmt(z.price)}</small></button>`;
+            onclick="addToCart('${id}','${esc(s)}')">${esc(s)}<small>${st===0?'sold out':st+' left · '+pLbl}</small></button>`;
         }).join('')}</div>`:''}
     </div>`;
   }).join('') || '<div class="empty">Nothing in stock in this category.</div>';
@@ -667,7 +677,8 @@ function addToCart(itemId,size){
   }
   const ex=cart.find(l=>l.itemId===itemId&&l.size===size&&!l.member);
   if(ex) ex.qty++;
-  else cart.push({itemId, item:it.name, size, qty:1, price:z.price, cost:z.cost, member:false, adhoc:!!it.adhoc});
+  else cart.push({itemId, item:it.name, size, qty:1, price:salePriceOf(it,z), regular:z.price,
+    salePct:it.salePct||0, cost:z.cost, member:false, adhoc:!!it.adhoc});
   toast(it.name+' '+size+' added');
   renderCartBar();
 }
@@ -709,7 +720,7 @@ function openCart(){
   const {subtotal, discAmt, total}=discountedLines();
   openModal(`<h3><button class="x" onclick="closeModal()">✕</button>Current Sale</h3>
     ${cart.map((l,i)=>`<div class="cartline">
-      <div class="d"><div class="nm">${esc(l.item)} — ${esc(l.size)}${l.member?'<span class="memberflag">MEMBER @ COST</span>':''}</div>
+      <div class="d"><div class="nm">${esc(l.item)} — ${esc(l.size)}${l.member?'<span class="memberflag">MEMBER @ COST</span>':''}${l.salePct&&!l.member?`<span class="saleflag">${l.salePct}% OFF</span>`:''}</div>
         <div class="sub">${fmt(l.member?l.cost:l.price)} each
           ${memberOK?`· <a href="#" style="color:var(--gold)" onclick="toggleMember(${i});return false">${l.member?'regular price':'member price'}</a>`:''}
         </div></div>
@@ -806,7 +817,8 @@ async function checkout(){
       voided:false, eventName:(S.settings&&S.settings.eventName)||'',
       discount: cartDisc? {type:cartDisc.type, value:cartDisc.value, amount:discAmt, by:cartDisc.by||u.name} : null,
       lines:base.map(x=>({itemId:x.l.itemId,item:x.l.item,size:x.l.size,qty:x.l.qty,
-        price:x.unit, orig:cartDisc?(x.l.member?x.l.cost:x.l.price):null,
+        price:x.unit, orig:(x.unit!==(x.l.regular??x.l.price))?(x.l.regular??x.l.price):null,
+        salePct:x.l.salePct||0,
         cost:x.l.cost, member:!!x.l.member, adhoc:!!x.l.adhoc})),
       total};
     await DB.push(['sales'], sale);
@@ -1388,7 +1400,7 @@ function itemsHTML(){
           <button class="btn small gray" style="padding:4px 10px" ${idx===arr.length-1?'disabled':''} onclick="moveItem('${id}',1)">▼</button>
         </div>`:''}
         <div style="flex:1;cursor:pointer" onclick="editItem('${id}')">
-          <b>${colorDot(it)}${esc(it.name)}</b>${hidden?' <span class="voidtag">HIDDEN</span>':''}
+          <b>${colorDot(it)}${esc(it.name)}</b>${hidden?' <span class="voidtag">HIDDEN</span>':''}${it.salePct?`<span class="saleflag">${it.salePct}% OFF</span>`:''}
           <div class="muted">${esc(it.cat||'')} · ${sizes.length} sizes · ${tot} in stock · ${m[id]||0} sold · <span class="goldtxt">edit ›</span></div></div>
         <button class="btn small ${hidden?'':'gray'}" onclick="toggleItemActive('${id}')">${hidden?'Show':'Hide'}</button>
       </div>`;
@@ -1432,6 +1444,8 @@ function editItem(id){
       <label style="display:flex;align-items:center;gap:6px;margin:0;font-size:13px;text-transform:none;letter-spacing:0">
         <input type="checkbox" id="ei_dot" style="width:auto" ${it.color!=='none'?'checked':''}> show dot</label>
     </div>
+    <label>On sale — % off the regular price (0 = not on sale, e.g. 50 = half price at the event)</label>
+    <input id="ei_sale" type="text" inputmode="numeric" autocomplete="off" value="${it.salePct||0}">
     <div class="switchrow"><div><div class="t">Ad-hoc item (e.g. raffle tickets)</div>
       <div class="s">Just records the sale — no stock counting, always available on the Sell screen, excluded from the Stock grid, Reorder list and inventory value.</div></div>
       <button class="toggle ${it.adhoc?'on':''}" id="ei_adhoc" onclick="this.classList.toggle('on')"></button></div>
@@ -1498,11 +1512,12 @@ async function saveItem(id){
   if(!Object.keys(sizes).length){ toast('Add at least one size',1); return; }
   const color = $('ei_dot').checked ? $('ei_color').value : 'none';
   const adhoc = $('ei_adhoc').classList.contains('on');
+  const salePct = Math.min(90, Math.max(0, Math.round(parseFloat(String($('ei_sale').value).replace(/[^0-9.]/g,''))||0)));
   if(id){ const it=S.items[id];
-    await DB.set(['items',id],{...it,name,cat,sizes,color,adhoc});
+    await DB.set(['items',id],{...it,name,cat,sizes,color,adhoc,salePct});
   }else{
     const order=Math.max(0,...itemsSorted().map(([,i])=>i.order??0))+1;
-    await DB.set(['items',newId()],{name,cat,sizes,color,adhoc,order,active:true});
+    await DB.set(['items',newId()],{name,cat,sizes,color,adhoc,salePct,order,active:true});
   }
   closeModal(); toast('Item saved'); rerender();
 }
