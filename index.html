@@ -313,7 +313,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.2.2';
+const APP_VERSION = 'v3.3';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -1190,11 +1190,16 @@ function moneyHTML(){
   tabSales.forEach(s=>{ trow(s.buyer||'Unknown').charged+=s.total; });
   const pays=Object.entries(S.payments||{}).sort((a,b)=>b[1].ts-a[1].ts);
   const payoutBy={};   // club -> member profit-share payouts
+  const floats={};     // cash float: loaned out for making change, then returned
+  const frow=n=>floats[n]=floats[n]||{out:0,back:0};
   pays.forEach(([,p])=>{
     if(p.kind==='tab') trow(p.from).paid+=p.amount;
     else if(p.kind==='payout') payoutBy[p.from]=(payoutBy[p.from]||0)+p.amount;
+    else if(p.kind==='floatout') frow(p.from).out+=p.amount;
+    else if(p.kind==='floatin') frow(p.from).back+=p.amount;
     else row(p.from).received+=p.amount;
   });
+  const floatOutNow=Object.values(floats).reduce((a,f)=>a+(f.out-f.back),0);
   // profit share the club owes sellers on Pay-Later sales (club collects those in full)
   const shareOf=s=>{ const prof=s.lines.reduce((a,l)=>a+(l.price-l.cost)*l.qty,0);
     return prof*(s.sellerPct||0)/100; };
@@ -1217,7 +1222,19 @@ function moneyHTML(){
      <div class="stat gold"><div class="v">${fmt(owedTabs-paidTabs)}</div><div class="l">Owed on member tabs</div></div>
      <div class="stat green"><div class="v">${fmt(recSellers+paidTabs)}</div><div class="l">Received by club</div></div>
      <div class="stat ${outstanding>0.005?'red':'green'}"><div class="v">${fmt(outstanding)}</div><div class="l">Still outstanding (total)</div></div>
+     ${floatOutNow>0.005?`<div class="stat gold"><div class="v">${fmt(floatOutNow)}</div><div class="l">💵 Cash float currently out</div></div>`:''}
    </div>
+   ${Object.keys(floats).length?`<h2>Cash float (change money — not revenue)</h2>
+   <div class="card"><table>
+    <tr><th>Held by</th><th class="r">Given out</th><th class="r">Returned</th><th class="r">Still out</th></tr>
+    ${Object.entries(floats).map(([n,f])=>{
+      const o=f.out-f.back;
+      return `<tr><td>${esc(n)}</td><td class="r">${fmt(f.out)}</td><td class="r pos">${fmt(f.back)}</td>
+        <td class="r ${o>0.005?'goldtxt':'pos'}"><b>${fmt(o)}</b></td></tr>`;}).join('')}
+   </table></div>
+   <p class="muted">End-of-day counting: <b>cash box total − float still out = sales cash</b> to hand in.
+   The float is a loan for making change — it never counts as revenue or as money owed. When the box comes back,
+   record a "Float returned" below and the balance goes to $0.</p>`:''}
    <h2>Sellers — cash to hand in</h2>
    <div class="card"><table>
     <tr><th>Member</th><th class="r">Collected</th><th class="r">Keeps</th><th class="r">Owes club</th><th class="r">Paid in</th><th class="r">Balance</th></tr>
@@ -1250,8 +1267,8 @@ function moneyHTML(){
    <p class="muted">Sellers' balance = collected − keeps − handed in. Tabs = pay-later purchases − tab payments. $0 means settled up.</p>
    <h2>Payments received</h2>
    ${pays.map(([id,p])=>`<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
-      <div><b>${fmt(p.amount)}</b> ${p.kind==='payout'?'to':'from'} ${esc(p.from)}
-        <span class="memberflag">${p.kind==='tab'?'TAB PAYMENT':p.kind==='payout'?'PROFIT PAYOUT':'SALES CASH'}</span>
+      <div><b>${fmt(p.amount)}</b> ${(p.kind==='payout'||p.kind==='floatout')?'to':'from'} ${esc(p.from)}
+        <span class="memberflag">${p.kind==='tab'?'TAB PAYMENT':p.kind==='payout'?'PROFIT PAYOUT':p.kind==='floatout'?'FLOAT OUT':p.kind==='floatin'?'FLOAT RETURNED':'SALES CASH'}</span>
         <div class="muted">${new Date(p.ts).toLocaleDateString('en-CA')}${p.note?' · '+esc(p.note):''} · recorded by ${esc(p.by)}</div></div>
       <button class="btn small red noprint" onclick="delPayment('${id}')">✕</button>
     </div>`).join('')||'<div class="empty">No payments recorded yet.</div>'}
@@ -1267,7 +1284,9 @@ function recordPayment(){
     <label>What is this payment?</label><select id="mp_kind">
       <option value="handover">Sales cash being handed in (seller → club)</option>
       <option value="tab">A member paying their tab (pay-later purchase → club)</option>
-      <option value="payout">Club paying a member their profit share (club → member)</option></select>
+      <option value="payout">Club paying a member their profit share (club → member)</option>
+      <option value="floatout">💵 Cash float GIVEN OUT for making change (club → cash box)</option>
+      <option value="floatin">💵 Cash float RETURNED at end of day (cash box → club)</option></select>
     <label>Member</label><select id="mp_from">${names.map(n=>`<option>${esc(n)}</option>`).join('')}
       <option>Other</option></select>
     <label>Amount received $</label><input id="mp_amt" type="number" min="0" step="0.01" placeholder="0.00">
@@ -1680,7 +1699,8 @@ function exportPaymentsCSV(){
   const rows=[['Date','Type','From','Amount','Note','Recorded By']];
   Object.values(S.payments||{}).sort((a,b)=>a.ts-b.ts).forEach(p=>
     rows.push([new Date(p.ts).toLocaleDateString('en-CA'),
-      p.kind==='tab'?'Tab payment':p.kind==='payout'?'Profit payout (club → member)':'Sales cash',
+      p.kind==='tab'?'Tab payment':p.kind==='payout'?'Profit payout (club → member)'
+        :p.kind==='floatout'?'Cash float given out':p.kind==='floatin'?'Cash float returned':'Sales cash',
       p.from,p.amount,p.note||'',p.by]));
   dl('three-aces-payments.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'));
 }
