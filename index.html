@@ -205,6 +205,12 @@
     min-width:120px;max-width:175px;white-space:normal;line-height:1.25;font-weight:600;}
   .stockgrid td.c{text-align:center;}
   .stockgrid .dim{color:var(--line);}
+  .dim{color:var(--muted);opacity:.6;}
+  /* attendance grid */
+  .attP{color:var(--pos);font-weight:800;} .attL{color:var(--gold);font-weight:800;}
+  .attA{color:var(--neg);font-weight:800;} .attAN{color:#e67e22;font-weight:800;}
+  .attNP{color:var(--muted);font-weight:800;}
+  .attcell{cursor:pointer;user-select:none;min-width:34px;}
   .stockgrid .lowc{color:var(--gold);font-weight:700;}
   .stockgrid th.sz{cursor:pointer;user-select:none;}
   .stockgrid th.sz.on{color:var(--gold);}
@@ -284,6 +290,11 @@
   <div id="myMoneyBody"></div>
 </div>
 
+<!-- MY CLUB (members: their attendance + sponsor, no club money) -->
+<div id="myclub" class="view">
+  <div id="myClubBody"></div>
+</div>
+
 <!-- ADMIN -->
 <div id="admin" class="view">
   <div class="tabbar" id="adminTabs"></div>
@@ -313,7 +324,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.3';
+const APP_VERSION = 'v3.9';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -506,6 +517,28 @@ const DB = {
   }
 };
 
+/* ------------------------- ATTACHED FILE STORE -----------------------------
+   Invoices (photos, PDFs, Word files) are stored OUTSIDE the main /threeaces
+   node so the 3-second live sync never has to download them — a file is only
+   fetched when someone taps 📎 to view it.                                   */
+function _filesUrl(id){ return FIREBASE_CONFIG.databaseURL.replace(/\/+$/,'')+'/threeacesFiles/'+encodeURIComponent(id)+'.json'; }
+async function fileSave(id,obj){        // obj = {name, type, data(dataURL)}
+  if(CLOUD){
+    const r=await fetch(_filesUrl(id),{method:'PUT',body:JSON.stringify(obj)});
+    if(!r.ok) throw new Error('file save failed');
+    return;
+  }
+  const all=JSON.parse(localStorage.getItem('threeacesFiles')||'{}');
+  all[id]=obj; localStorage.setItem('threeacesFiles',JSON.stringify(all));
+}
+async function fileLoad(id){
+  if(CLOUD){
+    try{ const r=await fetch(_filesUrl(id),{cache:'no-store'}); return r.ok? await r.json() : null; }
+    catch(e){ return null; }
+  }
+  return (JSON.parse(localStorage.getItem('threeacesFiles')||'{}'))[id]||null;
+}
+
 /* ============================== APP STATE ================================= */
 let me=null;            // current user id
 let view='sell', adminTab='report', cart=[], selCat='All', payMethod='Cash', openItem=null, cartBuyer='';
@@ -514,9 +547,12 @@ let stockView='grid', stockSortSize=null, reorderShowAll=false;
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const fmt=n=>'$'+(Math.round(n*100)/100).toLocaleString('en-CA',{minimumFractionDigits:(n%1?2:0),maximumFractionDigits:2});
+const fmt=n=>'$'+(Math.round(n*100)/100).toLocaleString('en-CA',{minimumFractionDigits:2,maximumFractionDigits:2});
 const meU=()=>S.users[me];
 const isAdmin=()=>me && meU() && meU().role==='admin';
+// Club records (Books + Attendance + member Club tab) stay hidden everywhere
+// until the admin flips the switch in Settings. Data is kept either way.
+const clubRecOn=()=>!!(S.settings&&S.settings.clubRecords);
 function toast(msg,err){ const t=$('toast'); t.textContent=msg; t.className='toast'+(err?' err':''); t.style.display='block';
   clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none',2200); }
 function sizeSort(a,b){ const ia=SIZE_ORDER.indexOf(a), ib=SIZE_ORDER.indexOf(b);
@@ -568,17 +604,19 @@ function rerender(){
   $('chipName').textContent=meU().name;
   renderNav();
   if(view==='mymoney' && !((meU().profitPct||0)>0)) view='sell';
-  ['sell','stock','saleslog','mymoney','admin'].forEach(v=>$(v).classList.toggle('active', v===view));
+  if(view==='myclub' && (isAdmin()||!clubRecOn())) view='sell';
+  ['sell','stock','saleslog','mymoney','myclub','admin'].forEach(v=>$(v).classList.toggle('active', v===view));
   if(view==='sell') renderSell();
   if(view==='stock') renderStock();
   if(view==='saleslog') renderSales();
   if(view==='mymoney') renderMyMoney();
+  if(view==='myclub') renderMyClub();
   if(view==='admin') renderAdmin();
   renderCartBar();
 }
 function showLogin(){
   $('appHeader').style.display='none'; $('nav').style.display='none';
-  ['sell','stock','saleslog','mymoney','admin'].forEach(v=>$(v).classList.remove('active'));
+  ['sell','stock','saleslog','mymoney','myclub','admin'].forEach(v=>$(v).classList.remove('active'));
   $('login').classList.add('active');
   // convenience: prefill the last name used on this device (never shows anyone else's name)
   if(!$('loginName').value){
@@ -631,6 +669,7 @@ document.addEventListener('keydown', e=>{
 function renderNav(){
   const tabs=[['sell','🛒','Sell'],['stock','📦','Stock'],['saleslog','🧾','Sales']];
   if((meU().profitPct||0)>0) tabs.push(['mymoney','💰','My $']);
+  if(!isAdmin() && clubRecOn()) tabs.push(['myclub','🎟','Club']);
   if(isAdmin()) tabs.push(['admin','⚙️','Admin']);
   $('nav').innerHTML=tabs.map(([v,ic,l])=>
     `<button class="${view===v?'on':''}" onclick="go('${v}')"><span class="ic">${ic}</span>${l}</button>`).join('');
@@ -910,6 +949,692 @@ async function voidSale(id){
   toast('Sale voided — stock restored');
 }
 
+/* ----------------------------- CLUB BOOKS ---------------------------------
+   The yearly cash flow that used to live in the Excel "Annual Expense" sheets.
+   History 2020–2025 is seeded from the sheet (2021 reconstructed from the
+   surrounding years — the original had a broken reference). From 2026 on,
+   sales income flows in automatically from the app's own sales records.     */
+const FIN_SEED={
+  opening:{year:2026, amount:15497},
+  sponsorTarget:500,
+  history:{
+    '2020':{income:21765,  expenses:10800, balance:10965},
+    '2021':{income:32435,  expenses:26885, balance:5550, note:'reconstructed'},
+    '2022':{income:22325,  expenses:16265, balance:6060},
+    '2023':{income:21853,  expenses:12410, balance:9443},
+    '2024':{income:16248,  expenses:4160,  balance:12088},
+    '2025':{income:19705,  expenses:4208,  balance:15497}
+  },
+  cats:{
+    income:['Donations','Member Fees','Other Income'],
+    expense:['Christmas Party - Hall','Christmas Party - Gifts','Annual Picnic - Park Fees',
+      'Annual Picnic - Entertainment','Annual Picnic - Prizes','Picnic - Expenses',
+      '3 Aces Merchandise','Charity','Attendance Re-Imbursement','Personal Care',
+      'Entertainment','3 Aces Meetings','Misc']
+  },
+  txns:{},
+  imported2026:true
+};
+// 2026 entries transcribed line-by-line from the Excel cell notes (fixed ids = safe to re-import)
+function _d(m,d){ return new Date(2026,m-1,d,12).getTime(); }
+const FIN_TXNS_2026={
+ imp26d1:{ts:_d(5,14),kind:'income',cat:'Donations',amount:500,member:'Charlie',sponsor:'Liquidation Event',inkind:false,note:'Cash received May 14 2026',by:'Imported from Excel'},
+ imp26d2:{ts:_d(5,14),kind:'income',cat:'Donations',amount:500,member:'Charlie',sponsor:'MTF Group',inkind:false,note:'Cash received May 14 2026',by:'Imported from Excel'},
+ imp26d3:{ts:_d(5,14),kind:'income',cat:'Donations',amount:500,member:'Charlie',sponsor:'Egnatia Paving',inkind:false,note:'Cash received May 14 2026',by:'Imported from Excel'},
+ imp26d4:{ts:_d(5,27),kind:'income',cat:'Donations',amount:500,member:'Luca',sponsor:'GOBRO CON INC.',inkind:false,note:'Cheque turned into cash',by:'Imported from Excel'},
+ imp26d5:{ts:_d(5,29),kind:'income',cat:'Donations',amount:500,member:'Luca',sponsor:'Bar Amaro',inkind:false,note:'E-transfer turned into cash',by:'Imported from Excel'},
+ imp26d6:{ts:_d(5,27),kind:'income',cat:'Donations',amount:500,member:'Calogero',sponsor:"Joseph and Mike's Barber Shop",inkind:false,note:'Cash (note dated May272027 — assumed 2026)',by:'Imported from Excel'},
+ imp26d7:{ts:_d(6,24),kind:'income',cat:'Donations',amount:500,member:'Calogero',sponsor:'Dennis Nolsaco',inkind:false,note:'E-transfer to Luca',by:'Imported from Excel'},
+ imp26d8:{ts:_d(6,25),kind:'income',cat:'Donations',amount:500,member:'Rob',sponsor:'Tony and Adriana Puzzo',inkind:false,note:'Cash given to Vito',by:'Imported from Excel'},
+ imp26e1:{ts:_d(1,19),kind:'expense',cat:'Annual Picnic - Park Fees',amount:751,member:'Vito',sponsor:null,inkind:false,note:'Park fees re-imbursed to Vito',by:'Imported from Excel'},
+ imp26e2:{ts:_d(6,9),kind:'expense',cat:'Annual Picnic - Prizes',amount:50,member:'Calogero',sponsor:null,inkind:false,note:'12 airplanes, 1 F1 kit, 20 WWE thumb wrestlers (Luca reimbursed)',by:'Imported from Excel'},
+ imp26e3:{ts:_d(6,24),kind:'expense',cat:'Annual Picnic - Prizes',amount:574.54,member:null,sponsor:null,inkind:false,note:'Walmart.ca prizes',by:'Imported from Excel'},
+ imp26e4:{ts:_d(6,24),kind:'expense',cat:'Annual Picnic - Prizes',amount:722.02,member:null,sponsor:null,inkind:false,note:'Amazon.ca prizes',by:'Imported from Excel'},
+ imp26e5:{ts:_d(5,27),kind:'expense',cat:'Picnic - Expenses',amount:90,member:null,sponsor:null,inkind:false,note:'Rechargeable megaphone',by:'Imported from Excel'},
+ imp26e6:{ts:_d(6,15),kind:'expense',cat:'Picnic - Expenses',amount:555.06,member:'Luca',sponsor:null,inkind:false,note:'Trophies and plaques (Luca paid with CC, reimbursed)',by:'Imported from Excel'},
+ imp26e7:{ts:_d(6,22),kind:'expense',cat:'Picnic - Expenses',amount:35,member:'Luca',sponsor:null,inkind:false,note:'200 paper plates x 2 (Amazon)',by:'Imported from Excel'},
+ imp26e8:{ts:_d(7,9),kind:'expense',cat:'3 Aces Merchandise',amount:800,member:null,sponsor:null,inkind:false,note:'Picnic order, cash paid to Mussa: 40 T-Shirts $680 + 1 LS 2XL $25 + 5 T 2XL $95',by:'Imported from Excel'},
+ imp26e9:{ts:_d(5,26),kind:'expense',cat:'Misc',amount:105,member:'Charlie',sponsor:null,inkind:false,note:'Threeacesitalian.com website renewal, reimbursed cash to Charlie',by:'Imported from Excel'},
+ imp26e10:{ts:_d(7,9),kind:'expense',cat:'Misc',amount:75,member:'Charlie',sponsor:null,inkind:false,note:'Threeaces.ca website renewal, reimbursed cash to Charlie',by:'Imported from Excel'}
+};
+FIN_SEED.txns=FIN_TXNS_2026;
+// Attendance register — roster and 2026 marks from the Excel Attendance sheet
+const ATT_CODES=['','P','L','AN','A','NP'];
+const ATT_SEED={"legend":"L = LATE; A = ABSENT; P = PRESENT; NP = NO PATCH; AN = ABSENT W NOTICE","roster":[{"id":"m01","name":"Charlie","hidden":false},{"id":"m02","name":"Luca","hidden":false},{"id":"m03","name":"Vito","hidden":false},{"id":"m04","name":"Steve","hidden":true},{"id":"m05","name":"Mike V.","hidden":true},{"id":"m06","name":"Rob","hidden":false},{"id":"m07","name":"Mike R.","hidden":true},{"id":"m08","name":"Luigi","hidden":true},{"id":"m09","name":"Anthony","hidden":true},{"id":"m10","name":"Rocco","hidden":true},{"id":"m11","name":"Paul","hidden":true},{"id":"m12","name":"Giancarlo","hidden":true},{"id":"m13","name":"Johnny Mustang","hidden":true},{"id":"m14","name":"Johnny","hidden":true},{"id":"m15","name":"Billy","hidden":true},{"id":"m16","name":"Calogero","hidden":false}],"baseline":{"m01":{"owed":50,"paid":0,"cash":8760},"m02":{"owed":0,"paid":0,"cash":8760},"m03":{"owed":400,"paid":0,"cash":8760},"m04":{"owed":100,"paid":100,"cash":7930},"m05":{"owed":50,"paid":150,"cash":6290},"m06":{"owed":100,"paid":0,"cash":7260},"m07":{"owed":100,"paid":0,"cash":6860},"m08":{"owed":0,"paid":0,"cash":2800},"m09":{"owed":0,"paid":0,"cash":1120},"m10":{"owed":600,"paid":200,"cash":3310},"m11":{"owed":100,"paid":0,"cash":1850},"m12":{"owed":0,"paid":0,"cash":1480},"m13":{"owed":0,"paid":0,"cash":800},"m14":{"owed":0,"paid":0,"cash":5540},"m15":{"owed":0,"paid":0,"cash":450},"m16":{"owed":0,"paid":0,"cash":1440}},"years":{"2013":{"marks":{"m01":{"m3":"P","m4":"L","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"A","m11":"P","m12":"P"},"m03":{"m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"A","m11":"P","m12":"P"},"m04":{"m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m10":{"m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m15":{"m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"A","m9":"P","m10":"A","m11":"A"}},"locked":{"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2014":{"marks":{"m01":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"L"},"m03":{"m1":"P","m2":"A","m3":"P","m4":"L","m5":"L","m6":"P","m7":"P","m8":"P","m9":"L","m10":"P","m11":"P","m12":"L"},"m04":{"m1":"P","m2":"A","m3":"L","m4":"L","m5":"A","m6":"L","m7":"P","m8":"P","m9":"P","m10":"L","m11":"P","m12":"P"},"m10":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"A","m6":"P","m7":"P","m8":"A","m9":"L","m10":"P","m11":"P","m12":"P"},"m14":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"A","m10":"P","m11":"A","m12":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2015":{"marks":{"m01":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m04":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"A","m7":"P","m8":"P","m9":"P","m10":"P","m11":"L","m12":"P"},"m05":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"A","m7":"P","m8":"P","m9":"A","m10":"P","m11":"P","m12":"P"},"m06":{"m9":"P","m10":"P","m11":"P","m12":"P"},"m07":{"m9":"P","m10":"P","m11":"P","m12":"P"},"m10":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"A","m7":"A","m8":"P","m9":"A","m10":"P","m11":"A","m12":"P"},"m11":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"A","m9":"P","m10":"P","m11":"P","m12":"P"},"m12":{"m10":"P","m11":"P","m12":"P"},"m14":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"A","m7":"P","m8":"P","m9":"AN","m10":"P","m11":"P","m12":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2016":{"marks":{"m01":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"AN","m11":"AN","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"AN","m11":"AN","m12":"P"},"m04":{"m1":"A","m2":"P","m3":"P","m4":"P","m5":"P","m6":"AN","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m05":{"m1":"L","m2":"A","m3":"P","m4":"P","m5":"P","m6":"P","m7":"AN","m8":"AN","m9":"P","m10":"L","m11":"P","m12":"L"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"AN","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m07":{"m1":"P","m2":"AN","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m10":{"m1":"P","m2":"AN","m3":"A","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"A","m10":"AN","m11":"AN","m12":"P"},"m11":{"m1":"P","m2":"P","m3":"AN","m4":"P","m5":"P","m6":"AN","m7":"P","m8":"AN","m9":"P","m10":"P","m11":"P","m12":"P"},"m12":{"m1":"P","m2":"P","m3":"AN","m4":"P","m5":"P","m6":"A","m7":"P","m8":"AN","m9":"P","m10":"P","m11":"P","m12":"AN"},"m13":{"m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m14":{"m1":"P","m2":"P","m3":"P","m4":"AN","m5":"P","m6":"A","m7":"P","m8":"P","m9":"AN","m10":"P","m11":"P","m12":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2017":{"marks":{"m01":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"AN","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"AN","m11":"P","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"AN","m7":"P","m8":"P","m9":"P","m10":"AN","m11":"P","m12":"P"},"m04":{"m1":"AN","m2":"AN","m3":"P","m4":"P","m5":"A","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m05":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"L","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m07":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m10":{"m1":"AN","m2":"AN","m3":"P","m4":"P","m5":"A","m6":"AN","m7":"P","m8":"P","m9":"P","m10":"A","m11":"AN","m12":"P"},"m11":{"m1":"P","m2":"AN","m3":"AN","m4":"P","m5":"AN","m6":"AN","m7":"P","m8":"AN","m9":"AN","m10":"A","m11":"P","m12":"P"},"m12":{"m1":"P","m2":"P","m3":"AN","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m13":{"m1":"P","m2":"P","m3":"AN","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"AN","m10":"A","m11":"AN","m12":"AN"},"m14":{"m1":"P","m2":"AN","m3":"P","m4":"P","m5":"AN","m6":"P","m7":"P","m8":"AN","m9":"AN","m10":"P","m11":"P","m12":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2018":{"marks":{"m01":{"m1":"AN","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"AN","m8":"AN","m9":"P","m10":"P","m11":"P","m12":"P"},"m04":{"m1":"AN","m2":"P","m3":"P","m4":"A","m5":"P","m6":"P","m7":"P","m8":"A","m9":"P","m10":"P","m11":"AN","m12":"P"},"m05":{"m1":"P","m2":"P","m3":"A","m4":"P","m5":"P","m6":"A","m7":"P","m8":"A","m9":"P","m10":"A","m11":"AN","m12":"P"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m07":{"m1":"AN","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m10":{"m1":"P","m2":"A","m3":"AN","m4":"A"},"m11":{"m1":"P","m2":"AN"},"m12":{"m1":"P","m2":"P","m3":"P"},"m13":{"m1":"AN","m2":"AN","m3":"AN","m4":"AN","m5":"AN","m6":"AN","m7":"AN","m8":"AN","m9":"AN","m10":"AN","m11":"AN"},"m14":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"A","m9":"P","m10":"P","m11":"P","m12":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2019":{"marks":{"m01":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"AN","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"A","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m04":{"m1":"AN","m2":"P","m3":"AN","m4":"A","m5":"P","m6":"P","m7":"A","m8":"P","m9":"AN","m10":"AN","m11":"AN","m12":"P"},"m05":{"m1":"A","m2":"A","m3":"A","m4":"A","m5":"A","m6":"A","m7":"P","m8":"P","m9":"P","m10":"AN","m11":"AN","m12":"P"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"A","m7":"P","m8":"P","m9":"P","m10":"P","m11":"AN","m12":"P"},"m07":{"m1":"AN","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m14":{"m1":"P","m2":"P","m3":"AN","m4":"A","m5":"P","m6":"A","m7":"P","m8":"P","m9":"P","m10":"A","m11":"L","m12":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2020":{"marks":{"m01":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"A","m12":"A"},"m04":{"m1":"P","m2":"AN","m3":"P","m4":"P","m5":"P","m6":"A","m7":"A","m8":"P","m9":"P","m10":"A","m11":"A","m12":"A"},"m05":{"m1":"P","m2":"AN","m3":"P","m4":"P","m5":"A","m6":"A","m7":"A","m8":"P","m9":"P","m10":"A","m11":"A","m12":"P"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m07":{"m1":"AN","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m08":{"m9":"P","m10":"P","m11":"P","m12":"P"},"m14":{"m1":"A","m2":"A","m3":"P","m4":"P","m5":"A","m6":"A","m7":"A","m8":"A","m9":"A","m10":"A","m11":"A","m12":"A"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2021":{"marks":{"m01":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m04":{"m1":"P","m2":"A","m3":"A","m4":"P","m5":"A","m6":"A","m7":"P","m8":"A","m9":"A","m10":"A","m11":"A","m12":"P"},"m05":{"m1":"P","m2":"A","m3":"P","m4":"A","m5":"A","m6":"A","m7":"P","m8":"A","m9":"A","m10":"P","m11":"A","m12":"P"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"A","m11":"P","m12":"P"},"m07":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"A","m7":"P","m8":"P","m9":"A","m10":"P","m11":"P","m12":"P"},"m08":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m14":{"m1":"A","m2":"A","m3":"A","m4":"A","m5":"A","m6":"A"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2022":{"marks":{"m01":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"A","m9":"P","m10":"P","m11":"P","m12":"P"},"m04":{"m1":"AN","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m05":{"m1":"P","m2":"A","m3":"A","m4":"A","m5":"A","m6":"P","m7":"P","m8":"A","m9":"A"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m07":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m08":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m09":{"m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m16":{"m11":"P","m12":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2023":{"marks":{"m01":{"m1":"L","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m04":{"m1":"P","m2":"P","m3":"P","m4":"A","m5":"P","m6":"P","m7":"P"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m07":{"m1":"AN","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m08":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P"},"m09":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"A"},"m16":{"m1":"AN","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2024":{"marks":{"m01":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m07":{"m1":"A","m2":"P"},"m16":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"A","m10":"P","m11":"P","m12":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2025":{"marks":{"m01":{"m1":"A","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"A"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m16":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2026":{"marks":{"m01":{"m1":"P","m2":"A","m3":"P","m4":"P","m5":"P","m6":"P"},"m02":{"m1":"P","m2":"A","m3":"P","m4":"P","m5":"P","m6":"P"},"m03":{"m1":"A","m2":"A","m3":"P","m4":"P","m5":"P","m6":"P"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"A","m5":"P","m6":"P"},"m16":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true},"notes":{"m1":"Vito: sick","m2":"Luca: in Italy","m4":"Rob: missed because of Joey hockey tryouts"}}}};
+let finYear=new Date().getFullYear(), _finInit=false;
+function finCalc(y){
+  const F=S.finance, op=F.opening;
+  if(y<op.year){ const h=(F.history||{})[String(y)];
+    return h? {hist:true, income:h.income, expenses:h.expenses, balance:h.balance, note:h.note||''} : null; }
+  const prev = y===op.year ? op.amount : (finCalc(y-1)||{}).balance||0;
+  const salesAuto=Object.values(S.sales||{}).filter(s=>!s.voided&&new Date(s.ts).getFullYear()===y)
+    .reduce((a,s)=>a+s.total,0);
+  const tx=Object.entries(F.txns||{}).map(([id,t])=>({id,...t}))
+    .filter(t=>new Date(t.ts).getFullYear()===y).sort((a,b)=>b.ts-a.ts);
+  const incCash=tx.filter(t=>t.kind==='income'&&!t.inkind).reduce((a,t)=>a+t.amount,0);
+  const inkind=tx.filter(t=>t.kind==='income'&&t.inkind).reduce((a,t)=>a+t.amount,0);
+  const expenses=tx.filter(t=>t.kind==='expense').reduce((a,t)=>a+t.amount,0);
+  const totalIn=prev+salesAuto+incCash;
+  return {prev, salesAuto, incCash, inkind, expenses, tx,
+    totalIn, balance:Math.round((totalIn-expenses)*100)/100,
+    pctSpent: totalIn>0? expenses/totalIn : 0};
+}
+function booksHTML(){
+  if(!S.finance){
+    if(!_finInit){ _finInit=true; DB.set(['finance'],FIN_SEED).then(()=>rerender()); }
+    return '<div class="empty">Opening the club books for the first time…</div>';
+  }
+  const F=S.finance, nowY=new Date().getFullYear();
+  const years=[...new Set(Object.keys(F.history||{}).map(Number)
+    .concat(Array.from({length:nowY-F.opening.year+1},(_,i)=>F.opening.year+i)))].sort();
+  if(!years.includes(finYear)) finYear=nowY;
+  const c=finCalc(finYear);
+  const yearBtns=`<div class="payrow noprint" style="flex-wrap:wrap">
+    ${years.map(y=>`<button class="${finYear===y?'on':''}" style="flex:1 1 15%"
+      onclick="finYear=${y};rerender()">${y}</button>`).join('')}</div>`;
+  if(c && c.hist){
+    return printHead('Club Books — '+finYear,'Archived year') + yearBtns + `
+      <div class="statgrid">
+        <div class="stat green"><div class="v">${fmt(c.income)}</div><div class="l">Total income (incl. carry-over)</div></div>
+        <div class="stat red"><div class="v">${fmt(c.expenses)}</div><div class="l">Expenses</div></div>
+        <div class="stat gold"><div class="v">${fmt(c.balance)}</div><div class="l">Year-end balance</div></div>
+        <div class="stat"><div class="v">${Math.round(c.expenses/c.income*100)}%</div><div class="l">Of income spent</div></div>
+      </div>
+      ${c.note?'<p class="muted">Note: '+esc(c.note)+' — the original sheet had a broken formula for this year; figures are derived from the years around it.</p>':''}
+      <p class="muted">Archived summary from the old Excel sheet. Full detail for this year stays in the workbook.</p>
+      ${yoyHTML(years)}`;
+  }
+  const catSum=(kind,cat)=>c.tx.filter(t=>t.kind===kind&&t.cat===cat&&!t.inkind).reduce((a,t)=>a+t.amount,0);
+  // like the Budget Report: EVERY category shown, even at $0
+  const hidCats=F.catsHidden||{income:[],expense:[]};
+  const incCats=[...new Set((F.cats&&F.cats.income||FIN_SEED.cats.income)
+    .filter(x=>!(hidCats.income||[]).includes(x))
+    .concat(c.tx.filter(t=>t.kind==='income').map(t=>t.cat)))];
+  const expCats=[...new Set((F.cats&&F.cats.expense||FIN_SEED.cats.expense)
+    .filter(x=>!(hidCats.expense||[]).includes(x))
+    .concat(c.tx.filter(t=>t.kind==='expense').map(t=>t.cat)))];
+  // sponsor quota board — driven by the member ROSTER (plus anyone credited)
+  const target=F.sponsorTarget||500;
+  const secured={};
+  c.tx.filter(t=>t.kind==='income'&&t.cat==='Donations'&&t.member).forEach(t=>{
+    secured[t.member]=(secured[t.member]||0)+t.amount; });
+  const roster=(S.attendance&&S.attendance.roster||ATT_SEED.roster).filter(r=>!r.hidden).map(r=>r.name);
+  const boardNames=[...new Set(roster.concat(Object.keys(secured)))];
+  // entries grouped by category, subtotal per group
+  const groups={};
+  c.tx.forEach(t=>{ (groups[t.cat]=groups[t.cat]||[]).push(t); });
+  const entriesHTML=Object.entries(groups).map(([cat,list])=>{
+    const sub=list.reduce((a,t)=>a+(t.inkind?0:t.amount),0);
+    const subInk=list.reduce((a,t)=>a+(t.inkind?t.amount:0),0);
+    const kind=list[0].kind;
+    return `<div class="card" style="padding:10px 14px;background:var(--panel2)">
+      <b>${esc(cat)}</b><span style="float:right"><span class="${kind==='income'?'pos':'neg'}"><b>${kind==='income'?'+':'−'}${fmt(sub)}</b></span>${subInk>0?` <span class="muted">+ ${fmt(subInk)} in-kind</span>`:''}</span></div>`+
+      list.map(t=>`<div class="card" style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+        <div>${t.inkind?`<b class="goldtxt">🎁 ${fmt(t.amount)} value</b> <span class="memberflag">IN-KIND — not income</span>`:`<b class="${t.kind==='income'?'pos':'neg'}">${t.kind==='income'?'+':'−'}${fmt(t.amount)}</b>`}
+          <span class="muted">${new Date(t.ts).toLocaleDateString('en-CA')}</span>
+          ${t.sponsor?' · <b>'+esc(t.sponsor)+'</b>':''}
+          <div class="muted">${t.member?(t.kind==='income'?'secured by ':'reimbursed to ')+esc(t.member):''}${t.member&&t.note?' · ':''}${t.note?esc(t.note):''}</div></div>
+        <span style="flex:0 0 auto" class="noprint">${t.invoice?`<button class="btn small gray" onclick="viewInvoice('${t.id}')">📎</button>`:''}
+        <button class="btn small gray" onclick="finEntryModal('${t.id}')">✎</button></span>
+      </div>`).join('');
+  }).join('');
+  return printHead('Club Books — '+finYear, 'Cash flow & annual report') + yearBtns + `
+    ${!F.imported2026 && finYear===2026 ? `<div class="card" style="border-color:var(--gold)">
+      <b>📥 One-time import available</b>
+      <p class="muted">I parsed every 2026 cell note from your Excel sheet — 8 donations ($4,000, with who secured each) and 10 expenses ($3,757.62, itemized). Load them as real entries?</p>
+      <button class="btn" onclick="importFin2026()">Import the 2026 entries from the Excel notes</button></div>`:''}
+    <div class="rowbtns noprint">
+      <button class="btn" onclick="finEntryModal(null)">＋ Add income / expense entry</button>
+      <button class="btn gray" style="flex:0 0 auto" onclick="manageCatsModal()">⚙ Categories</button>
+    </div>
+    <div style="height:12px"></div>
+    <h2>Total income</h2>
+    <div class="card"><table>
+      <tr><th>Item</th><th class="r">Amount</th></tr>
+      ${incCats.map(cat=>`<tr><td>${esc(cat)}</td><td class="r">${fmt(catSum('income',cat))}</td></tr>`).join('')}
+      <tr><td>Picnic + Apparel Sales — 🛒 live from this app</td><td class="r pos">${fmt(c.salesAuto)}</td></tr>
+      <tr><td>Previous Balance (carried from ${finYear-1})</td><td class="r">${fmt(c.prev)}</td></tr>
+      <tr><td><b>TOTAL INCOME</b></td><td class="r"><b>${fmt(c.totalIn)}</b></td></tr>
+      ${c.inkind>0.005?`<tr><td class="muted">In-kind donations (tracked, not in balance)</td><td class="r muted">${fmt(c.inkind)}</td></tr>`:''}
+    </table></div>
+    <h2>Total expenses</h2>
+    <div class="card"><table>
+      <tr><th>Item</th><th class="r">Amount</th></tr>
+      ${expCats.map(cat=>`<tr><td>${esc(cat)}</td><td class="r ${catSum('expense',cat)>0?'':'dim'}">${fmt(catSum('expense',cat))}</td></tr>`).join('')}
+      <tr><td><b>TOTAL EXPENSES</b></td><td class="r"><b>${fmt(c.expenses)}</b></td></tr>
+    </table></div>
+    <h2>Summary</h2>
+    <div class="statgrid">
+      <div class="stat green"><div class="v">${fmt(c.totalIn)}</div><div class="l">Total annual income</div></div>
+      <div class="stat red"><div class="v">${fmt(c.expenses)}</div><div class="l">Total annual expenses</div></div>
+      <div class="stat gold"><div class="v">${fmt(c.balance)}</div><div class="l">Balance</div></div>
+      <div class="stat"><div class="v">${Math.round(c.pctSpent*100)}%</div><div class="l">Percentage of income spent</div></div>
+    </div>
+    <h2>Sponsor rule — every member secures a ${fmt(target)} sponsor, or self-sponsors</h2>
+    <div class="card"><table><tr><th>Member</th><th class="r">Secured this year</th><th class="r">Status</th></tr>
+      ${boardNames.map(m=>{ const got=secured[m]||0;
+        return `<tr><td>${esc(m)}</td><td class="r">${fmt(got)}</td>
+          <td class="r ${got>=target?'pos':'neg'}"><b>${got>=target?'✔ covered':'owes '+fmt(target-got)}</b></td></tr>`;}).join('')}
+    </table></div>
+    <p class="muted">A donation counts toward whoever is picked as "secured by". Self-sponsoring: record a donation with sponsor "(Self)" and pick the member.</p>
+    <h2>Entries — ${finYear} (grouped by category)</h2>
+    ${entriesHTML||'<div class="empty">No entries yet for '+finYear+'. Sales income flows in automatically; add donations and expenses with the button above.</div>'}
+    ${yoyHTML(years)}
+    <div class="rowbtns noprint">
+      <button class="btn gray" onclick="window.print()">🖨 Print / Save as PDF</button>
+      <button class="btn gray" onclick="exportBooksCSV()">⬇ Books CSV</button>
+    </div>`;
+}
+async function importFin2026(){
+  for(const [id,t] of Object.entries(FIN_TXNS_2026)){
+    await DB.set(['finance','txns',id], t);
+  }
+  await DB.set(['finance','imported2026'], true);
+  toast('2026 entries imported from the Excel notes'); rerender();
+}
+function yoyHTML(years){
+  return `<h2>Year over year</h2><div class="card"><table>
+    <tr><th>Year</th><th class="r">Total income*</th><th class="r">Expenses</th><th class="r">Balance</th></tr>
+    ${years.map(y=>{ const c=finCalc(y); if(!c) return '';
+      return `<tr ${y===finYear?'style="font-weight:700"':''}><td>${y}${c.hist&&c.note?' †':''}</td>
+        <td class="r">${fmt(c.hist?c.income:c.totalIn)}</td><td class="r">${fmt(c.expenses)}</td>
+        <td class="r ${y===finYear?'goldtxt':''}">${fmt(c.balance)}</td></tr>`;}).join('')}
+    </table></div>
+    <p class="muted">* includes the balance carried forward, same as the old sheet. † reconstructed year.</p>`;
+}
+function finEntryModal(id){
+  const F=S.finance;
+  const t=id? {...F.txns[id]} : {kind:'expense', cat:'', amount:'', ts:Date.now(), member:'', sponsor:'', inkind:false, note:''};
+  window._fe={id, kind:t.kind}; window._feInv=t.invoice||null; window._feInvNew=null;
+  const hidC=(F.catsHidden||{})[t.kind==='income'?'income':'expense']||[];
+  const cats=((F.cats||FIN_SEED.cats)[t.kind==='income'?'income':'expense']||[]).filter(x=>!hidC.includes(x)||x===t.cat);
+  const members=[...new Set(
+    (S.attendance&&S.attendance.roster||ATT_SEED.roster).filter(r=>!r.hidden).map(r=>r.name)
+    .concat(Object.values(S.users||{}).filter(u=>u.active!==false).map(u=>u.name)))];
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>${id?'Edit':'New'} Book Entry</h3>
+    <label>Type</label>
+    <div class="payrow">
+      <button id="feInc" class="${t.kind==='income'?'on':''}" onclick="feKind('income')">Income</button>
+      <button id="feExp" class="${t.kind!=='income'?'on':''}" onclick="feKind('expense')">Expense</button>
+    </div>
+    <label>Category</label>
+    <select id="fe_cat" onchange="if(this.value==='__new'){const i=document.createElement('input');i.id='fe_cat';i.placeholder='New category name';this.replaceWith(i);i.focus();}">
+      ${t.cat?'':'<option value="" selected disabled>Pick a category…</option>'}
+      ${cats.map(x=>`<option ${x===t.cat?'selected':''}>${esc(x)}</option>`).join('')}
+      ${t.cat&&!cats.includes(t.cat)?`<option selected>${esc(t.cat)}</option>`:''}
+      <option value="__new">＋ New category…</option>
+    </select>
+    <label id="fe_amtLab">${t.inkind?'Value of the item $ (not added to income)':'Amount $'}</label>
+    <input id="fe_amt" type="text" inputmode="decimal" value="${t.amount}">
+    <label>Date</label>
+    <input id="fe_date" type="date" value="${dstr(t.ts)}">
+    <div id="feIncOnly" style="display:${t.kind==='income'?'block':'none'}">
+      <label>Sponsor / source (e.g. "MTF Group")</label>
+      <input id="fe_sponsor" value="${esc(t.sponsor||'')}">
+      <label>What did they give?</label>
+      <div class="payrow">
+        <button id="feCash" class="${t.inkind?'':'on'}" onclick="feInkind(false)">💵 Cash / cheque / e-transfer</button>
+        <button id="fe_inkind" class="${t.inkind?'on':''}" onclick="feInkind(true)">🎁 In-kind (an item)</button>
+      </div>
+      <div id="feInkNote" class="muted" style="display:${t.inkind?'block':'none'};margin:2px 0 8px">
+        In-kind = they donated an item (a TV, a gift card…), not money. The value counts toward their
+        sponsor quota, but it is <b>never added to income or the club balance</b>.</div>
+    </div>
+    <label id="fe_memLab">${t.kind==='income'?'Secured / collected by (counts toward their sponsor quota)':'Paid to / reimbursed to (optional)'}</label>
+    <select id="fe_member"><option value="">—</option>
+      ${members.map(m=>`<option ${t.member===m?'selected':''}>${esc(m)}</option>`).join('')}</select>
+    <label>Invoice / receipt (optional — photo, PDF or Word file)</label>
+    <img id="feInvPrev" src="${t.invoice&&t.invoice.startsWith('data:')?t.invoice:''}" style="max-height:130px;border-radius:8px;display:${t.invoice&&t.invoice.startsWith('data:')?'block':'none'};margin:4px 0">
+    <div id="feInvName" class="muted" style="display:${t.invoice&&String(t.invoice).startsWith('file:')?'block':'none'};margin:4px 0">📎 Attachment saved with this entry</div>
+    <div class="rowbtns">
+      <button class="btn gray" type="button" onclick="$('feInvFile').click()">📎 Attach photo / PDF / Word</button>
+      <button class="btn gray" type="button" onclick="window._feInv=null;window._feInvNew=null;$('feInvPrev').style.display='none';$('feInvName').style.display='none';toast('Invoice removed from this entry')">Remove</button>
+    </div>
+    <input type="file" id="feInvFile" accept="image/*,.pdf,.doc,.docx,application/pdf" style="display:none" onchange="feInvoicePick(this)">
+    <label>Note (what/why — like your old cell notes)</label>
+    <input id="fe_note" value="${esc(t.note||'')}">
+    <div style="height:12px"></div>
+    <button class="btn" onclick="saveFinEntry()">✓ Save Entry</button>
+    ${id?`<div style="height:8px"></div><button class="btn red" onclick="if(confirm('Delete this entry?'))DB.set(['finance','txns','${id}'],null).then(()=>{closeModal();rerender();})">Delete entry</button>`:''}`);
+}
+function feKind(k){
+  window._fe.kind=k;
+  $('feInc').classList.toggle('on',k==='income');
+  $('feExp').classList.toggle('on',k!=='income');
+  $('feIncOnly').style.display=k==='income'?'block':'none';
+  $('fe_memLab').textContent=k==='income'?'Secured / collected by (counts toward their sponsor quota)':'Paid to / reimbursed to (optional)';
+  // reload category options for the kind
+  const hidK=((S.finance.catsHidden||{})[k==='income'?'income':'expense'])||[];
+  const cats=((S.finance.cats||FIN_SEED.cats)[k==='income'?'income':'expense']||[]).filter(x=>!hidK.includes(x));
+  const sel=$('fe_cat');
+  if(sel && sel.tagName==='SELECT'){
+    sel.innerHTML='<option value="" selected disabled>Pick a category…</option>'
+      +cats.map(x=>`<option>${esc(x)}</option>`).join('')+'<option value="__new">＋ New category…</option>';
+  }
+}
+function feInkind(ink){
+  $('feCash').classList.toggle('on',!ink);
+  $('fe_inkind').classList.toggle('on',ink);
+  $('feInkNote').style.display=ink?'block':'none';
+  $('fe_amtLab').textContent=ink?'Value of the item $ (not added to income)':'Amount $';
+}
+async function saveFinEntry(){
+  const k=window._fe.kind;
+  let cat=$('fe_cat').value.trim(); if(cat==='__new') cat='';
+  if(!cat){ toast('Pick or type a category',1); return; }
+  const amt=parseFloat(String($('fe_amt').value).replace(/[^0-9.]/g,''))||0;
+  if(amt<=0){ toast('Enter the amount',1); return; }
+  const d=$('fe_date').value;
+  const cats=(S.finance.cats||FIN_SEED.cats)[k==='income'?'income':'expense']||[];
+  if(!cats.includes(cat)) await DB.set(['finance','cats',k==='income'?'income':'expense'],cats.concat(cat));
+  const t={ts: d? new Date(d+'T12:00').getTime():Date.now(), kind:k, cat,
+    amount:Math.round(amt*100)/100,
+    member:$('fe_member').value||null,
+    sponsor:k==='income'?($('fe_sponsor').value.trim()||null):null,
+    inkind:k==='income'?$('fe_inkind').classList.contains('on'):false,
+    note:$('fe_note').value.trim()||null, by:meU().name};
+  let inv=window._feInv||null;
+  if(window._feInvNew){          // a new photo/PDF/Word file → separate file store
+    const fid=newId();
+    try{ await fileSave(fid, window._feInvNew); inv='file:'+fid; }
+    catch(e){ toast('Could not save the attachment — check the connection',1); return; }
+  }
+  t.invoice=inv;
+  await DB.set(['finance','txns', window._fe.id||newId()], t);
+  closeModal(); toast('Entry saved'); rerender();
+}
+function exportBooksCSV(){
+  const rows=[['Date','Type','Category','Amount','In-Kind','Sponsor/Source','Member','Note','Recorded By']];
+  Object.values(S.finance.txns||{}).sort((a,b)=>a.ts-b.ts).forEach(t=>
+    rows.push([new Date(t.ts).toLocaleDateString('en-CA'),t.kind,t.cat,t.amount,
+      t.inkind?'Y':'',t.sponsor||'',t.member||'',t.note||'',t.by||'']));
+  dl('three-aces-books.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'));
+}
+
+function manageCatsModal(){
+  const F=S.finance, hid=F.catsHidden||{income:[],expense:[]};
+  const sec=(kind,label)=>{
+    const cats=(F.cats&&F.cats[kind])||[];
+    return `<h2 style="margin-top:14px">${label} categories</h2>`+
+      cats.map((cat,i)=>{
+        const h=(hid[kind]||[]).includes(cat);
+        return `<div class="cartline"><div class="d"><span id="mc_${kind}_${i}" ${h?'class="muted"':''}>${esc(cat)}${h?' (hidden)':''}</span></div>
+          <span style="flex:0 0 auto;white-space:nowrap">
+            <button class="btn small gray" ${i===0?'disabled style="opacity:.3"':''} onclick="catMove('${kind}',${i},-1)">▲</button>
+            <button class="btn small gray" ${i===cats.length-1?'disabled style="opacity:.3"':''} onclick="catMove('${kind}',${i},1)">▼</button>
+            <button class="btn small gray" onclick="catRename('${kind}',${i})">✎</button>
+            <button class="btn small gray" onclick="catHide('${kind}',${i},${h?'false':'true'})">${h?'show':'hide'}</button>
+            <button class="btn small red" onclick="catDelete('${kind}',${i})">🗑</button>
+          </span></div>`;
+      }).join('')+
+      `<input id="mcNew_${kind}" placeholder="Type the new ${label.toLowerCase()} category name" style="margin-top:8px">
+      <button class="btn gray" onclick="catAdd('${kind}')">＋ Add ${label.toLowerCase()} category</button>`;
+  };
+  openModal(`<h3><button class="x" onclick="closeModal();rerender()">✕</button>⚙ Manage income &amp; expense categories</h3>
+    <p class="muted">▲▼ set the order they appear in the report and the entry form. Hide what no longer applies — it disappears from the report rows and the entry form, but any old entries keep showing with their amounts. Rename updates every past entry too. Delete only works if a category was never used.</p>
+    ${sec('income','Income')}${sec('expense','Expense')}
+    <div style="height:10px"></div>
+    <button class="btn" onclick="closeModal();rerender()">Done</button>`);
+}
+async function catAdd(kind){
+  const v=$('mcNew_'+kind).value.trim();
+  if(!v){ toast('Type the category name',1); return; }
+  const cats=[...(S.finance.cats[kind]||[])];
+  if(cats.includes(v)){ toast('That category already exists',1); return; }
+  await DB.set(['finance','cats',kind],cats.concat(v));
+  toast('Category added'); manageCatsModal();
+}
+async function catMove(kind,i,dir){
+  const cats=[...S.finance.cats[kind]]; const j=i+dir;
+  if(j<0||j>=cats.length) return;
+  [cats[i],cats[j]]=[cats[j],cats[i]];
+  await DB.set(['finance','cats',kind],cats);
+  manageCatsModal();
+}
+async function catHide(kind,i,hide){
+  const cat=S.finance.cats[kind][i];
+  let list=[...(((S.finance.catsHidden||{})[kind])||[])];
+  if(hide==='true'||hide===true){ if(!list.includes(cat)) list.push(cat); }
+  else list=list.filter(x=>x!==cat);
+  await DB.set(['finance','catsHidden',kind],list);
+  manageCatsModal();
+}
+async function catDelete(kind,i){
+  const cat=S.finance.cats[kind][i];
+  if(Object.values(S.finance.txns||{}).some(t=>t.cat===cat)){
+    toast('"'+cat+'" has entries — hide it instead',1); return; }
+  if(!confirm('Delete category "'+cat+'"? (It was never used.)')) return;
+  await DB.set(['finance','cats',kind],S.finance.cats[kind].filter((x,j)=>j!==i));
+  await DB.set(['finance','catsHidden',kind],(((S.finance.catsHidden||{})[kind])||[]).filter(x=>x!==cat));
+  manageCatsModal();
+}
+function catRename(kind,i){
+  const cat=S.finance.cats[kind][i];
+  const el=$('mc_'+kind+'_'+i);
+  el.outerHTML=`<span style="display:flex;gap:6px;align-items:center"><input id="mcEdit" value="${esc(cat)}">
+    <button class="btn small" onclick="catRenameSave('${kind}',${i})">✓</button></span>`;
+  $('mcEdit').focus();
+}
+async function catRenameSave(kind,i){
+  const old=S.finance.cats[kind][i], nv=$('mcEdit').value.trim();
+  if(!nv){ toast('Name required',1); return; }
+  const cats=[...S.finance.cats[kind]]; cats[i]=nv;
+  await DB.set(['finance','cats',kind],cats);
+  const hid=(((S.finance.catsHidden||{})[kind])||[]);
+  if(hid.includes(old)) await DB.set(['finance','catsHidden',kind],hid.map(x=>x===old?nv:x));
+  for(const [id,tx] of Object.entries(S.finance.txns||{}))
+    if(tx.cat===old) await DB.set(['finance','txns',id,'cat'],nv);
+  toast('Renamed — all past entries updated'); manageCatsModal();
+}
+function feInvoicePick(inp){
+  const f=inp.files&&inp.files[0]; if(!f) return;
+  if(!(f.type||'').startsWith('image/')){
+    // PDF / Word / any document — stored as-is (no compression possible)
+    if(f.size>4*1024*1024){ toast('File too big — keep it under 4 MB, or take a photo of it instead',1); inp.value=''; return; }
+    const rd=new FileReader();
+    rd.onload=()=>{
+      window._feInvNew={name:f.name||'invoice', type:f.type||'application/octet-stream', data:rd.result};
+      const pv=$('feInvPrev'); if(pv) pv.style.display='none';
+      const nm=$('feInvName'); if(nm){ nm.textContent='📄 '+f.name+' — attached'; nm.style.display='block'; }
+      toast('Invoice file attached');
+    };
+    rd.readAsDataURL(f); inp.value=''; return;
+  }
+  const rd=new FileReader();
+  rd.onload=()=>{
+    const img=new Image();
+    img.onload=()=>{
+      let mx=1200,q=0.8,data='';
+      for(let k=0;k<3;k++){
+        const sc=Math.min(1,mx/Math.max(img.width,img.height));
+        const cv=document.createElement('canvas');
+        cv.width=Math.max(1,Math.round(img.width*sc)); cv.height=Math.max(1,Math.round(img.height*sc));
+        cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+        data=cv.toDataURL('image/jpeg',q);
+        if(data.length<450000) break;
+        mx*=0.7; q=0.7;
+      }
+      window._feInvNew={name:f.name||'photo.jpg', type:'image/jpeg', data};
+      const nm=$('feInvName'); if(nm) nm.style.display='none';
+      const pv=$('feInvPrev'); if(pv){ pv.src=data; pv.style.display='block'; }
+      toast('Invoice photo attached');
+    };
+    img.src=rd.result;
+  };
+  rd.readAsDataURL(f); inp.value='';
+}
+async function viewInvoice(id){
+  const tx=S.finance.txns[id];
+  if(!tx||!tx.invoice) return;
+  const head=`<h3><button class="x" onclick="closeModal()">✕</button>📎 ${esc(tx.cat)} — ${fmt(tx.amount)} · ${new Date(tx.ts).toLocaleDateString('en-CA')}</h3>`;
+  const note=tx.note?'<p class="muted">'+esc(tx.note)+'</p>':'';
+  if(String(tx.invoice).startsWith('data:')){   // older photo entries — stored inline
+    openModal(head+`<img src="${tx.invoice}" style="width:100%;border-radius:10px">`+note); return;
+  }
+  openModal(head+'<div class="empty">Loading the attachment…</div>');
+  const fobj=await fileLoad(String(tx.invoice).slice(5));
+  if(!fobj||!fobj.data){ openModal(head+'<div class="empty">Could not load the attachment — check the connection and try again.</div>'+note); return; }
+  const dl=`<a class="btn gray" style="display:block;text-align:center;text-decoration:none;margin-top:8px" href="${fobj.data}" download="${esc(fobj.name||'invoice')}">⬇ Download ${esc(fobj.name||'file')}</a>`;
+  if((fobj.type||'').startsWith('image/'))
+    openModal(head+`<img src="${fobj.data}" style="width:100%;border-radius:10px">`+note+dl);
+  else if(fobj.type==='application/pdf')
+    openModal(head+`<embed src="${fobj.data}" type="application/pdf" style="width:100%;height:60vh;border-radius:10px"><p class="muted noprint">If the preview is blank on this phone, use Download below.</p>`+note+dl);
+  else
+    openModal(head+`<div class="card">📄 <b>${esc(fobj.name||'document')}</b><br><span class="muted">Word / document file — download it to open.</span></div>`+note+dl);
+}
+
+/* --------------------------- ATTENDANCE ------------------------------------
+   Monthly meeting register, with the FULL 2013-2026 history imported from the
+   Excel sheet. Months are entered via dropdowns and SAVED (locked) — changing
+   a saved month requires the admin's PIN.                                    */
+let attYear=new Date().getFullYear(), attShowPast=false, _attInit=false;
+const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function attRoster(){ return (S.attendance&&S.attendance.roster)||ATT_SEED.roster; }
+function attVisible(){ return attRoster().filter(r=>!r.hidden); }
+function attendHTML(){
+  if(!S.attendance){
+    if(!_attInit){ _attInit=true; DB.set(['attendance'],ATT_SEED).then(()=>rerender()); }
+    return '<div class="empty">Opening the attendance register…</div>';
+  }
+  const A=S.attendance;
+  if(!A.baseline){   // upgraded from the first, 2026-only version
+    return `<div class="card" style="border-color:var(--gold)">
+      <b>📥 Full history available</b>
+      <p class="muted">I parsed the complete Excel attendance record — every month from 2013 to 2026 for all 16 members, plus the fees/cash totals. Load it? (Any marks you already entered for 2026 are kept.)</p>
+      <button class="btn" onclick="attUpgrade()">Import the full 2013–2026 register</button></div>`;
+  }
+  const nowY=new Date().getFullYear();
+  const years=[...new Set(Object.keys(A.years||{}).map(Number).concat([nowY]))].sort();
+  if(attYear!=='ALL' && !years.includes(attYear)) attYear=nowY;
+  const cls=c=>c==='P'?'attP':c==='L'?'attL':c==='A'?'attA':c==='AN'?'attAN':c==='NP'?'attNP':'dim';
+  const vis=attVisible(), hid=attRoster().filter(r=>r.hidden);
+  // lifetime totals computed from EVERY imported year + baseline fees/cash
+  const life={};
+  attRoster().forEach(r=>life[r.id]={P:0,L:0,AN:0,A:0,NP:0});
+  Object.values(A.years||{}).forEach(yy=>Object.entries(yy.marks||{}).forEach(([mid,mm])=>{
+    if(!life[mid]) return;
+    Object.values(mm).forEach(v=>{ if(life[mid][v]!==undefined) life[mid][v]++; });
+  }));
+  const bl=A.baseline||{};
+  const tot={P:0,L:0,AN:0,A:0,NP:0,owed:0,paid:0,cash:0};
+  attRoster().forEach(r=>{ const c=life[r.id], b=bl[r.id]||{owed:0,paid:0,cash:0};
+    ['P','L','AN','A','NP'].forEach(k=>tot[k]+=c[k]); tot.owed+=b.owed; tot.paid+=b.paid; tot.cash+=b.cash; });
+  const yearBtns=`<div class="payrow noprint" style="flex-wrap:wrap">
+      ${years.map(y=>`<button class="${attYear===y?'on':''}" style="flex:1 1 12%;padding:9px 4px" onclick="attYear=${y};rerender()">${y}</button>`).join('')}
+      <button class="${attYear==='ALL'?'on':''}" style="flex:1 1 12%;padding:9px 4px" onclick="attYear='ALL';rerender()">All</button>
+    </div>`;
+  let gridSection;
+  if(attYear==='ALL'){
+    // the FULL register, newest year first — read-only, includes past members
+    gridSection=`<p class="muted">The whole register, every year — past members included, so nobody is missed.
+      Read-only here: pick a single year above to enter or change a month. ${esc(A.legend||'')}</p>`+
+      years.slice().reverse().map(yr=>{
+        const Yy=(A.years||{})[String(yr)]||{}; const mk=Yy.marks||{}, nt=Yy.notes||{};
+        const rows=attRoster().filter(r=>mk[r.id]&&Object.values(mk[r.id]).some(v=>v));
+        if(!rows.length) return '';
+        return `<h2>${yr}</h2><div class="gridwrap"><table class="stockgrid">
+          <tr><th class="itc">Member</th>${MONTHS.map((m,i)=>`<th class="sz">${m}${nt['m'+(i+1)]?' ✱':''}</th>`).join('')}<th class="r">P</th></tr>
+          ${rows.map(r=>{ const row=mk[r.id]||{}; const p=Object.values(row).filter(v=>v==='P').length;
+            return `<tr><td class="itc">${esc(r.name)}${r.hidden?' <span class="muted">(past)</span>':''}</td>${MONTHS.map((m,i)=>{
+              const v=row['m'+(i+1)]||''; return `<td class="c attcell ${cls(v)}">${v||'·'}</td>`;}).join('')}<td class="r"><b>${p}</b></td></tr>`;}).join('')}
+        </table></div>`+
+        (Object.keys(nt||{}).length?`<div class="card">${MONTHS.map((m,i)=>nt['m'+(i+1)]?
+          `<div style="padding:4px 0"><b>${m}</b> — ${esc(nt['m'+(i+1)])}</div>`:'').join('')}</div>`:'');
+      }).join('');
+  } else {
+    const Y=(A.years||{})[String(attYear)]||{marks:{},notes:{},locked:{}};
+    const marks=Y.marks||{}, notes=Y.notes||{}, locked=Y.locked||{};
+    gridSection=`<p class="muted">Tap a month to enter or view it. 🔒 = saved &amp; locked — changing it asks for your PIN.
+    ${esc(A.legend||'')}</p>
+    <div class="gridwrap"><table class="stockgrid">
+      <tr><th class="itc">Member</th>${MONTHS.map((m,i)=>
+        `<th class="sz" onclick="attMonthOpen(${i+1})">${m}${notes['m'+(i+1)]?' ✱':''}${locked['m'+(i+1)]?' 🔒':''}<br><span style="font-weight:400;font-size:9px;opacity:.75">${meetDate(attYear,i+1).getDate()}</span></th>`).join('')}<th class="r">P</th></tr>
+      ${vis.map(r=>{
+        const row=marks[r.id]||{};
+        const pCount=Object.values(row).filter(v=>v==='P').length;
+        return `<tr><td class="itc">${esc(r.name)}</td>${MONTHS.map((m,i)=>{
+          const v=row['m'+(i+1)]||'';
+          return `<td class="c attcell ${cls(v)}" onclick="attMonthOpen(${i+1})">${v||'·'}</td>`;
+        }).join('')}<td class="r"><b>${pCount}</b></td></tr>`;
+      }).join('')}
+    </table></div>
+    ${Object.keys(notes).length?`<h2>Meeting notes — ${attYear}</h2>
+      <div class="card">${MONTHS.map((m,i)=>notes['m'+(i+1)]?
+        `<div style="padding:4px 0"><b>${m}</b> — ${esc(notes['m'+(i+1)])}</div>`:'').join('')}</div>`:''}
+    <h2>📅 Meeting dates — ${attYear}</h2>
+    <div class="card"><table>
+      <tr><th>Month</th><th>Meeting</th><th class="r noprint"></th></tr>
+      ${MONTHS.map((m,i)=>{ const ov=!!((Y.mdates||{})['m'+(i+1)]); const d=meetDate(attYear,i+1);
+        return `<tr><td>${m}</td><td>${d.toLocaleDateString('en-CA',{weekday:'short',month:'short',day:'numeric'})}${ov?' <span class="memberflag">changed</span>':''}</td>
+          <td class="r noprint"><button class="btn small gray" onclick="attMeetEdit(${i+1})">✎</button></td></tr>`;}).join('')}
+    </table></div>
+    <p class="muted">Meetings are the <b>last Wednesday of the month</b> — the small number under each month above is the meeting day.
+    If a meeting moves, tap ✎ (asks for your PIN); members see the change in their Club tab.</p>`;
+  }
+  const lifeRows=attRoster().filter(r=>!r.hidden||attShowPast);
+  return printHead('Attendance — '+(attYear==='ALL'?'all years':attYear),'Monthly meeting register') + yearBtns + gridSection + `
+    <h2>Lifetime record — 2013 to today</h2>
+    ${hid.length?`<button class="btn small gray noprint" style="margin-bottom:8px" id="attPastBtn"
+      onclick="attShowPast=!attShowPast;rerender()">${attShowPast?'▾ Hide past members':'▸ Show past members ('+hid.length+')'}</button>`:''}
+    <div class="gridwrap"><table class="stockgrid">
+      <tr><th class="itc">Member</th><th class="r">P</th><th class="r">L</th><th class="r">AN</th><th class="r">A</th><th class="r">NP</th>
+        <th class="r">Fees owed</th><th class="r">Fees paid</th><th class="r">Cash contributed</th></tr>
+      ${lifeRows.map(r=>{
+        const c=life[r.id]||{P:0,L:0,AN:0,A:0,NP:0}, b=bl[r.id]||{owed:0,paid:0,cash:0};
+        return `<tr ${r.hidden?'style="opacity:.55"':''}><td class="itc">${esc(r.name)}${r.hidden?' <span class="muted">(past)</span>':''}</td>
+          <td class="r attP">${c.P}</td><td class="r">${c.L}</td><td class="r">${c.AN}</td><td class="r">${c.A}</td><td class="r">${c.NP}</td>
+          <td class="r">${fmt(b.owed)}</td><td class="r">${fmt(b.paid)}</td><td class="r"><b>${fmt(b.cash)}</b></td></tr>`;
+      }).join('')}
+      <tr class="totrow"><td class="itc">TOTAL${hid.length&&!attShowPast?' (incl. past)':''}</td><td class="c">${tot.P}</td><td class="c">${tot.L}</td><td class="c">${tot.AN}</td>
+        <td class="c">${tot.A}</td><td class="c">${tot.NP}</td><td class="r">${fmt(tot.owed)}</td><td class="r">${fmt(tot.paid)}</td><td class="r">${fmt(tot.cash)}</td></tr>
+    </table></div>
+    <p class="muted">Attendance counts are computed live from the whole record (the Excel totals block stopped at Dec 31 2024).
+    Fees owed / paid / cash come from the sheet — monthly fees ($50, later $80) ran from 2013 until they were stopped in May 2024.
+    The TOTAL row always includes past members.</p>
+    <h2>Manage the register</h2>
+    <div class="card">
+      <p class="muted" style="margin-top:0">Active members</p>
+      ${vis.map(r=>`<span class="sizebtn" style="cursor:default;margin:3px">${esc(r.name)}
+        <a href="#" class="noprint" style="color:var(--muted);text-decoration:none;margin-left:6px"
+          onclick="attSetHidden('${r.id}',true);return false">hide</a></span>`).join('')}
+      ${hid.length?`<p class="muted">Past members — hidden from the grid and sponsor board, history kept. Tap show to bring one back.</p>
+      ${hid.map(r=>`<span class="sizebtn out" style="cursor:default;margin:3px">${esc(r.name)}
+        <a href="#" class="noprint" style="color:var(--gold);text-decoration:none;margin-left:6px"
+          onclick="attSetHidden('${r.id}',false);return false">show</a></span>`).join('')}`:''}
+      <div class="rowbtns noprint" style="margin-top:10px">
+        <input id="attNewName" placeholder="New member name">
+        <button class="btn gray" style="flex:0 0 auto" onclick="attAdd()">＋ Add</button>
+      </div>
+    </div>
+    <button class="btn gray noprint" onclick="window.print()">🖨 Print / Save as PDF</button>`;
+}
+async function attUpgrade(){
+  const old=S.attendance||{};
+  const seed=JSON.parse(JSON.stringify(ATT_SEED));
+  // keep anything already entered for 2026 that the import doesn't cover
+  const old26=((old.years||{})['2026'])||{};
+  const seed26=seed.years['2026'];
+  Object.entries(old26.marks||{}).forEach(([mid,mm])=>{
+    seed26.marks[mid]=Object.assign({}, seed26.marks[mid]||{}, mm); });
+  Object.assign(seed26.notes=seed26.notes||{}, old26.notes||{});
+  Object.assign(seed26.locked=seed26.locked||{}, old26.locked||{});
+  await DB.set(['attendance'],seed);
+  toast('Full 2013–2026 register imported'); rerender();
+}
+function attMonthOpen(month){
+  const Y=((S.attendance.years||{})[String(attYear)])||{};
+  if((Y.locked||{})['m'+month]){
+    pinConfirm(MONTHS[month-1]+' '+attYear+' is saved and locked. Enter your PIN to change it.',
+      ()=>attMonthEditor(month));
+  } else attMonthEditor(month);
+}
+function attMonthEditor(month){
+  const Y=((S.attendance.years||{})[String(attYear)])||{marks:{},notes:{}};
+  const marks=Y.marks||{}, note=(Y.notes||{})['m'+month]||'';
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>${MONTHS[month-1]} ${attYear} — meeting</h3>
+    ${attVisible().map(r=>{
+      const v=(marks[r.id]||{})['m'+month]||'';
+      return `<div class="cartline"><div class="d"><div class="nm">${esc(r.name)}</div></div>
+        <select class="attSel" data-id="${r.id}" style="width:110px;flex:0 0 auto">
+          <option value="" ${v===''?'selected':''}>—</option>
+          ${['P','L','AN','A','NP'].map(c=>`<option ${v===c?'selected':''}>${c}</option>`).join('')}
+        </select></div>`;
+    }).join('')}
+    <label>Meeting note (optional)</label>
+    <input id="attMNote" value="${esc(note)}" placeholder="e.g. Meeting moved to the 4th / virtual on Telegram">
+    <div style="height:12px"></div>
+    <button class="btn" onclick="attMonthSave(${month})">✓ Save ${MONTHS[month-1]} — locks it (PIN to change later)</button>`);
+}
+async function attMonthSave(month){
+  const y=String(attYear);
+  for(const sel of document.querySelectorAll('#modalBox .attSel')){
+    await DB.set(['attendance','years',y,'marks',sel.dataset.id,'m'+month], sel.value||null);
+  }
+  await DB.set(['attendance','years',y,'notes','m'+month], $('attMNote').value.trim()||null);
+  await DB.set(['attendance','years',y,'locked','m'+month], true);
+  closeModal(); toast(MONTHS[month-1]+' saved & locked'); rerender();
+}
+async function attAdd(){
+  const n=$('attNewName').value.trim();
+  if(!n){ toast('Type the member name',1); return; }
+  await DB.set(['attendance','roster'],attRoster().concat({id:newId(),name:n,hidden:false}));
+  toast('Added to the register'); rerender();
+}
+async function attSetHidden(id,hidden){
+  await DB.set(['attendance','roster'],attRoster().map(r=>r.id===id?{...r,hidden}:r));
+  rerender();
+}
+/* Meeting dates — last Wednesday of the month, with a PIN-protected override */
+function lastWed(y,mi){ const d=new Date(y,mi,0); d.setDate(d.getDate()-((d.getDay()+4)%7)); return d; }
+function meetDate(y,mi){
+  const md=((((S.attendance||{}).years||{})[String(y)]||{}).mdates||{})['m'+mi];
+  return md? new Date(md+'T12:00') : lastWed(y,mi);
+}
+function attMeetEdit(mi){
+  pinConfirm('Change the '+MONTHS[mi-1]+' '+attYear+' meeting date? (It is normally the last Wednesday of the month.)',()=>{
+    openModal(`<h3><button class="x" onclick="closeModal()">✕</button>📅 ${MONTHS[mi-1]} ${attYear} meeting</h3>
+      <label>Meeting date</label>
+      <input type="date" id="attMD" value="${dstr(meetDate(attYear,mi).getTime())}">
+      <div style="height:12px"></div>
+      <button class="btn" onclick="attMeetSave(${mi})">✓ Save the new date</button>
+      <div style="height:8px"></div>
+      <button class="btn gray" onclick="attMeetSave(${mi},true)">↺ Back to the last Wednesday</button>`);
+  });
+}
+async function attMeetSave(mi,reset){
+  await DB.set(['attendance','years',String(attYear),'mdates','m'+mi], reset?null:($('attMD').value||null));
+  closeModal(); toast(MONTHS[mi-1]+' meeting date '+(reset?'reset to the last Wednesday':'updated')); rerender();
+}
+/* ------------------------ MY CLUB (member self-view) -----------------------
+   Members (not admins) see what's pertinent to THEM: meeting dates, their own
+   attendance for the year, and whether their $500 sponsor is done.
+   No club money, costs or balances appear here.                             */
+function renderMyClub(){
+  const u=meU(), yr=new Date().getFullYear();
+  const A=S.attendance, F=S.finance;
+  let html=`<h2>🎟 ${esc(u.name)} — my club year ${yr}</h2>`;
+  if(A&&A.baseline){
+    const today=new Date(); today.setHours(0,0,0,0);
+    let nxt=null,nxtOv=false;
+    for(let mi=1;mi<=12;mi++){ const d=meetDate(yr,mi);
+      if(d>=today){ nxt=d; nxtOv=!!((((A.years||{})[String(yr)]||{}).mdates||{})['m'+mi]); break; } }
+    html+=`<div class="stat gold"><div class="v">${nxt? nxt.toLocaleDateString('en-CA',{weekday:'long',month:'long',day:'numeric'}) : 'See you in January'}</div>
+      <div class="l">Next meeting${nxtOv?' — note: the date was changed':''}</div></div>`;
+    const r=(A.roster||[]).find(x=>(x.name||'').trim().toLowerCase()===(u.name||'').trim().toLowerCase());
+    const Y=(A.years||{})[String(yr)]||{};
+    const myMarks=r? ((Y.marks||{})[r.id]||{}) : {};
+    html+=`<h2>📅 Meetings & my attendance — ${yr}</h2>
+      <div class="card"><table>
+        <tr><th>Month</th><th>Meeting</th><th class="r">Me</th></tr>
+        ${MONTHS.map((m,i)=>{ const d=meetDate(yr,i+1); const ov=!!((Y.mdates||{})['m'+(i+1)]);
+          const v=myMarks['m'+(i+1)]||'';
+          return `<tr><td>${m}</td><td>${d.toLocaleDateString('en-CA',{weekday:'short',month:'short',day:'numeric'})}${ov?' <span class="memberflag">changed</span>':''}</td>
+            <td class="r"><b>${v||'·'}</b></td></tr>`; }).join('')}
+      </table></div>`;
+    if(r){
+      const cnt={P:0,L:0,AN:0,A:0,NP:0};
+      Object.values(myMarks).forEach(v=>{ if(cnt[v]!==undefined) cnt[v]++; });
+      html+=`<p class="muted">${esc(A.legend||'')}<br>My year so far: P ${cnt.P} · L ${cnt.L} · AN ${cnt.AN} · A ${cnt.A} · NP ${cnt.NP}</p>`;
+    } else {
+      html+=`<p class="muted">You're not on the attendance register yet — ask the admin to add you (the register name must match your login name).</p>`;
+    }
+  } else {
+    html+=`<p class="muted">The attendance register hasn't been opened yet — it appears once the admin opens the Attendance tab.</p>`;
+  }
+  if(F){
+    const target=F.sponsorTarget||500;
+    const mine=Object.values(F.txns||{})
+      .filter(t=>t.kind==='income'&&t.cat==='Donations'&&t.member&&(t.member||'').trim().toLowerCase()===(u.name||'').trim().toLowerCase()
+        &&new Date(t.ts).getFullYear()===yr);
+    const got=mine.reduce((a,t)=>a+t.amount,0);
+    html+=`<h2>⭐ My sponsor — ${yr}</h2>
+      <div class="stat ${got>=target?'green':'red'}"><div class="v">${got>=target?'✔ Done':fmt(target-got)+' to go'}</div>
+        <div class="l">${got>=target?'Sponsor secured — thank you!':'Every member secures a '+fmt(target)+' sponsor for the year (or self-sponsors)'}</div></div>
+      ${mine.length?`<div class="card">${mine.map(t=>`<div style="padding:4px 0"><b>${esc(t.sponsor||'Donation')}</b> — ${fmt(t.amount)}${t.inkind?' <span class="memberflag">IN-KIND</span>':''} <span class="muted">${new Date(t.ts).toLocaleDateString('en-CA')}</span></div>`).join('')}</div>`:''}`;
+  }
+  $('myClubBody').innerHTML=html;
+}
+
 /* --------------------------- EDIT A SALE ---------------------------------- */
 let _es=null;
 function editSale(id){
@@ -1057,12 +1782,18 @@ function renderMyMoney(){
 /* ------------------------------- ADMIN ------------------------------------ */
 function renderAdmin(){
   if(!isAdmin()){ view='sell'; rerender(); return; }
-  const tabs=[['report','Report'],['money','Money'],['reorder','Reorder'],['restock','Restock'],['items','Items'],['users','Users'],['settings','Settings'],['data','Data']];
+  let tabs=[['report','Report'],['money','Money'],['books','Books'],['attend','Attendance'],['reorder','Reorder'],['restock','Restock'],['items','Items'],['users','Users'],['settings','Settings'],['data','Data']];
+  if(!clubRecOn()){
+    tabs=tabs.filter(([t])=>t!=='books'&&t!=='attend');
+    if(adminTab==='books'||adminTab==='attend') adminTab='report';
+  }
   $('adminTabs').innerHTML=tabs.map(([t,l])=>
     `<button class="${adminTab===t?'on':''}" onclick="adminTab='${t}';rerender()">${l}</button>`).join('');
   const b=$('adminBody');
   if(adminTab==='report') b.innerHTML=reportHTML();
   if(adminTab==='money') b.innerHTML=moneyHTML();
+  if(adminTab==='books') b.innerHTML=booksHTML();
+  if(adminTab==='attend') b.innerHTML=attendHTML();
   if(adminTab==='reorder') b.innerHTML=reorderHTML();
   if(adminTab==='restock') b.innerHTML=restockHTML();
   if(adminTab==='items') b.innerHTML=itemsHTML();
@@ -1608,11 +2339,84 @@ function settingsHTML(){
       <button class="toggle ${st.allowMemberSales!==false?'on':''}"
         onclick="DB.set(['settings','allowMemberSales'],!this.classList.contains('on'))"></button></div>
     </div>
+    <div class="card">
+    <div class="switchrow"><div><div class="t">Club records — Books, Attendance &amp; the members' Club tab</div>
+      <div class="s">${clubRecOn()
+        ?'ON — every phone sees the Books and Attendance tabs, and members see their Club tab. Turning it off hides them everywhere (the data itself is kept safe in the database).'
+        :'OFF — the Books, Attendance and Club tabs are hidden on every phone. Any records already in the database are kept and reappear the moment you switch this on. Changing this asks for your PIN.'}</div></div>
+      <button class="toggle ${clubRecOn()?'on':''}" id="crSwitch" onclick="setClubRecords()"></button></div>
+    </div>
     <div class="card muted">App version: <b>${APP_VERSION}</b> · Mode: <b>${CLOUD?'🟢 Live sync (Firebase)':'🟡 Local test mode'}</b><br><br>
     ${CLOUD?'All phones using this page see the same live data.':'Data lives only in this browser. To go live for the event, follow the Firebase steps in the README, paste the config into index.html, and re-upload to GitHub.'}</div>`;
 }
+function setClubRecords(){
+  const on=clubRecOn();
+  pinConfirm(on
+    ? 'Hide the club records? The Books, Attendance and Club tabs disappear from every phone until you switch them back on. Nothing is deleted.'
+    : 'Show the club records? The Books and Attendance tabs (and the members\' Club tab) appear on every phone within seconds.',
+    ()=>DB.set(['settings','clubRecords'],!on).then(()=>toast(on?'Club records hidden on all phones':'Club records ON — all phones see them now')));
+}
+async function downloadBackup(){
+  let tree, files;
+  if(CLOUD){
+    toast('Building the backup — reading the whole database…');
+    let r; try{ r=await fetch(_restUrl([]),{cache:'no-store'}); }catch(e){ r=null; }
+    if(!r||!r.ok){ toast('Could not read the database — check the connection and try again',1); return; }
+    tree=await r.json();
+    try{
+      const rf=await fetch(FIREBASE_CONFIG.databaseURL.replace(/\/+$/,'')+'/threeacesFiles.json',{cache:'no-store'});
+      files=rf.ok? await rf.json() : null;
+    }catch(e){ files=null; }
+  }else{
+    tree=S; files=JSON.parse(localStorage.getItem('threeacesFiles')||'null');
+  }
+  if(!tree||!tree.users){ toast('The database looks empty — backup not saved',1); return; }
+  const d=new Date(), pad=n=>String(n).padStart(2,'0');
+  const name='three-aces-backup-'+d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'-'+pad(d.getHours())+pad(d.getMinutes())+'.json';
+  dl(name, JSON.stringify({app:'Three Aces Sales App', version:APP_VERSION,
+    savedAt:d.toISOString(), data:tree, files:files||null}));
+  toast('Backup downloaded — keep it somewhere safe (email it to yourself, or a USB stick)');
+}
+function restoreBackupPick(inp){
+  const f=inp.files&&inp.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=()=>{
+    let b; try{ b=JSON.parse(rd.result); }catch(e){ toast('That file is not a Three Aces backup',1); return; }
+    const data=(b&&b.app==='Three Aces Sales App'&&b.data)? b.data : null;
+    if(!data||!data.users||!data.items){ toast('That file is not a Three Aces backup',1); return; }
+    const when=b.savedAt? new Date(b.savedAt).toLocaleString('en-CA') : 'an unknown date';
+    pinConfirm('RESTORE the backup from '+when+'? This REPLACES everything currently in the database — items, stock, sales, users, money, books, attendance — with what is in that file. Every phone switches to it within seconds. This cannot be undone (unless you have a newer backup).',
+      async ()=>{
+        if(CLOUD){
+          const r=await fetch(_restUrl([]),{method:'PUT',body:JSON.stringify(data)});
+          if(!r.ok){ toast('Restore failed — check the connection',1); return; }
+          if(b.files){ try{ await fetch(FIREBASE_CONFIG.databaseURL.replace(/\/+$/,'')+'/threeacesFiles.json',{method:'PUT',body:JSON.stringify(b.files)}); }catch(e){} }
+          _lastJson='';
+          S=Object.assign({items:{},users:{},sales:{},settings:{},restocks:{},payments:{}}, data);
+        }else{
+          S=Object.assign({items:{},users:{},sales:{},settings:{},restocks:{},payments:{}}, data);
+          if(b.files) localStorage.setItem('threeacesFiles',JSON.stringify(b.files));
+          DB._persist();
+        }
+        if(me && !S.users[me]) me=null;
+        toast('Backup restored — everything is back to '+when);
+      });
+  };
+  rd.readAsText(f); inp.value='';
+}
 function dataHTML(){
   return `<div class="card">
+    <b>💾 Backup — the whole database in one file</b>
+    <p class="muted">Downloads everything — items, stock, sales, users, money, books, attendance, invoice files — to this device. Do it before every event and after big changes. If disaster ever strikes, Restore puts it all back exactly as it was.</p>
+    <div class="rowbtns">
+      <button class="btn" onclick="downloadBackup()">⬇ Download full backup</button>
+    </div>
+    <div class="rowbtns">
+      <button class="btn red" onclick="$('restFile').click()">⬆ Restore from a backup file… (PIN)</button>
+    </div>
+    <input type="file" id="restFile" accept=".json,application/json" style="display:none" onchange="restoreBackupPick(this)">
+    </div>
+    <div class="card">
     <b>Export</b>
     <div class="rowbtns">
       <button class="btn gray" onclick="exportSalesCSV()">⬇ Sales CSV</button>
