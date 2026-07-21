@@ -324,7 +324,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.9';
+const APP_VERSION = 'v3.9.2';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -900,7 +900,10 @@ function renderStock(){
           `<td class="c">${items.reduce((n,[,it])=>n+((((it.sizes||{})[s])||{}).stock||0),0)}</td>`).join('')}
           <td class="r">${grand}</td></tr>`:''}
       </table></div>
-      <button class="btn gray noprint" style="margin-top:10px" onclick="window.print()">🖨 Print / Save as PDF</button>`;
+      <div class="rowbtns noprint" style="margin-top:10px">
+        <button class="btn gray" onclick="window.print()">🖨 Print this view</button>
+        <button class="btn" onclick="printStockSheet()">🖨 Stock sheet — one landscape page (PDF)</button>
+      </div>`;
     return;
   }
   const grandC=items.reduce((n,[,it])=>n+totalStock(it),0);
@@ -1801,6 +1804,56 @@ function renderAdmin(){
   if(adminTab==='settings') b.innerHTML=settingsHTML();
   if(adminTab==='data') b.innerHTML=dataHTML();
 }
+/* One-page LANDSCAPE stock sheet: every item, every size, totals — sized to
+   fit inside the margins of a single printed page (or Save-as-PDF).         */
+function printStockSheet(){
+  const items=allItemsSorted().filter(([,i])=>!i.adhoc);
+  const sizes=[...new Set(items.flatMap(([,it])=>Object.keys(it.sizes||{})))].sort(sizeSort);
+  const colTot=sizes.map(sz=>items.reduce((n,[,it])=>n+((((it.sizes||{})[sz])||{}).stock||0),0));
+  const grand=colTot.reduce((a,b)=>a+b,0);
+  // shrink the type as the table grows so it always stays on ONE page
+  const fs=items.length>30?7:items.length>24?8:9;
+  const rows=items.map(([id,it])=>
+    `<tr><td class="nm">${esc(it.name)}${it.active===false?' <span style="font-weight:400">(hidden)</span>':''}</td>${sizes.map(sz=>{
+      const z=(it.sizes||{})[sz];
+      if(!z) return '<td class="na"></td>';
+      const st=z.stock||0;
+      return `<td${st===0?' class="zero"':''}>${st===0?'—':st}</td>`;
+    }).join('')}<td class="tt">${totalStock(it)}</td></tr>`).join('');
+  const old=$('printSheet'); if(old) old.remove();
+  const el=document.createElement('div'); el.id='printSheet';
+  el.innerHTML=`<style>
+    #printSheet{display:none}
+    @media print{
+      @page{size:A4 landscape;margin:8mm}
+      body.sheetmode>*:not(#printSheet){display:none !important}
+      body.sheetmode #printSheet{display:block !important;color:#000;background:#fff;font-family:Arial,sans-serif}
+    }
+    #printSheet h1{font-size:15px;margin:0 0 1px;letter-spacing:1px}
+    #printSheet .sub{font-size:9px;margin:0 0 5px;color:#333}
+    #printSheet table{border-collapse:collapse;width:100%;font-size:${fs}px;line-height:1.35;table-layout:auto}
+    #printSheet th,#printSheet td{border:1px solid #888;padding:1px 3px;text-align:center}
+    #printSheet th{background:#e8e2d2;font-size:${fs}px}
+    #printSheet td.nm{text-align:left;font-weight:700;white-space:nowrap}
+    #printSheet td.na{background:#f2f2f2}
+    #printSheet td.zero{color:#999}
+    #printSheet .tt,#printSheet tr.tot td{font-weight:700;background:#eee}
+  </style>
+  <h1>★ THREE ACES ★ — STOCK SHEET</h1>
+  <div class="sub">Italian Canadian Cultural Club · every item and size · ${grand} pieces total ·
+    printed ${new Date().toLocaleString('en-CA')} · — = sold out, grey = size not carried</div>
+  <table>
+    <tr><th style="text-align:left">Item</th>${sizes.map(s=>`<th>${esc(s)}</th>`).join('')}<th>Total</th></tr>
+    ${rows}
+    <tr class="tot"><td class="nm">TOTAL</td>${colTot.map(n=>`<td>${n}</td>`).join('')}<td>${grand}</td></tr>
+  </table>`;
+  document.body.appendChild(el);
+  document.body.classList.add('sheetmode');
+  const clean=()=>{ document.body.classList.remove('sheetmode'); el.remove(); window.removeEventListener('afterprint',clean); };
+  window.addEventListener('afterprint',clean);
+  window.print();
+  setTimeout(clean,4000);   // fallback if the browser never fires afterprint
+}
 function printHead(title,sub){
   return `<div class="printhead"><h1>★ THREE ACES ★</h1>
     <p>Italian Canadian Cultural Club — ${esc(title)}</p>
@@ -1896,13 +1949,125 @@ function reportHTML(){
      `<tr><td>${esc(k)}</td><td class="r"><b>${e.qty}</b></td><td class="r">${fmt(e.rev)}</td></tr>`).join('')
      ||'<tr><td colspan="3" class="empty">—</td></tr>'}
    </table></div>
-   <h2>Inventory value (current stock — ad-hoc items like raffle tickets excluded)</h2>
-   <div class="card">${(()=>{ let c=0,r=0;
-      itemsSorted().filter(([,i])=>!i.adhoc).forEach(([,it])=>Object.values(it.sizes||{}).forEach(z=>{c+=(z.stock||0)*z.cost; r+=(z.stock||0)*z.price;}));
-      return `<table><tr><td>At cost</td><td class="r">${fmt(c)}</td></tr>
-        <tr><td>At retail</td><td class="r">${fmt(r)}</td></tr>
-        <tr><td><b>Potential profit</b></td><td class="r goldtxt"><b>${fmt(r-c)}</b></td></tr></table>`;})()}
-   </div>`;
+   ${invValueHTML()}`;
+}
+/* --------------- INVENTORY VALUE — by size, by item, pick & choose ---------
+   "How much money is sitting in 3XL?" — cost tied up, potential revenue and
+   potential profit of the CURRENT stock, split by size and by item, with
+   chips to leave things (cups…) out of the count.                           */
+let invExcl={}, invExclSz={};
+function invToggle(id){ invExcl[id]=!invExcl[id]; rerender(); }
+function invToggleSz(sz){ invExclSz[sz]=!invExclSz[sz]; rerender(); }
+function invAllItems(on){
+  invExcl={};
+  if(!on) allItemsSorted().forEach(([id,i])=>{ if(!i.adhoc) invExcl[id]=true; });
+  invChooseModal(); rerender();
+}
+function invAllSz(on){
+  invExclSz={};
+  if(!on) invAllSizes().forEach(sz=>invExclSz[sz]=true);
+  invChooseModal(); rerender();
+}
+function invCatToggle(cat){
+  const items=allItemsSorted().filter(([,i])=>!i.adhoc&&(i.cat||'Other')===cat);
+  const allOn=items.every(([id])=>!invExcl[id]);
+  items.forEach(([id])=>{ invExcl[id]=allOn; });   // all on → tick off the whole category; otherwise tick it all on
+  invChooseModal(); rerender();
+}
+function invChooseModal(){
+  const items=allItemsSorted().filter(([,i])=>!i.adhoc);
+  const cats=[...new Set(items.map(([,i])=>i.cat||'Other'))];
+  const allSz=invAllSizes();
+  const catBlocks=cats.map(cat=>{
+    const catItems=items.filter(([,i])=>(i.cat||'Other')===cat);
+    const allOn=catItems.every(([id])=>!invExcl[id]);
+    return `<div class="cartline" style="background:var(--panel2)"><div class="d">
+        <label style="display:flex;gap:10px;align-items:center;font-weight:700;cursor:pointer">
+        <input type="checkbox" style="width:18px;height:18px" ${allOn?'checked':''} onchange="invCatToggle('${esc(cat)}')">
+        ${esc(cat)} <span class="muted" style="font-weight:400">— whole category (${catItems.length})</span></label></div></div>`+
+      catItems.map(([id,it])=>`<div class="cartline" style="padding-left:26px"><div class="d">
+        <label style="display:flex;gap:10px;align-items:center;cursor:pointer">
+        <input type="checkbox" style="width:18px;height:18px" ${invExcl[id]?'':'checked'} onchange="invToggle('${id}')">
+        ${esc(it.name)}${it.active===false?' <span class="muted">(hidden)</span>':''}</label></div></div>`).join('');
+  }).join('');
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>🎛 What should be counted?</h3>
+    <p class="muted">Tick what to include in the stock-value numbers. Ticking a category flips everything in it at once.</p>
+    <div class="rowbtns">
+      <button class="btn small gray" onclick="invAllItems(true)">✓ All items</button>
+      <button class="btn small gray" onclick="invAllItems(false)">✕ No items</button>
+    </div>
+    ${catBlocks}
+    <h2 style="margin-top:14px">Sizes</h2>
+    <div class="rowbtns">
+      <button class="btn small gray" onclick="invAllSz(true)">✓ All sizes</button>
+      <button class="btn small gray" onclick="invAllSz(false)">✕ No sizes</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 14px">
+      ${allSz.map(sz=>`<label style="display:flex;gap:10px;align-items:center;padding:6px 0;cursor:pointer">
+        <input type="checkbox" style="width:18px;height:18px" ${invExclSz[sz]?'':'checked'} onchange="invToggleSz('${esc(sz)}')">
+        ${esc(sz)}</label>`).join('')}
+    </div>
+    <div style="height:12px"></div>
+    <button class="btn" onclick="closeModal();rerender()">✓ Done — show me the numbers</button>`);
+}
+function invAllSizes(){
+  const s=new Set();
+  allItemsSorted().forEach(([,i])=>{ if(!i.adhoc) Object.keys(i.sizes||{}).forEach(k=>s.add(k)); });
+  return [...s].sort(sizeSort);
+}
+function invValueHTML(){
+  const items=allItemsSorted().filter(([,i])=>!i.adhoc);
+  const sel=items.filter(([id])=>!invExcl[id]);
+  const allSz=invAllSizes();
+  const bySize={}, byItem=[];
+  let tu=0,tc=0,tr=0;
+  sel.forEach(([id,it])=>{
+    let iu=0,ic=0,ir=0;
+    Object.entries(it.sizes||{}).forEach(([sz,z])=>{
+      if(invExclSz[sz]) return;
+      const st=z.stock||0; if(!st) return;
+      const c=st*(z.cost||0), r=st*salePriceOf(it,z);
+      const b=bySize[sz]=bySize[sz]||{u:0,c:0,r:0};
+      b.u+=st; b.c+=c; b.r+=r;
+      iu+=st; ic+=c; ir+=r;
+    });
+    byItem.push({name:it.name,hidden:it.active===false,u:iu,c:ic,r:ir});
+    tu+=iu; tc+=ic; tr+=ir;
+  });
+  const szRows=Object.entries(bySize).sort((a,b)=>sizeSort(a[0],b[0]));
+  const nSzOn=allSz.filter(sz=>!invExclSz[sz]).length;
+  const excl=[...items.filter(([id])=>invExcl[id]).map(([,i])=>i.name), ...allSz.filter(sz=>invExclSz[sz])];
+  return `<h2>📦 What our stock is worth</h2>
+   <div class="rowbtns noprint" style="margin:4px 0 10px">
+     <button class="btn gray" onclick="invChooseModal()">🎛 Choose what to count — ${sel.length}/${items.length} items · ${nSzOn}/${allSz.length} sizes</button>
+   </div>
+   ${excl.length?`<p class="muted" style="margin:0 0 8px">Left out: ${excl.map(esc).join(', ')}</p>`:''}
+   <div class="statgrid">
+     <div class="stat"><div class="v">${tu}</div><div class="l">Units counted (${sel.length}/${items.length} items · ${nSzOn}/${allSz.length} sizes)</div></div>
+     <div class="stat red"><div class="v">${fmt(tc)}</div><div class="l">Money out (at cost)</div></div>
+     <div class="stat green"><div class="v">${fmt(tr)}</div><div class="l">Potential revenue (today's prices)</div></div>
+     <div class="stat gold"><div class="v">${fmt(tr-tc)}</div><div class="l">Potential profit</div></div>
+   </div>
+   <h2>By size — where the money is sitting</h2>
+   <div class="card"><table>
+     <tr><th>Size</th><th class="r">Units</th><th class="r">At cost</th><th class="r">Potential revenue</th><th class="r">Potential profit</th></tr>
+     ${szRows.map(([sz,b])=>`<tr><td><b>${esc(sz)}</b></td><td class="r">${b.u}</td>
+       <td class="r">${fmt(b.c)}</td><td class="r">${fmt(b.r)}</td><td class="r ${b.r-b.c>=0?'pos':'neg'}">${fmt(b.r-b.c)}</td></tr>`).join('')
+       ||'<tr><td colspan="5" class="empty">Nothing counted — pick at least one item above.</td></tr>'}
+     ${szRows.length?`<tr class="totrow"><td>TOTAL</td><td class="r">${tu}</td><td class="r">${fmt(tc)}</td><td class="r">${fmt(tr)}</td><td class="r">${fmt(tr-tc)}</td></tr>`:''}
+   </table></div>
+   <h2>By item</h2>
+   <div class="card"><table>
+     <tr><th>Item</th><th class="r">Units</th><th class="r">At cost</th><th class="r">Potential revenue</th><th class="r">Potential profit</th></tr>
+     ${byItem.map(e=>`<tr><td>${esc(e.name)}${e.hidden?' <span class="muted">(hidden)</span>':''}</td><td class="r">${e.u}</td>
+       <td class="r">${fmt(e.c)}</td><td class="r">${fmt(e.r)}</td><td class="r ${e.r-e.c>=0?'pos':'neg'}">${fmt(e.r-e.c)}</td></tr>`).join('')
+       ||'<tr><td colspan="5" class="empty">Nothing counted — pick at least one item above.</td></tr>'}
+   </table></div>
+   <p class="muted">Current stock only — sold pieces are in the sales report above. Potential revenue uses today's selling prices
+   (including any %-off sale). Use it for ordering decisions: untick everything, keep just 4XL–5XL (or just the shorts) and
+   you'll see exactly how much money is tied up there and what it could bring back. Hidden items still count — they're stock
+   you own — but you can untick them. Ad-hoc items (raffle tickets…) carry no inventory value and are never counted.
+   The chips reset to "count everything" each time you come back.</p>`;
 }
 function moneyHTML(){
   // All-time settlement view.
