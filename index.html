@@ -197,7 +197,13 @@
     .stat .v,.stat .l,td,th,h2,b,.goldtxt,.pos,.neg,.muted{color:#000 !important;}
     td,th{border-bottom:1px solid #ddd;}
     h2{color:#000;}
+    tr.drill td:first-child::after{content:'' !important;}
   }
+  /* a table row you can tap to see what the number is made of */
+  tr.drill{cursor:pointer;}
+  tr.drill td:first-child::after{content:' ›';color:var(--gold);font-weight:800;}
+  tr.drill:active td{background:var(--panel2);}
+  .drilltot td{border-top:2px solid var(--line);background:var(--panel2);font-weight:800;}
   .switchrow{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #222;}
   .switchrow .t{font-size:14px;} .switchrow .s{font-size:12px;color:var(--muted);}
   .toggle{width:52px;height:30px;border-radius:15px;background:var(--togoff);border:none;position:relative;cursor:pointer;flex:0 0 auto;}
@@ -334,7 +340,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.11';
+const APP_VERSION = 'v3.12';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -647,11 +653,27 @@ async function fileLoad(id){
 /* ============================== APP STATE ================================= */
 let me=null;            // current user id
 let view='sell', adminTab='report', cart=[], selCat='All', payMethod='Cash', openItem=null, cartBuyer='';
+/* --------------------------- HOW A SALE WAS PAID ---------------------------
+   Cash      — the SELLER walked away holding the money, so the seller owes the
+               club everything they collected minus the profit share they keep.
+   Interac   — Square / Interac tap. The money lands straight in the CLUB's own
+               account, so nobody is holding it and nobody owes it. The seller's
+               profit share on that sale is owed BY the club, same as pay-later.
+   Pay Later — nothing was collected at all; the BUYER owes the club (their tab).
+   Anything else (old records that said "E-Transfer", say) is treated as cash,
+   which is how those were always counted.                                    */
+const PAY_METHODS=['Cash','Interac','Pay Later'];
+const isTabSale=s=>s.payment==='Pay Later';
+const isDirectSale=s=>s.payment==='Interac';                 // straight to the club
+const isSellerCash=s=>!isTabSale(s)&&!isDirectSale(s);       // seller is holding it
 let cartDisc=null;   // {type:'pct'|'amt', value:n} — volume discount on the current sale
 let stockView='grid', stockSortSize=null, reorderShowAll=false;
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// Safe to drop inside onclick="fn('…')" — JS-escape FIRST, then HTML-escape, so a
+// category called "Kids' shirts" survives the round trip instead of breaking the handler.
+const jsq=s=>esc(String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
 const fmt=n=>'$'+(Math.round(n*100)/100).toLocaleString('en-CA',{minimumFractionDigits:2,maximumFractionDigits:2});
 const meU=()=>S.users[me];
 const isAdmin=()=>me && meU() && meU().role==='admin';
@@ -1035,8 +1057,10 @@ function openCart(){
     <button class="btn gray" style="margin-bottom:10px" onclick="discountModal()">％ Volume discount ${cartDisc?'(change)':''}</button>
     <label>Payment</label>
     <div class="payrow">
-      ${['Cash','Pay Later'].map(p=>`<button class="${payMethod===p?'on':''}" onclick="payMethod='${p}';openCart()">${p}</button>`).join('')}
+      ${PAY_METHODS.map(p=>`<button class="${payMethod===p?'on':''}" onclick="payMethod='${p}';openCart()">${p}</button>`).join('')}
     </div>
+    ${payMethod==='Interac'?`<p class="muted" style="margin:6px 0 0">Tapped or e-transferred straight to the club — you are not
+      holding this money, so it never shows up as cash for you to hand in. Your profit share on it is paid back to you.</p>`:''}
     ${payMethod==='Pay Later'?`
       <label>Who owes this? (tracked on their tab until they pay)</label>
       <select id="buyerSel" onchange="cartBuyer=this.value">
@@ -1488,6 +1512,164 @@ function finCalc(y){
     totalIn, balance:Math.round((totalIn-expenses)*100)/100,
     pctSpent: totalIn>0? expenses/totalIn : 0};
 }
+
+/* ======================= BOOKS DRILL-DOWN ==================================
+   Every line in the Total income and Total expenses tables can be tapped to
+   see exactly what that number is made of — every entry, who it came from or
+   went to, the date, the note, and a subtotal that has to match the row you
+   tapped. Tapping the ✎ on an entry takes you straight into editing it.
+   ------------------------------------------------------------------------- */
+const _dDate=ts=>new Date(ts).toLocaleDateString('en-CA');
+function _drillTitle(t,sub,total,cls){
+  return `<h3><button class="x" onclick="closeModal()">✕</button>${esc(t)}</h3>
+    <div class="stat ${cls||'gold'}" style="margin:0 0 4px">
+      <div class="v">${fmt(total)}</div><div class="l">${esc(t)} — ${finYear}</div></div>
+    ${sub?`<p class="muted" style="margin:6px 0 10px">${sub}</p>`:'<div style="height:8px"></div>'}`;
+}
+// One transaction, rendered as a row of the breakdown table.
+function _drillTxRows(list){
+  return list.slice().sort((a,b)=>a.ts-b.ts).map(t=>`<tr>
+    <td style="white-space:nowrap;vertical-align:top">${_dDate(t.ts)}</td>
+    <td>${t.sponsor?`<b>${esc(t.sponsor)}</b>`:`<span class="muted">${esc(t.cat||'—')}</span>`}
+      ${t.inkind?' <span class="memberflag">IN-KIND</span>':''}
+      ${t.invoice?' <span class="muted">📎</span>':''}
+      ${(t.member||t.note)?`<div class="muted">${t.member?(t.kind==='income'?'secured by ':'paid / reimbursed to ')+esc(t.member):''}${t.member&&t.note?' · ':''}${t.note?esc(t.note):''}</div>`:''}
+      <div class="noprint" style="margin-top:3px"><button class="btn small gray"
+        onclick="closeModal();finEntryModal('${t.id}')">✎ edit this entry</button></div></td>
+    <td class="r ${t.inkind?'goldtxt':(t.kind==='income'?'pos':'neg')}" style="vertical-align:top;white-space:nowrap">
+      <b>${fmt(t.amount)}</b></td></tr>`).join('');
+}
+function _drillTxTable(list,label){
+  if(!list.length) return `<div class="empty">No entries under this for ${finYear}.</div>`;
+  const sub=list.reduce((a,t)=>a+t.amount,0);
+  return `<div class="card"><table>
+    <tr><th>Date</th><th>Who / what</th><th class="r">Amount</th></tr>
+    ${_drillTxRows(list)}
+    <tr class="drilltot"><td colspan="2">${esc(label||'Subtotal')} — ${list.length} entr${list.length===1?'y':'ies'}</td>
+      <td class="r">${fmt(sub)}</td></tr></table></div>`;
+}
+// A simple two-column "these add up to that" table.
+function _drillSum(rows,totLabel,tot,note){
+  return `<div class="card"><table>
+    ${rows.map(r=>`<tr><td>${r[2]?`<span class="muted">${esc(r[0])}</span>`:esc(r[0])}</td>
+      <td class="r ${r[2]?'muted':''}">${fmt(r[1])}</td></tr>`).join('')}
+    <tr class="drilltot"><td>${esc(totLabel)}</td><td class="r">${fmt(tot)}</td></tr></table></div>
+    ${note?`<p class="muted">${note}</p>`:''}`;
+}
+function finDrill(kind,cat){
+  const c=finCalc(finYear); if(!c||c.hist) return;
+  const F=S.finance, tx=c.tx;
+
+  /* ---- one income / expense category ---- */
+  if(kind==='income'||kind==='expense'){
+    const cash=tx.filter(t=>t.kind===kind&&t.cat===cat&&!t.inkind);
+    const ink =tx.filter(t=>t.kind===kind&&t.cat===cat&&t.inkind);
+    const sub=cash.reduce((a,t)=>a+t.amount,0);
+    let extra='';
+    if(ink.length) extra=`<h2>Also recorded here — but NOT in that total</h2>
+      <p class="muted">In-kind means somebody gave an item rather than money. The value counts toward their
+      sponsor quota but it is never added to the club's cash, so it is left out of the ${fmt(sub)} above.</p>
+      ${_drillTxTable(ink,'In-kind value')}`;
+    // who secured / who was paid
+    const by={}; cash.forEach(t=>{ const k=t.member||'(nobody recorded)'; by[k]=(by[k]||0)+t.amount; });
+    const byRows=Object.entries(by).sort((a,b)=>b[1]-a[1]);
+    const byBlock=(byRows.length>1||(byRows.length===1&&byRows[0][0]!=='(nobody recorded)'))
+      ? `<h2>${kind==='income'?'Secured by':'Paid / reimbursed to'}</h2>
+         ${_drillSum(byRows.map(r=>[r[0],r[1]]),'Total',sub)}` : '';
+    return openModal(_drillTitle(cat, kind==='income'
+        ? 'Every '+finYear+' income entry filed under this category.'
+        : 'Every '+finYear+' expense filed under this category.',
+      sub, kind==='income'?'green':'red')
+      + _drillTxTable(cash,'Category total') + byBlock + extra);
+  }
+
+  /* ---- the live app-sales figure ---- */
+  if(kind==='sales'){
+    const sales=Object.entries(S.sales||{}).map(([id,s])=>({id,...s}))
+      .filter(s=>!s.voided&&new Date(s.ts).getFullYear()===finYear);
+    const g=groupRollup(sales);
+    const grpRows=SALE_GROUPS.filter(k=>g[k]).map(k=>[GRP_LABEL[k]||k, g[k].rev]);
+    const byMonth={}; const byPay={}; const bySeller={};
+    sales.forEach(s=>{
+      const m=new Date(s.ts).getMonth(); byMonth[m]=(byMonth[m]||0)+s.total;
+      const p=isTabSale(s)?'⏳ Pay Later (on a buyer’s tab)':isDirectSale(s)?'💳 Interac / Square':'💵 Cash';
+      byPay[p]=(byPay[p]||0)+s.total;
+      const n=s.sellerName||'—'; bySeller[n]=(bySeller[n]||0)+s.total;
+    });
+    const units=sales.reduce((a,s)=>a+saleUnits(s),0);
+    const voided=Object.values(S.sales||{}).filter(s=>s.voided&&new Date(s.ts).getFullYear()===finYear);
+    return openModal(_drillTitle('Picnic + Apparel Sales',
+      `Added up live from the app — ${sales.length} sale${sales.length===1?'':'s'}, ${units} item${units===1?'':'s'} rung up in ${finYear}. Nothing here is typed in by hand.`,
+      c.salesAuto,'green')
+      + `<h2>By what was sold</h2>${_drillSum(grpRows,'Total sales',c.salesAuto)}`
+      + `<h2>By month</h2>${_drillSum(Object.keys(byMonth).map(Number).sort((a,b)=>a-b)
+          .map(m=>[MONTHS[m]+' '+finYear, byMonth[m]]),'Total sales',c.salesAuto)}`
+      + `<h2>By how it was paid</h2>${_drillSum(Object.entries(byPay).map(r=>[r[0],r[1]]),'Total sales',c.salesAuto,
+          'The books count a sale the moment it is rung up, however it was paid. Pay-later money is still sitting on a buyer’s tab and cash may still be in a seller’s pocket — the Money screen tracks who owes what.')}`
+      + `<h2>By who rang it up</h2>${_drillSum(Object.entries(bySeller).sort((a,b)=>b[1]-a[1]).map(r=>[r[0],r[1]]),'Total sales',c.salesAuto)}`
+      + (voided.length?`<p class="muted">${voided.length} voided sale${voided.length===1?'':'s'} in ${finYear} — voided sales are not counted anywhere above.</p>`:''));
+  }
+
+  /* ---- previous balance carried in ---- */
+  if(kind==='prev'){
+    const py=finYear-1, p=finCalc(py);
+    let body;
+    if(finYear===F.opening.year || !p){
+      body=`<div class="card"><p>This is the club's opening balance — the figure the books were started
+        from for ${F.opening.year}. It was not calculated from anything inside the app; it is the balance
+        that was carried over from the old Excel sheet.</p></div>`;
+    } else if(p.hist){
+      body=_drillSum([['Income recorded for '+py,p.income],['Expenses recorded for '+py,-p.expenses]],
+        py+' year-end balance → carried into '+finYear, p.balance,
+        'Archived year from the old Excel workbook — the app holds the summary, and the workbook holds the line detail.');
+    } else {
+      body=_drillSum([
+        ['Carried into '+py, p.prev],
+        ['Picnic + Apparel Sales in '+py, p.salesAuto],
+        ['Other income recorded in '+py, p.incCash],
+        ['Less: expenses in '+py, -p.expenses],
+      ], py+' year-end balance → carried into '+finYear, p.balance,
+        'Tap the '+py+' button at the top of the Books screen to see that year in full.');
+    }
+    return openModal(_drillTitle('Previous Balance (carried from '+(finYear-1)+')',
+      'What the club had in hand when '+finYear+' started.', c.prev,'gold') + body);
+  }
+
+  /* ---- the two grand totals ---- */
+  if(kind==='totalin'){
+    const cats=[...new Set(tx.filter(t=>t.kind==='income'&&!t.inkind).map(t=>t.cat))];
+    const rows=[['Previous Balance (carried from '+(finYear-1)+')',c.prev],
+                ['Picnic + Apparel Sales — live from this app',c.salesAuto]]
+      .concat(cats.map(x=>[x, tx.filter(t=>t.kind==='income'&&t.cat===x&&!t.inkind).reduce((a,t)=>a+t.amount,0)]));
+    if(c.inkind>0.005) rows.push(['In-kind donations — tracked, deliberately NOT added in',c.inkind,true]);
+    return openModal(_drillTitle('TOTAL INCOME',
+      'Everything the club has had available in '+finYear+', including what was carried in.', c.totalIn,'green')
+      + _drillSum(rows,'TOTAL INCOME',c.totalIn,
+        'Tap any single line back in the Books screen to see the individual entries behind it.'));
+  }
+  if(kind==='totalexp'){
+    const cats=[...new Set(tx.filter(t=>t.kind==='expense').map(t=>t.cat))];
+    const rows=cats.map(x=>[x, tx.filter(t=>t.kind==='expense'&&t.cat===x&&!t.inkind).reduce((a,t)=>a+t.amount,0)]);
+    const expInk=tx.filter(t=>t.kind==='expense'&&t.inkind).reduce((a,t)=>a+t.amount,0);
+    if(expInk>0.005) rows.push(['In-kind expenses recorded (included in the total)',expInk]);
+    return openModal(_drillTitle('TOTAL EXPENSES',
+      'Every dollar spent in '+finYear+'.', c.expenses,'red')
+      + _drillSum(rows,'TOTAL EXPENSES',c.expenses,
+        'Tap any single line back in the Books screen to see the individual entries behind it.'));
+  }
+
+  /* ---- in-kind ---- */
+  if(kind==='inkind'){
+    const ink=tx.filter(t=>t.kind==='income'&&t.inkind);
+    const by={}; ink.forEach(t=>{ const k=t.member||'(nobody recorded)'; by[k]=(by[k]||0)+t.amount; });
+    return openModal(_drillTitle('In-kind donations',
+      'Items donated rather than money — a TV, a gift card, a case of wine. The value counts toward the '
+      +'donor’s sponsor quota, but it is never added to income or the club balance, because no cash changed hands.',
+      c.inkind,'gold')
+      + _drillTxTable(ink,'Total value donated')
+      + `<h2>Secured by</h2>${_drillSum(Object.entries(by).sort((a,b)=>b[1]-a[1]).map(r=>[r[0],r[1]]),'Total value',c.inkind)}`);
+  }
+}
 function booksHTML(){
   if(!S.finance){
     if(!_finInit){ _finInit=true; DB.set(['finance'],FIN_SEED).then(()=>rerender()); }
@@ -1514,6 +1696,9 @@ function booksHTML(){
       ${yoyHTML(years)}`;
   }
   const catSum=(kind,cat)=>c.tx.filter(t=>t.kind===kind&&t.cat===cat&&!t.inkind).reduce((a,t)=>a+t.amount,0);
+  // The category rows count cash only, but TOTAL EXPENSES counts everything — so if an
+  // in-kind expense ever gets recorded, show it on its own line and the table still adds up.
+  const expInk=c.tx.filter(t=>t.kind==='expense'&&t.inkind).reduce((a,t)=>a+t.amount,0);
   // like the Budget Report: EVERY category shown, even at $0
   const hidCats=F.catsHidden||{income:[],expense:[]};
   const incCats=[...new Set((F.cats&&F.cats.income||FIN_SEED.cats.income)
@@ -1558,19 +1743,22 @@ function booksHTML(){
     </div>
     <div style="height:12px"></div>
     <h2>Total income</h2>
+    <p class="muted noprint" style="margin:-6px 0 8px">Tap any line to see exactly what it is made up of.</p>
     <div class="card"><table>
       <tr><th>Item</th><th class="r">Amount</th></tr>
-      ${incCats.map(cat=>`<tr><td>${esc(cat)}</td><td class="r">${fmt(catSum('income',cat))}</td></tr>`).join('')}
-      <tr><td>Picnic + Apparel Sales — 🛒 live from this app</td><td class="r pos">${fmt(c.salesAuto)}</td></tr>
-      <tr><td>Previous Balance (carried from ${finYear-1})</td><td class="r">${fmt(c.prev)}</td></tr>
-      <tr><td><b>TOTAL INCOME</b></td><td class="r"><b>${fmt(c.totalIn)}</b></td></tr>
-      ${c.inkind>0.005?`<tr><td class="muted">In-kind donations (tracked, not in balance)</td><td class="r muted">${fmt(c.inkind)}</td></tr>`:''}
+      ${incCats.map(cat=>`<tr class="drill" onclick="finDrill('income','${jsq(cat)}')"><td>${esc(cat)}</td><td class="r">${fmt(catSum('income',cat))}</td></tr>`).join('')}
+      <tr class="drill" onclick="finDrill('sales')"><td>Picnic + Apparel Sales — 🛒 live from this app</td><td class="r pos">${fmt(c.salesAuto)}</td></tr>
+      <tr class="drill" onclick="finDrill('prev')"><td>Previous Balance (carried from ${finYear-1})</td><td class="r">${fmt(c.prev)}</td></tr>
+      <tr class="drill" onclick="finDrill('totalin')"><td><b>TOTAL INCOME</b></td><td class="r"><b>${fmt(c.totalIn)}</b></td></tr>
+      ${c.inkind>0.005?`<tr class="drill" onclick="finDrill('inkind')"><td class="muted">In-kind donations (tracked, not in balance)</td><td class="r muted">${fmt(c.inkind)}</td></tr>`:''}
     </table></div>
     <h2>Total expenses</h2>
+    <p class="muted noprint" style="margin:-6px 0 8px">Tap any line to see every entry behind it.</p>
     <div class="card"><table>
       <tr><th>Item</th><th class="r">Amount</th></tr>
-      ${expCats.map(cat=>`<tr><td>${esc(cat)}</td><td class="r ${catSum('expense',cat)>0?'':'dim'}">${fmt(catSum('expense',cat))}</td></tr>`).join('')}
-      <tr><td><b>TOTAL EXPENSES</b></td><td class="r"><b>${fmt(c.expenses)}</b></td></tr>
+      ${expCats.map(cat=>`<tr class="drill" onclick="finDrill('expense','${jsq(cat)}')"><td>${esc(cat)}</td><td class="r ${catSum('expense',cat)>0?'':'dim'}">${fmt(catSum('expense',cat))}</td></tr>`).join('')}
+      ${expInk>0.005?`<tr class="drill" onclick="finDrill('totalexp')"><td class="muted">In-kind expenses (included in the total below)</td><td class="r muted">${fmt(expInk)}</td></tr>`:''}
+      <tr class="drill" onclick="finDrill('totalexp')"><td><b>TOTAL EXPENSES</b></td><td class="r"><b>${fmt(c.expenses)}</b></td></tr>
     </table></div>
     <h2>Summary</h2>
     <div class="statgrid">
@@ -2128,7 +2316,7 @@ function tsLocalInput(ts){
 }
 function editSale(id){
   const s=S.sales[id];
-  _es={id, payment: s.payment==='Pay Later'?'Pay Later':'Cash', buyer: s.buyer||'', ts:s.ts};
+  _es={id, payment: PAY_METHODS.includes(s.payment)? s.payment : 'Cash', buyer: s.buyer||'', ts:s.ts};
   const users=Object.values(S.users||{}).filter(u=>u.active!==false).map(u=>u.name);
   openModal(`<h3><button class="x" onclick="closeModal()">✕</button>✎ Edit Sale</h3>
     <p class="muted">Rung up ${new Date(s.ts).toLocaleString('en-CA')} · sold by ${esc(s.sellerName)}</p>
@@ -2141,8 +2329,8 @@ function editSale(id){
     </div>`).join('')}
     <label>Payment</label>
     <div class="payrow">
-      <button id="esPayCash" class="${_es.payment==='Cash'?'on':''}" onclick="esSetPay('Cash')">Cash</button>
-      <button id="esPayLater" class="${_es.payment==='Pay Later'?'on':''}" onclick="esSetPay('Pay Later')">Pay Later</button>
+      ${PAY_METHODS.map(p=>`<button class="esPay ${_es.payment===p?'on':''}" data-pay="${p}"
+        onclick="esSetPay('${p}')">${p}</button>`).join('')}
     </div>
     <div id="esBuyerWrap" style="display:${_es.payment==='Pay Later'?'block':'none'}">
       <label>Who owes this?</label>
@@ -2173,8 +2361,7 @@ function esShiftDay(n){
 function esResetWhen(ts){ const el=$('es_when'); if(el) el.value=tsLocalInput(ts); }
 function esSetPay(p){
   _es.payment=p;
-  $('esPayCash').classList.toggle('on',p==='Cash');
-  $('esPayLater').classList.toggle('on',p==='Pay Later');
+  document.querySelectorAll('#modalBox .esPay').forEach(b=>b.classList.toggle('on',b.dataset.pay===p));
   $('esBuyerWrap').style.display = p==='Pay Later'?'block':'none';
 }
 async function saveSaleEdit(){
@@ -2242,8 +2429,11 @@ function renderMyMoney(){
   let sold=0, keep=0;
   inRange.forEach(s=>{ sold+=s.total; keep+=shareOf(s); });
   // all-time settlement
-  const cash=mySales.filter(s=>s.payment!=='Pay Later');
-  const later=mySales.filter(s=>s.payment==='Pay Later');
+  const cash=mySales.filter(isSellerCash);
+  // Pay-later AND Interac: the club ends up with the whole amount, so the share
+  // owed to me comes back out of the club, not out of cash in my pocket.
+  const later=mySales.filter(s=>isTabSale(s)||isDirectSale(s));
+  const interacC=mySales.filter(isDirectSale).reduce((a,s)=>a+s.total,0);
   const cashC=cash.reduce((a,s)=>a+s.total,0);
   const cashK=cash.reduce((a,s)=>a+shareOf(s),0);
   const laterK=later.reduce((a,s)=>a+shareOf(s),0);
@@ -2288,9 +2478,10 @@ function renderMyMoney(){
       <tr><td>− your share kept</td><td class="r goldtxt">${fmt(cashK)}</td></tr>
       <tr><td>− already handed to the club</td><td class="r pos">${fmt(handed)}</td></tr>
       <tr><td><b>Still to hand in to the club</b></td><td class="r ${oweClub>0.005?'neg':'pos'}"><b>${fmt(Math.max(0,oweClub))}</b></td></tr>
+      ${interacC>0.005?`<tr><td class="muted">Interac / Square you took (${fmt(interacC)}) went straight to the club — not yours to hand in</td><td class="r muted">—</td></tr>`:''}
     </table></div>
     ${(laterK>0.005||paidOut>0.005)?`<div class="card"><table>
-      <tr><td>Your share from Pay-Later sales (club collects those)</td><td class="r goldtxt">${fmt(laterK)}</td></tr>
+      <tr><td>Your share from Pay-Later &amp; Interac sales (the club collects those in full)</td><td class="r goldtxt">${fmt(laterK)}</td></tr>
       <tr><td>− already paid out to you</td><td class="r pos">${fmt(paidOut)}</td></tr>
       <tr><td><b>Club still owes you</b></td><td class="r ${clubOwes>0.005?'goldtxt':'pos'}"><b>${fmt(Math.max(0,clubOwes))}</b></td></tr>
     </table></div>`:''}
@@ -2302,7 +2493,7 @@ function renderMyMoney(){
       <div class="lines">${s.lines.map(l=>`${l.qty}× ${esc(l.item)} ${esc(l.size)}`).join(' · ')}
         · ${esc(s.payment)}${s.payment==='Pay Later'&&s.buyer?' — '+esc(s.buyer):''}</div>
       <div class="lines" style="margin-top:4px">You keep <b class="goldtxt">${fmt(shareOf(s))}</b> ·
-        club gets <b class="pos">${fmt(s.total-shareOf(s))}</b>${s.payment==='Pay Later'?' <span class="memberflag">CLUB COLLECTS — YOUR SHARE OWED TO YOU</span>':''}</div>
+        club gets <b class="pos">${fmt(s.total-shareOf(s))}</b>${(isTabSale(s)||isDirectSale(s))?' <span class="memberflag">CLUB COLLECTS — YOUR SHARE OWED TO YOU</span>':''}</div>
     </div>`).join('') || '<div class="empty">No sales in this period.</div>'}
     <button class="btn gray noprint" style="margin-top:8px" onclick="window.print()">🖨 Print / Save as PDF</button>`;
 }
@@ -2626,11 +2817,14 @@ function invValueHTML(){
 }
 function moneyHTML(){
   // All-time settlement view.
-  //  - Cash/E-Transfer sales: the SELLER is holding the money → seller owes club (minus their profit share).
+  //  - Cash sales: the SELLER is holding the money → seller owes club (minus their profit share).
+  //  - Interac/Square: the money is already in the club's account → nobody owes it.
   //  - Pay Later sales: nobody collected money → the BUYER owes the club (their "tab").
   const sales=salesSorted().map(([,s])=>s).filter(s=>!s.voided);
-  const cashSales=sales.filter(s=>s.payment!=='Pay Later');
-  const tabSales=sales.filter(s=>s.payment==='Pay Later');
+  const cashSales=sales.filter(isSellerCash);
+  const tabSales=sales.filter(isTabSale);
+  const interacSales=sales.filter(isDirectSale);
+  const interacTotal=interacSales.reduce((a,s)=>a+s.total,0);
   const bal={};  const row=n=>bal[n]=bal[n]||{collected:0,keeps:0,received:0};
   cashSales.forEach(s=>{
     const pct=(s.sellerPct||0)/100;
@@ -2654,8 +2848,11 @@ function moneyHTML(){
   // profit share the club owes sellers on Pay-Later sales (club collects those in full)
   const shareOf=s=>{ const prof=s.lines.reduce((a,l)=>a+(l.price-l.cost)*l.qty,0);
     return prof*(s.sellerPct||0)/100; };
+  // ...and on Interac sales too — that money went straight to the club, so the
+  // seller never had a chance to take their share out of it.
   const laterShare={};
-  tabSales.forEach(s=>{ const sh=shareOf(s); if(sh>0) laterShare[s.sellerName]=(laterShare[s.sellerName]||0)+sh; });
+  tabSales.concat(interacSales).forEach(s=>{ const sh=shareOf(s);
+    if(sh>0) laterShare[s.sellerName]=(laterShare[s.sellerName]||0)+sh; });
   Object.keys(payoutBy).forEach(n=>{ laterShare[n]=laterShare[n]||0; });
   const owedSellers=Object.values(bal).reduce((a,e)=>a+(e.collected-e.keeps),0);
   const recSellers=Object.values(bal).reduce((a,e)=>a+e.received,0);
@@ -2664,8 +2861,9 @@ function moneyHTML(){
   const outstanding=(owedSellers-recSellers)+(owedTabs-paidTabs);
   const mism=shareMismatches();
   return printHead('Money In / Reimbursements & Tabs','All-time up to '+new Date().toLocaleDateString('en-CA')) + `
-   <p class="muted noprint">Cash &amp; e-transfer sales: whoever rang it up is holding that money and owes the club everything
-   they collected minus the profit share they keep. Pay-later sales go on the buyer's tab instead. When any money is
+   <p class="muted noprint">Cash sales: whoever rang it up is holding that money and owes the club everything
+   they collected minus the profit share they keep. Interac / Square sales are already in the club's account, so nobody
+   owes them — only the seller's share has to come back out. Pay-later sales go on the buyer's tab instead. When any money is
    handed to the club, record it below — with the date it was actually paid.</p>
    <button class="btn noprint" onclick="recordPayment()">＋ Record money received by club</button>
    <div style="height:12px"></div>
@@ -2673,6 +2871,8 @@ function moneyHTML(){
      <div class="stat gold"><div class="v">${fmt(owedSellers)}</div><div class="l">Owed by sellers (cash sales)</div></div>
      <div class="stat gold"><div class="v">${fmt(owedTabs-paidTabs)}</div><div class="l">Owed on member tabs</div></div>
      <div class="stat green"><div class="v">${fmt(recSellers+paidTabs)}</div><div class="l">Received by club</div></div>
+     ${interacTotal>0.005?`<div class="stat green"><div class="v">${fmt(interacTotal)}</div>
+       <div class="l">💳 Interac / Square — already in the club's account (${interacSales.length} sale${interacSales.length===1?'':'s'})</div></div>`:''}
      <div class="stat ${outstanding>0.005?'red':'green'}"><div class="v">${fmt(outstanding)}</div><div class="l">Still outstanding (total)</div></div>
      ${floatOutNow>0.005?`<div class="stat gold"><div class="v">${fmt(floatOutNow)}</div><div class="l">💵 Cash float currently out</div></div>`:''}
    </div>
@@ -2729,7 +2929,7 @@ function moneyHTML(){
       <td class="r"><b>${fmt(owedTabs)}</b></td><td class="r pos"><b>${fmt(paidTabs)}</b></td>
       <td class="r ${owedTabs-paidTabs>0.005?'neg':'pos'}"><b>${fmt(owedTabs-paidTabs)}</b></td><td></td></tr>`:''}
    </table></div>
-   ${Object.keys(laterShare).length?`<h2>Profit share owed BY the club (pay-later sales)</h2>
+   ${Object.keys(laterShare).length?`<h2>Profit share owed BY the club (pay-later &amp; Interac sales)</h2>
    <div class="card"><table>
     <tr><th>Member</th><th class="r">Share earned</th><th class="r">Paid out</th><th class="r">Club still owes</th></tr>
     ${Object.entries(laterShare).map(([n,sh])=>{
@@ -2737,9 +2937,11 @@ function moneyHTML(){
       return `<tr><td>${esc(n)}</td><td class="r goldtxt">${fmt(sh)}</td><td class="r pos">${fmt(po)}</td>
         <td class="r ${o>0.005?'neg':'pos'}"><b>${fmt(o)}</b></td></tr>`;}).join('')}
    </table></div>
-   <p class="muted">On a pay-later sale the club collects the full amount from the buyer, so the seller's profit share
-   is owed back to them — record it below as a payout when it's paid.</p>`:''}
-   <p class="muted">Sellers' balance = collected − keeps − handed in. Tabs = pay-later purchases − tab payments. $0 means settled up.</p>
+   <p class="muted">On a pay-later sale the club collects the full amount from the buyer, and on an Interac / Square sale
+   the money goes straight into the club's account — either way the seller never took their share out, so it is owed back
+   to them. Record it below as a payout when it's paid.</p>`:''}
+   <p class="muted">Sellers' balance = collected − keeps − handed in, and it only counts <b>cash</b> — Interac never lands
+   in a seller's pocket, so it is not theirs to hand in. Tabs = pay-later purchases − tab payments. $0 means settled up.</p>
    <h2>Payments received</h2>
    ${pays.map(([id,p])=>`<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
       <div><b>${fmt(p.amount)}</b> ${(p.kind==='payout'||p.kind==='floatout')?'to':'from'} ${esc(p.from)}
