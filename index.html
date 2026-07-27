@@ -26,9 +26,10 @@
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
   body{padding-bottom:calc(70px + env(safe-area-inset-bottom));}
   button{font-family:inherit;}
-  input,select{font-family:inherit;font-size:16px;background:var(--panel2);color:var(--text);
+  input,select,textarea{font-family:inherit;font-size:16px;background:var(--panel2);color:var(--text);
     border:1px solid var(--line);border-radius:8px;padding:10px;width:100%;}
-  input:focus,select:focus{outline:2px solid var(--green);}
+  textarea{resize:vertical;line-height:1.35;}
+  input:focus,select:focus,textarea:focus{outline:2px solid var(--green);}
   label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px;text-transform:uppercase;letter-spacing:.5px;}
 
   /* Header */
@@ -128,6 +129,15 @@
   td{padding:9px 6px;border-bottom:1px solid var(--line2);}
   td.r,th.r{text-align:right;}
   .pos{color:var(--pos);} .neg{color:var(--neg);} .goldtxt{color:var(--gold);}
+  /* Spreadsheet-style listings — scroll sideways on a phone, never squash */
+  .scrollx{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  table.sheet{min-width:100%;width:max-content;font-size:12.5px;white-space:nowrap;}
+  table.sheet th,table.sheet td{padding:7px 10px;}
+  table.sheet tr:nth-child(even) td{background:var(--panel2);}
+  table.sheet .totrow td{border-top:2px solid var(--line);background:var(--panel2);font-weight:800;}
+  table.sheet.grid td:first-child,table.sheet.grid th:first-child{position:sticky;left:0;
+    background:var(--panel);box-shadow:1px 0 0 var(--line);}
+  table.sheet.grid tr:nth-child(even) td:first-child{background:var(--panel2);}
 
   /* Cards / stats */
   .statgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px;}
@@ -324,7 +334,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.10';
+const APP_VERSION = 'v3.11';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -392,19 +402,113 @@ function newId(){ return 'k'+Date.now().toString(36)+Math.random().toString(36).
 
 let _initErr=null;
 function updateBanner(){
-  const b=$('modeBanner');
+  const b=$('modeBanner'); if(!b) return;
   if(!CLOUD){
     b.style.display='block'; b.className='mode-banner';
     b.textContent='⚠ LOCAL TEST MODE — data stays on this device only. Set up Firebase to sync phones (see README).';
     return;
   }
-  if(_initErr){ b.style.display='block'; b.className='mode-banner'; b.textContent='⚠ '+_initErr; }
-  else if(!_ready){ b.style.display='block'; b.className='mode-banner online'; b.textContent='Connecting to the club database…'; }
-  else { b.style.display='none'; }
+  if(_initErr){ b.style.display='block'; b.className='mode-banner'; b.textContent='⚠ '+_initErr; return; }
+  if(!_ready){ b.style.display='block'; b.className='mode-banner online'; b.textContent='Connecting to the club database…'; return; }
+  // Connected and working — but warn an admin if the signature isn't going out,
+  // because that means the lockdown isn't actually protecting anything.
+  if(_authState!=='ok' && me && typeof isAdmin==='function' && isAdmin()){
+    b.style.display='block'; b.className='mode-banner';
+    b.textContent = _authState==='disabled'
+      ? '🔓 Sign-in is not switched on yet — the club database is still open to anyone who knows the address. In Firebase → Authentication → Sign-in method → Anonymous → Enable.'
+      : '🔓 This phone could not sign in to the database'+(_authMsg?' ('+_authMsg+')':'')+'. Everything still works, but the lockdown is not protecting it.';
+    return;
+  }
+  b.style.display='none';
 }
 /* Cloud mode talks to the Firebase Realtime Database over plain HTTPS (its REST
-   API) — no SDK, no sign-in service, nothing for corporate networks to choke on.
-   Requires the database rules to be public (".read": true, ".write": true).   */
+   API) — no SDK, nothing for corporate networks to choke on.                  */
+
+/* -------------------------- SIGNING IN (ANONYMOUS) -------------------------
+   Every phone quietly signs itself in as an anonymous Firebase user the moment
+   the app opens, and every request to the database carries that signature.
+   Nobody types anything extra — the club's own name-and-PIN screen is still the
+   real front door. What this buys us is the database Rules: once they read
+   "auth != null", a stranger who finds the database address gets nothing back.
+
+   Deliberately forgiving. If signing in is unavailable for any reason the app
+   carries straight on unsigned, which still works while the Rules are open.
+   That is what makes the changeover safe: put the new file on every phone
+   FIRST, let them all sign in, and only then tighten the Rules.
+
+   authBase / tokenBase in the config are for testing only — leave them out.  */
+const AUTH_BASE  = (FIREBASE_CONFIG && FIREBASE_CONFIG.authBase)  || 'https://identitytoolkit.googleapis.com/v1';
+const TOKEN_BASE = (FIREBASE_CONFIG && FIREBASE_CONFIG.tokenBase) || 'https://securetoken.googleapis.com/v1';
+const AUTH_STORE = 'threeacesAuth';
+let _tok=null, _tokExp=0, _authState='new', _authMsg='', _authPend=null, _authNext=0;
+
+async function _authPost(url, body){
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  let j={}; try{ j=await r.json(); }catch(e){}
+  if(!r.ok) throw new Error((j.error&&j.error.message)||('HTTP '+r.status));
+  return j;
+}
+function _authSavedRefresh(){
+  try{ return (JSON.parse(localStorage.getItem(AUTH_STORE)||'null')||{}).r||null; }catch(e){ return null; }
+}
+async function _authFetchToken(){
+  const key=encodeURIComponent(FIREBASE_CONFIG.apiKey||'');
+  const saved=_authSavedRefresh();
+  if(saved){                                   // reuse this phone's anonymous account
+    try{
+      const j=await _authPost(TOKEN_BASE+'/token?key='+key,
+        {grant_type:'refresh_token', refresh_token:saved});
+      _tok=j.id_token; _tokExp=Date.now()+((+j.expires_in||3600)*1000);
+      try{ localStorage.setItem(AUTH_STORE,JSON.stringify({r:j.refresh_token||saved})); }catch(e){}
+      return _tok;
+    }catch(e){ try{ localStorage.removeItem(AUTH_STORE); }catch(e2){} }   // stale — start fresh
+  }
+  const j=await _authPost(AUTH_BASE+'/accounts:signUp?key='+key,{returnSecureToken:true});
+  _tok=j.idToken; _tokExp=Date.now()+((+j.expiresIn||3600)*1000);
+  try{ localStorage.setItem(AUTH_STORE,JSON.stringify({r:j.refreshToken})); }catch(e){}
+  return _tok;
+}
+async function _authToken(force){
+  if(!CLOUD) return null;
+  if(!force && _tok && Date.now() < _tokExp-120000) return _tok;   // renew 2 min early
+  if(_authPend) return _authPend;                                   // one sign-in at a time
+  if(!force && !_tok && Date.now() < _authNext) return null;        // backing off after a failure
+  _authPend=(async()=>{
+    const was=_authState;
+    try{
+      const t=await _authFetchToken();
+      _authState='ok'; _authMsg=''; _authNext=0;
+      if(was!=='ok') updateBanner();
+      return t;
+    }catch(e){
+      const m=(e&&e.message)||'';
+      _authState = /OPERATION_NOT_ALLOWED|ADMIN_ONLY|CONFIGURATION_NOT_FOUND/.test(m) ? 'disabled' : 'error';
+      _authMsg=m; _tok=null; _tokExp=0; _authNext=Date.now()+60000;
+      if(was!==_authState) updateBanner();
+      return null;
+    }finally{ _authPend=null; }
+  })();
+  return _authPend;
+}
+function _sign(url,tok){ return tok ? url+(url.includes('?')?'&':'?')+'auth='+encodeURIComponent(tok) : url; }
+/* every database request goes through here — signed if we have a signature,
+   and retried once if the database says our signature has gone stale */
+async function _fx(url,opts,_again){
+  const tok=await _authToken();
+  const r=await fetch(_sign(url,tok), opts||{});
+  if(r.status===401 && tok && !_again){
+    const t2=await _authToken(true);
+    if(t2 && t2!==tok) return _fx(url,opts,true);
+  }
+  return r;
+}
+function _ruleHint(status){
+  if(status!==401 && status!==403) return '';
+  return _authState==='ok'
+    ? ' — this phone signed in, but the database refused it. In Firebase → Realtime Database → Rules, both ".read" and ".write" should be exactly  auth != null  (then Publish).'
+    : ' — this phone could not sign in. In Firebase → Authentication → Sign-in method, Anonymous must be Enabled.';
+}
+
 let _lastJson='', _pollTimer=null;
 function _restUrl(pathArr){
   const base=FIREBASE_CONFIG.databaseURL.replace(/\/+$/,'')+'/threeaces';
@@ -421,8 +525,9 @@ const DB = {
     if(CLOUD){
       updateBanner();   // show "connecting…" right away
       setTimeout(()=>{ if(!_ready && !_initErr){
-        _initErr='Still cannot reach the club database after 20 seconds. Check in Firebase: Realtime Database → Rules — both ".read" and ".write" must be exactly true (then Publish). If they already are, this network is blocking '+FIREBASE_CONFIG.databaseURL.replace('https://','')+'.';
+        _initErr='Still cannot reach the club database after 20 seconds. Check two things in Firebase: Authentication → Sign-in method → Anonymous is Enabled, and Realtime Database → Rules has ".read" and ".write" set to  auth != null  (then Publish). If both are right, this network is blocking '+FIREBASE_CONFIG.databaseURL.replace('https://','')+'.';
         updateBanner(); } },20000);
+      await _authToken();          // sign in before the first read
       await this._refresh();
       // live sync: re-check every 3 seconds, plus instantly when the app regains focus
       _pollTimer=setInterval(()=>{ if(!document.hidden) this._refresh(); },3000);
@@ -436,8 +541,8 @@ const DB = {
   },
   async _refresh(){
     try{
-      const r=await fetch(_restUrl([]),{cache:'no-store'});
-      if(!r.ok) throw new Error('HTTP '+r.status+(r.status===401||r.status===403?' — the database Rules are not public. In Firebase: Realtime Database → Rules → set ".read" and ".write" to true → Publish.':''));
+      const r=await _fx(_restUrl([]),{cache:'no-store'});
+      if(!r.ok) throw new Error('HTTP '+r.status+_ruleHint(r.status));
       const txt=await r.text();
       if(txt==='null'){ if(!_ready){ await this.seed(); } return true; }
       if(txt!==_lastJson){
@@ -458,11 +563,11 @@ const DB = {
     const full={items,users,sales:{},settings:SEED_SETTINGS,restocks:{},payments:{}};
     if(CLOUD){
       try{
-        const r=await fetch(_restUrl([]),{method:'PUT',body:JSON.stringify(full)});
-        if(!r.ok) throw new Error('HTTP '+r.status);
+        const r=await _fx(_restUrl([]),{method:'PUT',body:JSON.stringify(full)});
+        if(!r.ok) throw new Error('HTTP '+r.status+_ruleHint(r.status));
         _lastJson=JSON.stringify(full); S=full; _initErr=null; _ready=true; updateBanner(); _onChange();
       }catch(e){
-        _initErr='Could not write the starting data ('+(e.message||e)+'). Check the database Rules are public and published, then refresh.';
+        _initErr='Could not write the starting data ('+(e.message||e)+'). Fix that, then refresh.';
         updateBanner();
       }
     }
@@ -471,8 +576,8 @@ const DB = {
   _persist(){ localStorage.setItem('threeaces', JSON.stringify(S)); },
   async set(path, val){          // path: array e.g. ['items', id, 'name']
     if(CLOUD){
-      const r=await fetch(_restUrl(path),{method: val===null?'DELETE':'PUT', body: val===null?undefined:JSON.stringify(val)});
-      if(!r.ok){ toast('Save failed — check connection',1); throw new Error('save failed'); }
+      const r=await _fx(_restUrl(path),{method: val===null?'DELETE':'PUT', body: val===null?undefined:JSON.stringify(val)});
+      if(!r.ok){ toast(r.status===401||r.status===403?'Save refused — this phone is not signed in':'Save failed — check connection',1); throw new Error('save failed'); }
       _applyLocal(path,val); _lastJson=''; _onChange();
       return;
     }
@@ -492,12 +597,12 @@ const DB = {
       const u=_restUrl(['items',itemId,'sizes',size,'stock']);
       for(let attempt=0; attempt<6; attempt++){
         try{
-          const g=await fetch(u,{headers:{'X-Firebase-ETag':'true'},cache:'no-store'});
+          const g=await _fx(u,{headers:{'X-Firebase-ETag':'true'},cache:'no-store'});
           if(!g.ok) return false;
           const etag=g.headers.get('ETag');
           const cur=(await g.json())||0;
           if(cur+delta<0) return false;
-          const p=await fetch(u,{method:'PUT',
+          const p=await _fx(u,{method:'PUT',
             headers: etag? {'if-match':etag} : {},
             body: JSON.stringify(cur+delta)});
           if(p.ok){
@@ -524,8 +629,8 @@ const DB = {
 function _filesUrl(id){ return FIREBASE_CONFIG.databaseURL.replace(/\/+$/,'')+'/threeacesFiles/'+encodeURIComponent(id)+'.json'; }
 async function fileSave(id,obj){        // obj = {name, type, data(dataURL)}
   if(CLOUD){
-    const r=await fetch(_filesUrl(id),{method:'PUT',body:JSON.stringify(obj)});
-    if(!r.ok) throw new Error('file save failed');
+    const r=await _fx(_filesUrl(id),{method:'PUT',body:JSON.stringify(obj)});
+    if(!r.ok) throw new Error('file save failed'+_ruleHint(r.status));
     return;
   }
   const all=JSON.parse(localStorage.getItem('threeacesFiles')||'{}');
@@ -533,7 +638,7 @@ async function fileSave(id,obj){        // obj = {name, type, data(dataURL)}
 }
 async function fileLoad(id){
   if(CLOUD){
-    try{ const r=await fetch(_filesUrl(id),{cache:'no-store'}); return r.ok? await r.json() : null; }
+    try{ const r=await _fx(_filesUrl(id),{cache:'no-store'}); return r.ok? await r.json() : null; }
     catch(e){ return null; }
   }
   return (JSON.parse(localStorage.getItem('threeacesFiles')||'{}'))[id]||null;
@@ -623,10 +728,11 @@ function lineGroup(l){                      // group of one line on a sale
   return guessGroup(l.item,'');
 }
 function saleUnits(s){ return (s.lines||[]).reduce((n,l)=>n+l.qty,0); }
-// Roll a list of sales up into {group:{n,units,rev,items:{'Item — Size':{qty,rev}}}}
+// Roll a list of sales up into
+// {group:{n,units,rev,items:{'Item — Size':{qty,rev}}, sellers:{name:{n,units,rev}}}}
 function groupRollup(sales){
   const g={};
-  const row=k=>g[k]=g[k]||{n:0,units:0,rev:0,items:{}};
+  const row=k=>g[k]=g[k]||{n:0,units:0,rev:0,items:{},sellers:{}};
   sales.forEach(s=>{
     const seen={};
     (s.lines||[]).forEach(l=>{
@@ -636,9 +742,111 @@ function groupRollup(sales){
       const ik=l.item+' — '+l.size;
       e.items[ik]=e.items[ik]||{qty:0,rev:0};
       e.items[ik].qty+=l.qty; e.items[ik].rev+=r;
+      const sn=s.sellerName||'—';
+      const se=e.sellers[sn]=e.sellers[sn]||{n:0,units:0,rev:0};
+      if(seen[k]===1){ seen[k]=2; se.n++; }
+      se.units+=l.qty; se.rev+=r;
     });
   });
   return g;
+}
+/* ------------------------ MEMBER TABS (PAY LATER) -------------------------
+   A "tab" is everything one person took on pay-later plus everything they've
+   since paid off. Both the admin (Money screen) and the member themselves
+   (My $) look at the same numbers through tabDetail, so they can never
+   disagree about what is owed.                                             */
+function tabDetail(name){
+  name=name||'';
+  const buys=salesSorted().filter(([,s])=>!s.voided && s.payment==='Pay Later' && (s.buyer||'')===name);
+  const pays=Object.entries(S.payments||{}).filter(([,p])=>p.kind==='tab' && p.from===name)
+    .sort((a,b)=>b[1].ts-a[1].ts);
+  const charged=buys.reduce((a,[,s])=>a+s.total,0);
+  const paid=pays.reduce((a,[,p])=>a+p.amount,0);
+  return {name, buys, pays, charged, paid, owes:Math.round((charged-paid)*100)/100};
+}
+// Every line on a tab, newest first — the list the member actually wants.
+function tabLines(t){
+  const out=[];
+  t.buys.forEach(([id,s])=>(s.lines||[]).forEach(l=>out.push({
+    id, ts:s.ts, seller:s.sellerName, item:l.item, size:l.size, qty:l.qty,
+    price:l.price, member:!!l.member, total:l.price*l.qty, note:s.note||''})));
+  return out.sort((a,b)=>b.ts-a.ts);
+}
+function tabDetailHTML(name, admin){
+  const t=tabDetail(name), lines=tabLines(t);
+  if(!t.buys.length && !t.pays.length)
+    return '<div class="empty">Nothing on this tab — everything was paid at the till.</div>';
+  const roll={};
+  lines.forEach(l=>{ const k=l.item+' — '+l.size;
+    roll[k]=roll[k]||{qty:0,total:0}; roll[k].qty+=l.qty; roll[k].total+=l.total; });
+  const rollRows=Object.entries(roll).sort((a,b)=>b[1].total-a[1].total);
+  return `<div class="statgrid">
+      <div class="stat"><div class="v">${fmt(t.charged)}</div><div class="l">Bought on the tab</div></div>
+      <div class="stat pos"><div class="v">${fmt(t.paid)}</div><div class="l">Paid so far</div></div>
+      <div class="stat ${t.owes>0.005?'red':'green'}"><div class="v">${fmt(Math.max(0,t.owes))}</div>
+        <div class="l">${t.owes>0.005?'Still owing':'All settled 🎉'}</div></div>
+    </div>
+    <h2>Every item on this tab</h2>
+    <div class="card scrollx"><table class="sheet">
+      <tr><th>Date</th><th>Item</th><th>Size</th><th class="r">Qty</th><th class="r">Price</th>
+        <th class="r">Total</th><th>Rung up by</th></tr>
+      ${lines.map(l=>`<tr><td>${new Date(l.ts).toLocaleDateString('en-CA')}</td>
+        <td>${esc(l.item)}${l.member?' <span class="muted">(member price)</span>':''}</td><td>${esc(l.size)}</td>
+        <td class="r"><b>${l.qty}</b></td><td class="r">${fmt(l.price)}</td>
+        <td class="r"><b>${fmt(l.total)}</b></td><td>${esc(l.seller)}${l.note?`<div class="muted">📝 ${esc(l.note)}</div>`:''}</td></tr>`).join('')
+        ||'<tr><td colspan="7" class="empty">No purchases on this tab.</td></tr>'}
+      <tr class="totrow"><td colspan="3"><b>${lines.length} line${lines.length===1?'':'s'}</b></td>
+        <td class="r"><b>${lines.reduce((a,l)=>a+l.qty,0)}</b></td><td></td>
+        <td class="r"><b>${fmt(t.charged)}</b></td><td></td></tr>
+    </table></div>
+    ${rollRows.length>1?`<h2>Totals by item</h2>
+    <div class="card"><table>
+      <tr><th>What was taken</th><th class="r">Qty</th><th class="r">Value</th></tr>
+      ${rollRows.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="r"><b>${v.qty}</b></td>
+        <td class="r">${fmt(v.total)}</td></tr>`).join('')}
+    </table></div>`:''}
+    <h2>Payments against this tab</h2>
+    <div class="card"><table>
+      <tr><th>Date</th><th>Note</th><th class="r">Paid</th>${admin?'<th></th>':''}</tr>
+      ${t.pays.map(([id,p])=>`<tr><td>${new Date(p.ts).toLocaleDateString('en-CA')}</td>
+        <td>${esc(p.note||'')} <span class="muted">recorded by ${esc(p.by||'')}</span></td>
+        <td class="r pos"><b>${fmt(p.amount)}</b></td>
+        ${admin?`<td class="r noprint"><button class="btn small red" onclick="delPayment('${id}')">✕</button></td>`:''}</tr>`).join('')
+        ||`<tr><td colspan="${admin?4:3}" class="empty">Nothing paid against this tab yet.</td></tr>`}
+    </table></div>
+    ${admin?`<div class="rowbtns noprint">
+      <button class="btn" onclick="payTabModal('${esc(name).replace(/'/g,"\\'")}')">✓ Record a payment on this tab</button>
+    </div>`:`<p class="muted">Pay an admin (cash or e-transfer) and they'll mark it here — this page updates on its own.</p>`}`;
+}
+function tabModal(name){
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>🧾 ${esc(name)}'s tab</h3>`
+    + tabDetailHTML(name, isAdmin()));
+}
+function payTabModal(name){
+  const t=tabDetail(name);
+  closeModal();
+  setTimeout(()=>{ recordPayment();
+    setTimeout(()=>{
+      const k=$('mp_kind'), f=$('mp_from'), a=$('mp_amt');
+      if(!k) return;
+      k.value='tab';
+      if(![...f.options].some(o=>o.value===name)) f.add(new Option(name,name),0);
+      f.value=name;
+      a.value=(Math.max(0,t.owes)||0).toFixed(2);
+    },30);
+  },60);
+}
+/* Flatten sales into one row per line — the spreadsheet view of a period.   */
+function saleLines(sales){
+  const out=[];
+  sales.forEach(([id,s])=>(s.lines||[]).forEach((l,i)=>out.push({
+    id, i, ts:s.ts, seller:s.sellerName, sellerId:s.sellerId, payment:s.payment,
+    buyer:s.buyer||'', voided:!!s.voided, edited:!!s.edited, grp:lineGroup(l),
+    note:s.note||'', movedFrom:(s.edited&&s.edited.movedFrom)||null,
+    item:l.item, size:l.size, qty:l.qty, price:l.price, cost:l.cost||0,
+    member:!!l.member, total:l.price*l.qty, profit:(l.price-(l.cost||0))*l.qty,
+  })));
+  return out;
 }
 
 /* ============================== RENDERING ================================= */
@@ -653,7 +861,7 @@ function rerender(){
   $('nav').style.display='flex';
   $('chipName').textContent=meU().name;
   renderNav();
-  if(view==='mymoney' && !((meU().profitPct||0)>0)) view='sell';
+  if(view==='mymoney' && !((meU().profitPct||0)>0) && !(tabDetail(meU().name).charged>0.005)) view='sell';
   if(view==='myclub' && (isAdmin()||!clubRecOn())) view='sell';
   ['sell','stock','saleslog','mymoney','myclub','admin'].forEach(v=>$(v).classList.toggle('active', v===view));
   if(view==='sell') renderSell();
@@ -718,7 +926,9 @@ document.addEventListener('keydown', e=>{
 
 function renderNav(){
   const tabs=[['sell','🛒','Sell'],['stock','📦','Stock'],['saleslog','🧾','Sales']];
-  if((meU().profitPct||0)>0) tabs.push(['mymoney','💰','My $']);
+  // "My $" is for anyone who keeps a share OR has ever bought on a tab —
+  // a member who owes the club needs somewhere to see what for.
+  if((meU().profitPct||0)>0 || tabDetail(meU().name).charged>0.005) tabs.push(['mymoney','💰','My $']);
   if(!isAdmin() && clubRecOn()) tabs.push(['myclub','🎟','Club']);
   if(isAdmin()) tabs.push(['admin','⚙️','Admin']);
   $('nav').innerHTML=tabs.map(([v,ic,l])=>
@@ -976,6 +1186,8 @@ function salesSorted(){ return Object.entries(S.sales||{}).sort((a,b)=>b[1].ts-a
    get any date range they like, totals split by sales group (clothing /
    raffle / bocce entry) and a full itemized listing underneath each one.  */
 let slPreset='today', slFrom=null, slTo=null, slGroup='', slWho='all', slOpen={};
+let slView='cards';        // cards = receipts · list = spreadsheet · grid = item × size
+let slSort='time';         // list view sort key
 function slRange(){
   const now=new Date();
   if(!canReport()) return [today0(), today0()+86400000-1];
@@ -1043,9 +1255,94 @@ function renderSales(){
         ${items.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="r"><b>${v.qty}</b></td><td class="r">${fmt(v.rev)}</td></tr>`).join('')}
         <tr class="totrow"><td><b>Total ${esc(GRP_LABEL[g].replace(/^\S+\s/,''))}</b></td>
           <td class="r"><b>${e.units}</b></td><td class="r"><b>${fmt(e.rev)}</b></td></tr>
-      </table>`:''}
+      </table>
+      <table style="margin-top:10px">
+        <tr><th>Who sold it</th><th class="r">Sales</th><th class="r">Qty</th><th class="r">Revenue</th></tr>
+        ${Object.entries(e.sellers).sort((a,b)=>b[1].rev-a[1].rev).map(([n,v])=>
+          `<tr><td>${esc(n)}</td><td class="r">${v.n}</td><td class="r"><b>${v.units}</b></td>
+           <td class="r">${fmt(v.rev)}</td></tr>`).join('')}
+      </table>
+      ${full?`<div class="rowbtns noprint" style="margin-top:10px">
+        <button class="btn small gray" onclick="slGroup='${g}';slView='list';rerender();document.getElementById('slEverything').scrollIntoView()">
+          ▸ Every ${esc(GRP_LABEL[g].replace(/^\S+\s/,''))} sale, line by line</button></div>`:''}`:''}
     </div>`;
   }).join('');
+
+  // ---- the spreadsheet view: one row per line sold --------------------------
+  const rows=saleLines(shown).map(r=>({...r, lineOK: !slGroup || r.grp===slGroup}))
+    .filter(r=>r.lineOK);
+  const SORTS={time:(a,b)=>b.ts-a.ts, item:(a,b)=>a.item.localeCompare(b.item)||sizeSort(a.size,b.size),
+    seller:(a,b)=>a.seller.localeCompare(b.seller)||b.ts-a.ts,
+    grp:(a,b)=>SALE_GROUPS.indexOf(a.grp)-SALE_GROUPS.indexOf(b.grp)||a.item.localeCompare(b.item),
+    qty:(a,b)=>b.qty-a.qty, total:(a,b)=>b.total-a.total};
+  rows.sort(SORTS[slSort]||SORTS.time);
+  const liveRows=rows.filter(r=>!r.voided);
+  const multiDay=dstr(from)!==dstr(to);
+  const listHTML = !rows.length ? '<div class="empty">Nothing sold in this period. 🤞</div>' : `
+    <div class="rowbtns noprint" style="margin:0 0 8px"><select id="slSortSel" onchange="slSort=this.value;rerender()">
+      ${[['time','🕒 Newest first'],['item','🏷 By item name'],['seller','👤 By who sold it'],
+         ['grp','🧾 By type of sale'],['qty','🔢 Biggest quantity first'],['total','💵 Biggest amount first']]
+        .map(([v,l])=>`<option value="${v}" ${slSort===v?'selected':''}>${l}</option>`).join('')}
+    </select></div>
+    <div class="card scrollx"><table class="sheet">
+      <tr><th>${multiDay?'Date':'Time'}</th>${multiDay?'<th>Time</th>':''}<th>Who sold it</th><th>Type</th>
+        <th>Item</th><th>Size</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Total</th>
+        ${isAdmin()?'<th class="r">Profit</th>':''}<th>Paid by</th><th>Note</th></tr>
+      ${rows.map(r=>`<tr${r.voided?' style="opacity:.45;text-decoration:line-through"':''}>
+        <td>${multiDay?new Date(r.ts).toLocaleDateString('en-CA'):new Date(r.ts).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</td>
+        ${multiDay?`<td>${new Date(r.ts).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</td>`:''}
+        <td>${esc(r.seller)}</td><td>${esc(GRP_LABEL[r.grp].replace(/^\S+\s/,''))}</td>
+        <td>${esc(r.item)}${r.member?' <span class="muted">(member)</span>':''}</td><td>${esc(r.size)}</td>
+        <td class="r"><b>${r.qty}</b></td><td class="r">${fmt(r.price)}</td><td class="r"><b>${fmt(r.total)}</b></td>
+        ${isAdmin()?`<td class="r goldtxt">${fmt(r.profit)}</td>`:''}
+        <td>${esc(r.payment)}${r.buyer?' — '+esc(r.buyer):''}</td>
+        <td>${r.movedFrom?`<span class="muted">📅 back-dated</span> `:''}${r.note?esc(r.note):''}</td></tr>`).join('')}
+      <tr class="totrow"><td colspan="${(multiDay?2:1)+4}"><b>${liveRows.length} line${liveRows.length===1?'':'s'}</b></td>
+        <td class="r"><b>${liveRows.reduce((a,r)=>a+r.qty,0)}</b></td><td></td>
+        <td class="r"><b>${fmt(liveRows.reduce((a,r)=>a+r.total,0))}</b></td>
+        ${isAdmin()?`<td class="r"><b>${fmt(liveRows.reduce((a,r)=>a+r.profit,0))}</b></td>`:''}<td></td><td></td></tr>
+    </table></div>
+    <p class="muted noprint">Scroll the table sideways to see every column. Voided lines are struck through and
+      left out of the totals.</p>`;
+
+  // ---- the grid view: item × size, sold vs still in stock -------------------
+  const gridHTML = (()=>{
+    const byItem={};
+    liveRows.forEach(r=>{
+      const e=byItem[r.item]=byItem[r.item]||{sizes:{},qty:0,rev:0,grp:r.grp};
+      e.sizes[r.size]=(e.sizes[r.size]||0)+r.qty; e.qty+=r.qty; e.rev+=r.total;
+    });
+    const names=Object.keys(byItem).sort((a,b)=>byItem[b].qty-byItem[a].qty||a.localeCompare(b));
+    if(!names.length) return '<div class="empty">Nothing sold in this period. 🤞</div>';
+    const cols=[...new Set(names.flatMap(n=>Object.keys(byItem[n].sizes)))].sort(sizeSort);
+    const stockOf=(name,size)=>{
+      const it=Object.values(S.items||{}).find(i=>i.name===name);
+      if(!it) return null;
+      if(size===undefined) return totalStock(it);
+      return it.sizes&&it.sizes[size]?(it.sizes[size].stock||0):null;
+    };
+    return `<div class="card scrollx"><table class="sheet grid">
+      <tr><th>Item</th>${cols.map(c=>`<th class="r">${esc(c)}</th>`).join('')}
+        <th class="r">Sold</th><th class="r">Left</th><th class="r">Revenue</th></tr>
+      ${names.map(n=>{
+        const e=byItem[n], left=stockOf(n);
+        return `<tr><td><b>${esc(n)}</b> <span class="muted">${esc(GRP_LABEL[e.grp].replace(/^\S+\s/,''))}</span></td>
+        ${cols.map(c=>{
+          const q=e.sizes[c]||0, st=stockOf(n,c);
+          return `<td class="r">${q?`<b>${q}</b>`:'<span class="muted">·</span>'}${
+            q&&st!==null?`<div class="muted" style="font-size:11px">${st} left</div>`:''}</td>`;
+        }).join('')}
+        <td class="r"><b>${e.qty}</b></td>
+        <td class="r ${left!==null&&left<=2?'neg':''}">${left===null?'<span class="muted">—</span>':left}</td>
+        <td class="r">${fmt(e.rev)}</td></tr>`;}).join('')}
+      <tr class="totrow"><td><b>Total</b></td>${cols.map(c=>
+        `<td class="r"><b>${names.reduce((a,n)=>a+(byItem[n].sizes[c]||0),0)}</b></td>`).join('')}
+        <td class="r"><b>${names.reduce((a,n)=>a+byItem[n].qty,0)}</b></td><td></td>
+        <td class="r"><b>${fmt(names.reduce((a,n)=>a+byItem[n].rev,0))}</b></td></tr>
+    </table></div>
+    <p class="muted noprint">Each cell is how many of that size sold, with what is still on the shelf underneath.
+      The <b>Left</b> column is the item's whole remaining stock right now — handy for counting the boxes back in.</p>`;
+  })();
 
   $('salesList').innerHTML= printHead('Sales', slLabel(from,to)+(slWho==='all'?'':' · '+(slWho==='mine'?meU().name:slWho)))+
     controls+
@@ -1061,13 +1358,22 @@ function renderSales(){
     <h2>By type of sale</h2>
     <p class="muted noprint" style="margin:0 0 8px">Tap a type to see exactly which items and sizes were sold. Set what belongs where in ${isAdmin()?'Admin → Items → 🏷 Sales groups':'Admin → Items'}.</p>
     ${groupCards||'<div class="empty">Nothing sold in this period.</div>'}
-    <h2>Every sale${slGroup?' — '+esc(GRP_LABEL[slGroup]):''}</h2>
-    ${full?`<div class="rowbtns noprint" style="margin:0 0 10px">
+    <h2 id="slEverything">Everything sold${slGroup?' — '+esc(GRP_LABEL[slGroup]):''}</h2>
+    ${full?`<div class="rowbtns noprint" style="margin:0 0 8px">
       <select onchange="slGroup=this.value;rerender()">
         <option value="">🧾 All types of sale</option>
         ${SALE_GROUPS.map(g=>`<option value="${g}" ${slGroup===g?'selected':''}>${GRP_LABEL[g]}</option>`).join('')}
-      </select></div>`:''}`+
-    (shown.map(([id,s])=>{
+      </select></div>`:''}
+    <div class="payrow noprint" style="margin:0 0 10px">
+      ${[['cards','🧾 Receipts'],['list','📋 List'],['grid','▦ Grid']].map(([v,l])=>
+        `<button class="${slView===v?'on':''}" onclick="slView='${v}';rerender()">${l}</button>`).join('')}
+    </div>
+    <p class="muted noprint" style="margin:0 0 10px">${
+      slView==='cards'?'One card per sale, the way it was rung up.':
+      slView==='list'?'One row per line sold — item, size, quantity and who sold it. Sorts any way you like.':
+      'Every item across, every size down — how many sold and how many are still on the shelf.'}</p>`+
+    (slView==='list'?listHTML: slView==='grid'?gridHTML:
+     shown.map(([id,s])=>{
       const lines = slGroup ? s.lines.filter(l=>lineGroup(l)===slGroup) : s.lines;
       const sub = slGroup ? lines.reduce((a,l)=>a+l.price*l.qty,0) : s.total;
       return `<div class="card salecard ${s.voided?'voided':''}">
@@ -1077,8 +1383,10 @@ function renderSales(){
       <div class="lines">${lines.map(l=>`${l.qty}× ${esc(l.item)} ${esc(l.size)}${l.member?' (member)':''}`).join(' · ')}
         · ${esc(s.payment)}${s.payment==='Pay Later'&&s.buyer?` — <b>${esc(s.buyer)} owes</b>`:''}${s.discount?` · <b class="neg">−${fmt(s.discount.amount)} discount</b> <span class="muted">(by ${esc(s.discount.by||s.sellerName)})</span>`:''}</div>
       <div class="lines muted">${[...new Set(lines.map(lineGroup))].map(g=>GRP_LABEL[g]).join(' · ')}</div>
+      ${s.edited&&s.edited.movedFrom?`<div class="lines muted">📅 Back-dated from ${new Date(s.edited.movedFrom).toLocaleString('en-CA')} by ${esc(s.edited.by||'')}</div>`:''}
+      ${s.note?`<div class="lines" style="color:var(--gold)">📝 ${esc(s.note)}</div>`:''}
       ${isAdmin()&&!s.voided?`<div class="rowbtns noprint">
-        <button class="btn small gray" onclick="pinConfirm('Edit this sale? Quantities, prices and payment can be changed — stock adjusts automatically.',()=>editSale('${id}'))">✎ Edit sale</button>
+        <button class="btn small gray" onclick="pinConfirm('Edit this sale? Quantities, prices, payment, the date it happened and a note can all be changed — stock adjusts automatically.',()=>editSale('${id}'))">✎ Edit sale</button>
         <button class="btn small red" onclick="voidSale('${id}')">Void &amp; restock</button></div>`:''}
     </div>`;}).join('')||'<div class="empty">No sales in this period. 🤞</div>');
 }
@@ -1091,12 +1399,13 @@ function exportShownSalesCSV(){
   let list=salesSorted().reverse().filter(([,s])=>s.ts>=from&&s.ts<=to);
   if(slWho==='mine') list=list.filter(([,s])=>s.sellerId===me);
   else if(slWho!=='all') list=list.filter(([,s])=>s.sellerName===slWho);
-  const rows=[['Date','Time','Type of sale','Seller','Item','Size','Qty','Unit Price','Line Total','Payment','Owed By','Voided']];
+  const rows=[['Date','Time','Type of sale','Seller','Item','Size','Qty','Unit Price','Line Total','Payment','Owed By','Voided','Note','Back-dated From']];
   list.forEach(([,s])=>{ const d=new Date(s.ts);
     s.lines.filter(l=>!slGroup||lineGroup(l)===slGroup).forEach(l=>rows.push([
       d.toLocaleDateString('en-CA'), d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}),
       GRP_LABEL[lineGroup(l)].replace(/^\S+\s/,''), s.sellerName, l.item, l.size, l.qty, l.price,
-      Math.round(l.price*l.qty*100)/100, s.payment, s.buyer||'', s.voided?'Y':'']));
+      Math.round(l.price*l.qty*100)/100, s.payment, s.buyer||'', s.voided?'Y':'', s.note||'',
+      (s.edited&&s.edited.movedFrom)?new Date(s.edited.movedFrom).toLocaleString('en-CA'):'']));
   });
   dl('three-aces-sales-'+dstr(from)+'-to-'+dstr(to)+'.csv', rows.map(r=>r.map(csvCell).join(',')).join('\n'));
   toast('Exported '+(rows.length-1)+' lines');
@@ -1812,12 +2121,17 @@ function renderMyClub(){
 
 /* --------------------------- EDIT A SALE ---------------------------------- */
 let _es=null;
+// datetime-local wants "YYYY-MM-DDTHH:MM" in LOCAL time, not a UTC ISO string.
+function tsLocalInput(ts){
+  const d=new Date(ts), p=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes());
+}
 function editSale(id){
   const s=S.sales[id];
-  _es={id, payment: s.payment==='Pay Later'?'Pay Later':'Cash', buyer: s.buyer||''};
+  _es={id, payment: s.payment==='Pay Later'?'Pay Later':'Cash', buyer: s.buyer||'', ts:s.ts};
   const users=Object.values(S.users||{}).filter(u=>u.active!==false).map(u=>u.name);
   openModal(`<h3><button class="x" onclick="closeModal()">✕</button>✎ Edit Sale</h3>
-    <p class="muted">${new Date(s.ts).toLocaleString('en-CA')} · sold by ${esc(s.sellerName)}</p>
+    <p class="muted">Rung up ${new Date(s.ts).toLocaleString('en-CA')} · sold by ${esc(s.sellerName)}</p>
     <div class="sehead" style="grid-template-columns:2.2fr .9fr 1fr">
       <span>Item</span><span>Qty</span><span>Unit $</span></div>
     ${s.lines.map((l,i)=>`<div class="sizeedit" style="grid-template-columns:2.2fr .9fr 1fr" data-i="${i}">
@@ -1836,9 +2150,27 @@ function editSale(id){
         ${users.map(n=>`<option ${_es.buyer===n?'selected':''}>${esc(n)}</option>`).join('')}</select>
       <div style="height:8px"></div>
     </div>
+    <label>Date &amp; time of this sale</label>
+    <input id="es_when" type="datetime-local" value="${tsLocalInput(s.ts)}">
+    <div class="rowbtns noprint" style="margin:6px 0 2px">
+      <button class="btn small gray" onclick="esShiftDay(-1)">◂ Day earlier</button>
+      <button class="btn small gray" onclick="esShiftDay(1)">Day later ▸</button>
+      <button class="btn small gray" onclick="esResetWhen(${s.ts})">↺ Back to original</button>
+    </div>
+    <p class="muted">Change this to put the sale on the day it actually happened — it moves in every report,
+      on the day's totals and on any member tab it belongs to.</p>
+    <label>Note (optional)</label>
+    <textarea id="es_note" rows="2" placeholder="What changed and why — e.g. rung up on the wrong day, wrong size, price corrected at the tent">${esc(s.note||'')}</textarea>
     <p class="muted">Set a quantity to 0 to remove that line — removing every line voids the whole sale. Stock adjusts automatically either way.</p>
     <button class="btn" onclick="saveSaleEdit()">✓ Save Changes</button>`);
 }
+function esShiftDay(n){
+  const el=$('es_when'); if(!el) return;
+  const d=el.value? new Date(el.value) : new Date(_es.ts);
+  d.setDate(d.getDate()+n);
+  el.value=tsLocalInput(d.getTime());
+}
+function esResetWhen(ts){ const el=$('es_when'); if(el) el.value=tsLocalInput(ts); }
 function esSetPay(p){
   _es.payment=p;
   $('esPayCash').classList.toggle('on',p==='Cash');
@@ -1869,12 +2201,22 @@ async function saveSaleEdit(){
     if(q>0) newLines.push({...l,qty:q,price:p});
   }
   const total=newLines.reduce((a,l)=>a+l.qty*l.price,0);
-  await DB.set(['sales',_es.id],{...s, lines:newLines, total,
+  const whenEl=$('es_when'), typed=whenEl? whenEl.value : '';
+  let ts=s.ts, moved=false;
+  if(typed){
+    const t=new Date(typed).getTime();
+    if(!isNaN(t) && Math.abs(t-s.ts)>60000){ ts=t; moved=true; }
+  }
+  const note=(($('es_note')||{}).value||'').trim().slice(0,500);
+  await DB.set(['sales',_es.id],{...s, ts, lines:newLines, total,
     payment:_es.payment, buyer:_es.payment==='Pay Later'?_es.buyer:null,
+    note: note||null,
     voided:newLines.length===0? true : (s.voided||false),
-    edited:{ts:Date.now(), by:meU().name}});
+    edited:{ts:Date.now(), by:meU().name, movedFrom: moved? s.ts : (s.edited&&s.edited.movedFrom)||null}});
   closeModal();
-  toast(newLines.length? 'Sale updated — '+fmt(total) : 'All lines removed — sale voided');
+  toast(newLines.length
+    ? 'Sale updated — '+fmt(total)+(moved?' · moved to '+new Date(ts).toLocaleDateString('en-CA'):'')
+    : 'All lines removed — sale voided');
   rerender();
 }
 
@@ -1914,7 +2256,18 @@ function renderMyMoney(){
   const oweClub=cashC-cashK-handed;
   const clubOwes=laterK-paidOut;
   const presets=[['today','Today'],['week','This week'],['month','This month'],['year','This year'],['all','All time']];
-  $('myMoneyBody').innerHTML= printHead('My Sales & Earnings — '+esc(myName), dstr(from)+' to '+dstr(to)) + `
+  const myTab=tabDetail(myName);
+  const tabBlock = (myTab.charged>0.005||myTab.pays.length) ? `
+    <h2>🧾 My tab — what I took on pay-later</h2>
+    ${tabDetailHTML(myName, isAdmin())}
+    <div style="height:6px"></div>` : '';
+  if(!(u.profitPct||0) && tabBlock){
+    // this member is here only for their tab — show it and nothing else
+    $('myMoneyBody').innerHTML = printHead('My Tab — '+esc(myName),'All-time') + tabBlock;
+    return;
+  }
+  $('myMoneyBody').innerHTML= printHead('My Sales & Earnings — '+esc(myName), dstr(from)+' to '+dstr(to)) +
+    tabBlock + `
     <h2>My sales &amp; earnings</h2>
     <div class="payrow noprint" style="flex-wrap:wrap">
       ${presets.map(([v,l])=>`<button class="${myPreset===v?'on':''}" style="flex:1 1 28%"
@@ -2309,6 +2662,7 @@ function moneyHTML(){
   const owedTabs=Object.values(tabs).reduce((a,e)=>a+e.charged,0);
   const paidTabs=Object.values(tabs).reduce((a,e)=>a+e.paid,0);
   const outstanding=(owedSellers-recSellers)+(owedTabs-paidTabs);
+  const mism=shareMismatches();
   return printHead('Money In / Reimbursements & Tabs','All-time up to '+new Date().toLocaleDateString('en-CA')) + `
    <p class="muted noprint">Cash &amp; e-transfer sales: whoever rang it up is holding that money and owes the club everything
    they collected minus the profit share they keep. Pay-later sales go on the buyer's tab instead. When any money is
@@ -2333,24 +2687,47 @@ function moneyHTML(){
    <p class="muted">End-of-day counting: <b>cash box total − float still out = sales cash</b> to hand in.
    The float is a loan for making change — it never counts as revenue or as money owed. When the box comes back,
    record a "Float returned" below and the balance goes to $0.</p>`:''}
+   ${mism.length?`<div class="card" style="border-color:var(--gold)">
+     <b>⚠ Someone is keeping a share that doesn't match their settings</b>
+     <p class="muted">Every sale stores the profit share it was rung up at, so changing a member's percentage later
+       does not quietly rewrite what they were already owed. That is normally what you want — but if the wrong
+       percentage was left on during an event, the "Keeps" column below is still using it. Correct it here and
+       every figure on this screen re-adds itself.</p>
+     ${mism.map(m=>`<div class="rowbtns noprint" style="margin-top:8px">
+       <button class="btn gray" onclick="fixShareModal('${m.id}')">⟳ ${esc(m.name)} — ${m.n} sale${m.n===1?'':'s'}
+         recorded at ${m.pcts.map(p=>p+'%').join(' / ')}, settings now say ${m.now}%</button></div>`).join('')}
+   </div>`:''}
    <h2>Sellers — cash to hand in</h2>
    <div class="card"><table>
     <tr><th>Member</th><th class="r">Collected</th><th class="r">Keeps</th><th class="r">Owes club</th><th class="r">Paid in</th><th class="r">Balance</th></tr>
     ${Object.entries(bal).map(([n,e])=>{
       const owes=e.collected-e.keeps, b=owes-e.received;
-      return `<tr><td>${esc(n)}</td><td class="r">${fmt(e.collected)}</td><td class="r goldtxt">${fmt(e.keeps)}</td>
+      const mm=mism.find(m=>m.name===n);
+      return `<tr><td>${esc(n)}${mm?` <span class="voidtag noprint" style="color:var(--gold);cursor:pointer"
+          onclick="fixShareModal('${mm.id}')">⚠ SHARE</span>`:''}</td>
+        <td class="r">${fmt(e.collected)}</td><td class="r goldtxt">${fmt(e.keeps)}</td>
         <td class="r">${fmt(owes)}</td><td class="r pos">${fmt(e.received)}</td>
         <td class="r ${b>0.005?'neg':'pos'}"><b>${fmt(b)}</b></td></tr>`;}).join('')
       ||'<tr><td colspan="6" class="empty">No cash sales or hand-ins yet.</td></tr>'}
    </table></div>
    <h2>Member tabs — pay later</h2>
+   <p class="muted noprint" style="margin:0 0 8px">Biggest debt first. Tap a name to see exactly what they took,
+     line by line, and to mark a payment against it.</p>
    <div class="card"><table>
-    <tr><th>Member</th><th class="r">Charged</th><th class="r">Paid</th><th class="r">Still owes</th></tr>
-    ${Object.entries(tabs).map(([n,e])=>{
-      const b=e.charged-e.paid;
-      return `<tr><td>${esc(n)}</td><td class="r">${fmt(e.charged)}</td><td class="r pos">${fmt(e.paid)}</td>
-        <td class="r ${b>0.005?'neg':'pos'}"><b>${fmt(b)}</b></td></tr>`;}).join('')
-      ||'<tr><td colspan="4" class="empty">No pay-later purchases yet.</td></tr>'}
+    <tr><th>Member</th><th class="r">Charged</th><th class="r">Paid</th><th class="r">Still owes</th><th class="noprint"></th></tr>
+    ${Object.entries(tabs).sort((a,b)=>(b[1].charged-b[1].paid)-(a[1].charged-a[1].paid)).map(([n,e])=>{
+      const b=e.charged-e.paid, q=esc(n).replace(/'/g,"\\'");
+      return `<tr><td><a href="#" style="color:var(--gold);font-weight:700"
+          onclick="tabModal('${q}');return false">${esc(n)}</a>
+          <div class="muted noprint">${tabLines(tabDetail(n)).length} item line(s) on this tab</div></td>
+        <td class="r">${fmt(e.charged)}</td><td class="r pos">${fmt(e.paid)}</td>
+        <td class="r ${b>0.005?'neg':'pos'}"><b>${fmt(b)}</b></td>
+        <td class="r noprint">${b>0.005?`<button class="btn small" onclick="payTabModal('${q}')">✓ Paid</button>`
+          :'<span class="pos">settled</span>'}</td></tr>`;}).join('')
+      ||'<tr><td colspan="5" class="empty">No pay-later purchases yet.</td></tr>'}
+    ${Object.keys(tabs).length?`<tr class="totrow"><td><b>Total outstanding</b></td>
+      <td class="r"><b>${fmt(owedTabs)}</b></td><td class="r pos"><b>${fmt(paidTabs)}</b></td>
+      <td class="r ${owedTabs-paidTabs>0.005?'neg':'pos'}"><b>${fmt(owedTabs-paidTabs)}</b></td><td></td></tr>`:''}
    </table></div>
    ${Object.keys(laterShare).length?`<h2>Profit share owed BY the club (pay-later sales)</h2>
    <div class="card"><table>
@@ -2743,6 +3120,18 @@ function pastShareSales(userId){
 function countSharePast(userId,pct){
   return pastShareSales(userId).filter(([,s])=>(s.sellerPct||0)!==pct).length;
 }
+// Anyone whose recorded sales carry a share that isn't what their settings say
+// now. Surfaced on the Money screen, where the wrong number actually shows up.
+function shareMismatches(){
+  const out=[];
+  Object.entries(S.users||{}).forEach(([id,u])=>{
+    const now=u.profitPct||0;
+    const wrong=pastShareSales(id).filter(([,s])=>(s.sellerPct||0)!==now);
+    if(wrong.length) out.push({id, name:u.name, now, n:wrong.length,
+      pcts:[...new Set(wrong.map(([,s])=>s.sellerPct||0))].sort((a,b)=>b-a)});
+  });
+  return out;
+}
 let _fsFrom=null;
 function fixShareModal(userId, oldPct){
   const u=S.users[userId], now=u.profitPct||0;
@@ -2838,11 +3227,11 @@ async function downloadBackup(){
   let tree, files;
   if(CLOUD){
     toast('Building the backup — reading the whole database…');
-    let r; try{ r=await fetch(_restUrl([]),{cache:'no-store'}); }catch(e){ r=null; }
+    let r; try{ r=await _fx(_restUrl([]),{cache:'no-store'}); }catch(e){ r=null; }
     if(!r||!r.ok){ toast('Could not read the database — check the connection and try again',1); return; }
     tree=await r.json();
     try{
-      const rf=await fetch(FIREBASE_CONFIG.databaseURL.replace(/\/+$/,'')+'/threeacesFiles.json',{cache:'no-store'});
+      const rf=await _fx(FIREBASE_CONFIG.databaseURL.replace(/\/+$/,'')+'/threeacesFiles.json',{cache:'no-store'});
       files=rf.ok? await rf.json() : null;
     }catch(e){ files=null; }
   }else{
@@ -2866,9 +3255,9 @@ function restoreBackupPick(inp){
     pinConfirm('RESTORE the backup from '+when+'? This REPLACES everything currently in the database — items, stock, sales, users, money, books, attendance — with what is in that file. Every phone switches to it within seconds. This cannot be undone (unless you have a newer backup).',
       async ()=>{
         if(CLOUD){
-          const r=await fetch(_restUrl([]),{method:'PUT',body:JSON.stringify(data)});
+          const r=await _fx(_restUrl([]),{method:'PUT',body:JSON.stringify(data)});
           if(!r.ok){ toast('Restore failed — check the connection',1); return; }
-          if(b.files){ try{ await fetch(FIREBASE_CONFIG.databaseURL.replace(/\/+$/,'')+'/threeacesFiles.json',{method:'PUT',body:JSON.stringify(b.files)}); }catch(e){} }
+          if(b.files){ try{ await _fx(FIREBASE_CONFIG.databaseURL.replace(/\/+$/,'')+'/threeacesFiles.json',{method:'PUT',body:JSON.stringify(b.files)}); }catch(e){} }
           _lastJson='';
           S=Object.assign({items:{},users:{},sales:{},settings:{},restocks:{},payments:{}}, data);
         }else{
@@ -2882,8 +3271,55 @@ function restoreBackupPick(inp){
   };
   rd.readAsText(f); inp.value='';
 }
-function dataHTML(){
+/* ---------------------- IS THE DATABASE LOCKED? ----------------------------
+   Asks the database for the club data with NO signature attached — exactly what
+   a stranger who found the address would get. Data back means it is still wide
+   open; "Permission denied" means the lock is doing its job.                  */
+let _lockState=null;      // null = not checked yet
+async function checkLock(){
+  _lockState={busy:true}; renderAdmin();
+  let open=null, err='';
+  try{
+    const r=await fetch(_restUrl(['settings']),{cache:'no-store'});
+    if(r.status===401||r.status===403) open=false;
+    else if(r.ok){ const t=await r.text(); open = t!=='null'; if(!open) err='the database answered but had nothing to give'; }
+    else err='HTTP '+r.status;
+  }catch(e){ err=(e&&e.message)||'no answer'; }
+  _lockState={open, err, signedIn:_authState==='ok', ts:Date.now()};
+  renderAdmin();
+}
+function securityHTML(){
+  if(!CLOUD) return `<div class="card"><b>🔐 Security</b>
+    <p class="muted">This is the local test copy — nothing is on the internet, so there is nothing to lock.</p></div>`;
+  const s=_lockState;
+  const signed=_authState==='ok';
   return `<div class="card">
+    <b>🔐 Security — who can reach the club database</b>
+    <p class="muted">The app signs each phone in automatically and the database is told to answer signed phones only.
+      Nobody types an extra password; this just stops a stranger with the address helping themselves.</p>
+    <div class="statgrid" style="margin:8px 0">
+      <div class="stat ${signed?'green':'red'}"><div class="v">${signed?'✔ Signed in':'✕ Not signed in'}</div>
+        <div class="l">This phone${signed?'':(_authState==='disabled'?' — anonymous sign-in is switched off in Firebase':(_authMsg?' — '+esc(_authMsg):''))}</div></div>
+      <div class="stat"><div class="v">${APP_VERSION}</div><div class="l">Version on this phone</div></div>
+    </div>
+    ${s&&s.busy?'<p class="muted">Checking…</p>':s?`
+      <div class="stat ${s.open===false?'green':'red'}" style="margin-bottom:8px">
+        <div class="v">${s.open===false?'🔒 Locked':s.open===true?'🔓 Wide open':'⚠ No clear answer'}</div>
+        <div class="l">${s.open===false
+          ? 'A stranger with the address gets nothing — the Rules are doing their job.'
+          : s.open===true
+          ? 'Anyone who knows the database address can read the club data right now. Set the Rules to auth != null.'
+          : 'Could not tell'+(s.err?' — '+esc(s.err):'')+'. Try again on a normal internet connection.'}</div></div>`:''}
+    <div class="rowbtns">
+      <button class="btn gray" onclick="checkLock()">🔍 Check the lock now</button>
+    </div>
+    <p class="muted" style="margin-top:8px"><b>Changing this over:</b> put the new file on every phone first and check each one says
+      “Signed in” here. Only then set the Rules in Firebase to  auth != null  and Publish. Doing it the other way round
+      locks out any phone still on the old file.</p>
+  </div>`;
+}
+function dataHTML(){
+  return securityHTML()+`<div class="card">
     <b>💾 Backup — the whole database in one file</b>
     <p class="muted">Downloads everything — items, stock, sales, users, money, books, attendance, invoice files — to this device. Do it before every event and after big changes. If disaster ever strikes, Restore puts it all back exactly as it was.</p>
     <div class="rowbtns">
