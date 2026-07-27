@@ -346,7 +346,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.14';
+const APP_VERSION = 'v3.15';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -890,7 +890,7 @@ function rerender(){
   $('chipName').textContent=meU().name;
   renderNav();
   if(view==='mymoney' && !((meU().profitPct||0)>0) && !(tabDetail(meU().name).charged>0.005)) view='sell';
-  if(view==='myclub' && (isAdmin()||!clubRecOn())) view='sell';
+  if(view==='myclub' && !clubRecOn()) view='sell';
   ['sell','stock','saleslog','mymoney','myclub','admin'].forEach(v=>$(v).classList.toggle('active', v===view));
   if(view==='sell') renderSell();
   if(view==='stock') renderStock();
@@ -957,7 +957,9 @@ function renderNav(){
   // "My $" is for anyone who keeps a share OR has ever bought on a tab —
   // a member who owes the club needs somewhere to see what for.
   if((meU().profitPct||0)>0 || tabDetail(meU().name).charged>0.005) tabs.push(['mymoney','💰','My $']);
-  if(!isAdmin() && clubRecOn()) tabs.push(['myclub','🎟','Club']);
+  // An admin is a member of the club as well: their own attendance and their own
+  // sponsor are theirs to see, the same as everybody else's.
+  if(clubRecOn()) tabs.push(['myclub','🎟','Club']);
   if(isAdmin()) tabs.push(['admin','⚙️','Admin']);
   $('nav').innerHTML=tabs.map(([v,ic,l])=>
     `<button class="${view===v?'on':''}" onclick="go('${v}')"><span class="ic">${ic}</span>${l}</button>`).join('');
@@ -2261,6 +2263,7 @@ function attStaff(){ return attVisible().filter(r=>isStaffRow(r)); }
    It stays readable wherever it was already recorded — the old years are the
    club's history and nothing is rewritten.                                   */
 const MARK_CODES=['P','L','AN','A'];
+const MARK_LABEL={P:'Present',L:'Late',A:'Absent',AN:'Absent — with notice',NP:'No patch'};
 function attHasNP(){
   return Object.values(((S.attendance||{}).years)||{}).some(yy=>
     Object.values(yy.marks||{}).some(mm=>Object.values(mm).some(v=>v==='NP')));
@@ -2342,19 +2345,47 @@ function attendHTML(){
         }).join('')}<td class="r"><b>${pCount}</b></td></tr>`;
       }).join('')}
     </table></div>
-    ${MONTHS.some((m,i)=>minutes['m'+(i+1)]||notes['m'+(i+1)]||Object.keys(mnotes['m'+(i+1)]||{}).length)?
-      `<h2>📝 What was covered — ${attYear}</h2>
-      <p class="muted noprint" style="margin:-6px 0 8px">Anyone marked absent for a month sees that month's minutes on their own Club tab, so they know what they missed.</p>
-      ${MONTHS.map((m,i)=>{ const k='m'+(i+1), mn=minutes[k]||'', nt=notes[k]||'', per=mnotes[k]||{};
-        const perList=Object.entries(per).filter(([id,v])=>v&&mem.concat(stf,hid).some(r=>r.id===id));
-        if(!mn&&!nt&&!perList.length) return '';
-        const nameOf=id=>(attRoster().find(r=>r.id===id)||{}).name||'—';
-        return `<div class="card"><b>${m} ${attYear}</b> <span class="muted">${meetDate(attYear,i+1).toLocaleDateString('en-CA',{month:'short',day:'numeric'})}</span>
-          ${mn?`<p style="margin:6px 0 0;white-space:pre-wrap">${esc(mn)}</p>`:'<p class="muted" style="margin:6px 0 0">No minutes were written for this meeting.</p>'}
-          ${nt?`<p class="muted" style="margin:6px 0 0">Register note: ${esc(nt)}</p>`:''}
-          ${perList.length?`<div class="muted" style="margin-top:6px;font-size:12px">${perList.map(([id,v])=>
-            `<div><b>${esc(nameOf(id))}</b> — ${esc(v)}</div>`).join('')}</div>`:''}
-        </div>`; }).join('')}`:''}
+    ${(()=>{
+      /* ---- MEETING BY MEETING, the admin's copy -------------------------------
+         Members each get their own missed-meeting page and see only their own
+         reason for being away. The admin runs the register, so this is the whole
+         picture in one place: who was away that month, why each of them was away,
+         what was covered, and the admin-only register note.                      */
+      const nameOf=id=>(attRoster().find(r=>r.id===id)||{}).name||'—';
+      const all=mem.concat(stf,hid);
+      const cards=MONTHS.map((m,i)=>{
+        const k='m'+(i+1), mn=minutes[k]||'', nt=notes[k]||'', per=mnotes[k]||{};
+        // Anybody on the register — hidden or since moved to staff — who was marked
+        // away that month. Their history stays readable even after they move.
+        const away=all.filter(r=>{ const v=(marks[r.id]||{})[k]; return v==='A'||v==='AN'; })
+          .map(r=>({r, v:(marks[r.id]||{})[k], why:per[r.id]||''}));
+        const marked=all.filter(r=>(marks[r.id]||{})[k]).length;
+        // A reason written against somebody who was not marked away — keep it visible
+        // rather than quietly dropping it.
+        const stray=Object.entries(per).filter(([id,v])=>v&&!away.some(a=>a.r.id===id)&&all.some(r=>r.id===id));
+        if(!mn&&!nt&&!away.length&&!stray.length&&!marked) return '';
+        return `<div class="card"><b>${m} ${attYear}</b> <span class="muted">${meetDate(attYear,i+1).toLocaleDateString('en-CA',{weekday:'short',month:'short',day:'numeric'})}${locked[k]?' 🔒':''}</span>
+          ${marked?`<div style="margin-top:6px"><b class="${away.length?'neg':'pos'}">${away.length?away.length+' away':'Full house'}</b>
+            <span class="muted">· ${marked-away.length} of ${marked} marked in</span></div>`:''}
+          ${away.length?`<table style="margin-top:6px"><tr><th>Away</th><th>Mark</th><th>Reason on the register</th></tr>
+            ${away.map(a=>`<tr><td>${esc(a.r.name)}${isStaffRow(a.r)?' <span class="memberflag">STAFF</span>':''}${a.r.hidden?' <span class="memberflag">OFF REGISTER</span>':''}</td>
+              <td>${MARK_LABEL[a.v]||a.v}</td>
+              <td>${a.why?esc(a.why):'<span class="muted">— none written —</span>'}</td></tr>`).join('')}
+          </table>`:''}
+          ${stray.length?`<div class="muted" style="margin-top:6px;font-size:12px">${stray.map(([id,v])=>
+            `<div><b>${esc(nameOf(id))}</b> — ${esc(v)} <i>(not marked away)</i></div>`).join('')}</div>`:''}
+          ${mn?`<p style="margin:8px 0 0;white-space:pre-wrap">${esc(mn)}</p>`
+              :'<p class="muted" style="margin:8px 0 0">No minutes were written for this meeting — whoever was away sees nothing on their Club tab.</p>'}
+          ${nt?`<p class="muted" style="margin:6px 0 0">🔒 Register note (admin only): ${esc(nt)}</p>`:''}
+          <div class="noprint" style="margin-top:8px"><button class="btn small gray" onclick="attMonthOpen(${i+1})">✎ ${mn?'Edit':'Write'} the ${m} meeting</button></div>
+        </div>`;
+      }).filter(Boolean);
+      if(!cards.length) return '';
+      return `<h2>📝 Meeting by meeting — ${attYear}</h2>
+      <p class="muted noprint" style="margin:-6px 0 8px">Everything about each meeting in one place: who was away, why, and what was covered.
+        Members only ever see the minutes for the meetings <b>they</b> missed, plus their own reason — never anybody else's, and never the register note.</p>
+      ${cards.join('')}`;
+    })()}
     <h2>📅 Meeting dates — ${attYear}</h2>
     <div class="card"><table>
       <tr><th>Month</th><th>Meeting</th><th class="r noprint"></th></tr>
