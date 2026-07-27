@@ -204,6 +204,9 @@
   tr.drill td:first-child::after{content:' ›';color:var(--gold);font-weight:800;}
   tr.drill:active td{background:var(--panel2);}
   .drilltot td{border-top:2px solid var(--line);background:var(--panel2);font-weight:800;}
+  .drillrow{cursor:pointer;}
+  .drillrow:hover td{background:var(--panel2);}
+  .drillrow:active td{background:var(--panel2);}
   .stat .sub{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.35;}
   .stat.drilltile{cursor:pointer;position:relative;}
   .stat.drilltile::after{content:'›';position:absolute;top:8px;right:11px;color:var(--gold);
@@ -346,7 +349,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.15';
+const APP_VERSION = 'v3.16';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -2897,6 +2900,48 @@ function printHead(title,sub){
     <p>${esc(sub)} · printed ${new Date().toLocaleString('en-CA')}</p></div>`;
 }
 let repFrom=null, repTo=null, repPreset='today', repSeller='', repItem='', repDisc='', repGroup='';
+/* ------------------ WHAT "DISCOUNTED" ACTUALLY MEANS ------------------------
+   Two completely different things were being muddled together:
+
+   1. A VOLUME DISCOUNT is applied to a whole SALE at the till. It is then spread
+      across the lines in proportion to their value. So a sale can be flagged
+      "discounted" while one particular item on it still went out at full shelf
+      price — the money came off the other lines.
+   2. A LINE is marked down when what was charged for it is less than the shelf
+      price. That can come from the volume discount, from the item being on sale,
+      or from member pricing (members pay cost).
+
+   The old filter tested (1) and then printed every line of those sales, so a
+   full-price hoodie inside a discounted sale looked discounted. It never was.
+   Pay Later has nothing to do with either — that is only WHEN it was paid.     */
+function lineList(l){ return (l.orig!=null? l.orig : l.price); }        // shelf price
+function lineOff(l){ return Math.max(0,(lineList(l)-l.price))*(l.qty||0); }
+function lineCut(l){ return lineOff(l)>0.005; }
+// Why this line came in under the shelf price — in plain words, for the drill-down.
+function lineWhy(l,s){
+  const w=[];
+  if(l.member) w.push('member price (at cost)');
+  if(l.salePct>0) w.push(l.salePct+'% off — item on sale');
+  if(s&&s.discount) w.push('share of the '+(s.discount.type==='pct'?s.discount.value+'%':fmt(s.discount.value))
+    +' volume discount on this sale');
+  return w;
+}
+// One place that decides which sales are in scope, so the tiles, the tables and
+// the drill-downs can never drift apart.
+function repScopedSales(){
+  const [from,to]=repRange();
+  let sales=salesSorted().map(([id,s])=>({id,s})).filter(x=>!x.s.voided&&x.s.ts>=from&&x.s.ts<=to);
+  if(repSeller) sales=sales.filter(x=>x.s.sellerName===repSeller);
+  if(repDisc==='sale') sales=sales.filter(x=>x.s.discount);
+  return sales;
+}
+// ...and one place that decides which LINES of a scoped sale are in scope.
+function repScopedLines(s){
+  let lines = repItem ? s.lines.filter(l=>l.item===repItem) : s.lines;
+  if(repGroup) lines = lines.filter(l=>lineGroup(l)===repGroup);
+  if(repDisc==='line') lines = lines.filter(lineCut);
+  return lines;
+}
 function repRange(){
   const now=new Date();
   if(repPreset==='custom') return [repFrom??today0(), repTo??(today0()+86400000-1)];
@@ -2908,19 +2953,85 @@ function repRange(){
   return [0, Date.now()];   // all time
 }
 function dstr(t){ const d=new Date(t); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+/* --------------------------- SHOW YOUR WORKING ------------------------------
+   Every total on the report can now be opened up. You get the individual sales
+   behind it: when, who rang it up, how it was paid — and for each line the shelf
+   price against what was actually charged, with the reason spelled out. This is
+   what was missing: the numbers were right, but there was no way to check them. */
+function repDrill(kind,key){
+  const [from,to]=repRange();
+  const want=l=> kind==='group' ? lineGroup(l)===key
+             : kind==='item'  ? (l.item+' — '+l.size)===key
+             : kind==='off'   ? lineCut(l)
+             : true;                                  // 'seller' — whole sale
+  const hits=[];
+  repScopedSales().forEach(({id,s})=>{
+    if(kind==='seller' && s.sellerName!==key) return;
+    const lines=repScopedLines(s).filter(want);
+    if(lines.length) hits.push({id,s,lines});
+  });
+  const rev=hits.reduce((a,h)=>a+h.lines.reduce((b,l)=>b+l.price*l.qty,0),0);
+  const cost=hits.reduce((a,h)=>a+h.lines.reduce((b,l)=>b+l.cost*l.qty,0),0);
+  const qty=hits.reduce((a,h)=>a+h.lines.reduce((b,l)=>b+l.qty,0),0);
+  const off=hits.reduce((a,h)=>a+h.lines.reduce((b,l)=>b+lineOff(l),0),0);
+  const title = kind==='group' ? (GRP_LABEL[key]||key)
+              : kind==='item'  ? key
+              : kind==='off'   ? 'Everything sold below shelf price'
+              : 'Sold by '+key;
+  const rows=hits.map(({id,s,lines})=>{
+    const paid = s.payment==='Pay Later'
+      ? `<b class="goldtxt">Pay Later</b>${s.buyer?` — on ${esc(s.buyer)}'s tab`:''}`
+      : esc(s.payment);
+    return `<div class="card" style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+        <b>${new Date(s.ts).toLocaleDateString('en-CA',{month:'short',day:'numeric'})}
+          ${new Date(s.ts).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</b>
+        <span class="muted">${esc(s.sellerName)} · ${paid}</span></div>
+      <table style="margin-top:6px"><tr><th>Item</th><th class="r">Qty</th><th class="r">Shelf</th><th class="r">Charged</th><th class="r">Off</th></tr>
+      ${lines.map(l=>{ const o=lineOff(l), why=lineWhy(l,s);
+        return `<tr><td>${esc(l.item)} ${esc(l.size)}
+            ${o>0.005&&why.length?`<div class="muted" style="font-size:11px">${esc(why.join(' + '))}</div>`:''}</td>
+          <td class="r">${l.qty}</td>
+          <td class="r ${o>0.005?'muted':''}" style="${o>0.005?'text-decoration:line-through':''}">${fmt(lineList(l))}</td>
+          <td class="r"><b>${fmt(l.price)}</b></td>
+          <td class="r ${o>0.005?'neg':'muted'}">${o>0.005?'−'+fmt(o):'—'}</td></tr>`; }).join('')}
+      </table>
+      ${s.discount?`<p class="muted" style="margin:6px 0 0">🧾 A ${s.discount.type==='pct'?s.discount.value+'%':fmt(s.discount.value)+' off'}
+        volume discount (−${fmt(s.discount.amount)}) was applied to this whole sale by <b>${esc(s.discount.by||s.sellerName)}</b>,
+        spread across all ${s.lines.length} line${s.lines.length===1?'':'s'} on it${s.lines.length>lines.length?` — only ${lines.length} shown here`:''}.</p>`:''}
+      ${s.note?`<p style="margin:6px 0 0;color:var(--gold)">📝 ${esc(s.note)}</p>`:''}
+      ${s.edited?'<p class="muted" style="margin:6px 0 0">This sale was edited after it was rung up.</p>':''}
+    </div>`;
+  }).join('');
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>${esc(title)}</h3>
+    <p class="muted">${dstr(from)} to ${dstr(to)}${repSeller&&kind!=='seller'?' · seller: '+esc(repSeller):''}</p>
+    <div class="statgrid">
+      <div class="stat green"><div class="v">${fmt(rev)}</div><div class="l">Revenue · ${hits.length} sale${hits.length===1?'':'s'}</div></div>
+      <div class="stat gold"><div class="v">${qty}</div><div class="l">Units</div></div>
+      <div class="stat ${rev-cost>=0?'gold':'red'}"><div class="v">${fmt(rev-cost)}</div><div class="l">Profit (cost ${fmt(cost)})</div></div>
+      ${off>0.005?`<div class="stat red"><div class="v">−${fmt(off)}</div><div class="l">Off shelf price</div></div>`
+        :`<div class="stat green"><div class="v">Full price</div><div class="l">Nothing was marked down</div></div>`}
+    </div>
+    ${off>0.005?'':`<div class="card"><p class="muted" style="margin:0">Every line here was charged at its full shelf price.
+      If this opened from a "volume discount" filter, that discount landed on <i>other</i> lines of the same sale, not on these.
+      <b>Pay Later</b> is only when the money arrives — it never reduces the price.</p></div>`}
+    ${rows||'<div class="empty">Nothing matches.</div>'}`);
+}
 function reportHTML(){
   const [from,to]=repRange();
-  let sales=salesSorted().map(([id,s])=>s).filter(s=>!s.voided&&s.ts>=from&&s.ts<=to);
-  if(repSeller) sales=sales.filter(s=>s.sellerName===repSeller);
-  if(repDisc==='only') sales=sales.filter(s=>s.discount);
-  const discTotal=sales.reduce((a,s)=>a+((s.discount&&s.discount.amount)||0),0);
+  const scoped=repScopedSales();
+  const sales=scoped.map(x=>x.s);
+  // Money actually taken off the lines being counted — not the whole-sale figure,
+  // which would include lines this report has filtered out.
+  let offList=0, cutLines=0, volSales=0;
   let rev=0,cogs=0,units=0,nSales=0;
   const bySeller={}, byItem={}, byGroup={};
   sales.forEach(s=>{
-    let lines = repItem ? s.lines.filter(l=>l.item===repItem) : s.lines;
-    if(repGroup) lines = lines.filter(l=>lineGroup(l)===repGroup);
+    const lines = repScopedLines(s);
     if(!lines.length) return;
     nSales++;
+    if(s.discount) volSales++;
+    lines.forEach(l=>{ const o=lineOff(l); if(o>0.005){ offList+=o; cutLines++; } });
     const pct=(s.sellerPct||0)/100;
     let sRev=0,sProf=0,sUnits=0;
     const seenG={};
@@ -2946,7 +3057,9 @@ function reportHTML(){
     .concat(allItemsSorted().map(([,i])=>i.name)))].sort((a,b)=>a.localeCompare(b));
   const presets=[['today','Today'],['week','This week'],['month','This month'],['year','This year'],['all','All time']];
   const filterSub=(repSeller?'seller: '+repSeller+' · ':'')+(repItem?'item: '+repItem+' · ':'')
-    +(repGroup?'type: '+GRP_LABEL[repGroup].replace(/^\S+\s/,'')+' · ':'')+(repDisc==='only'?'discounted sales only · ':'');
+    +(repGroup?'type: '+GRP_LABEL[repGroup].replace(/^\S+\s/,'')+' · ':'')
+    +(repDisc==='sale'?'sales that carried a volume discount · ':'')
+    +(repDisc==='line'?'only the items sold below shelf price · ':'');
   return printHead('Sales Report', filterSub + dstr(from)+' to '+dstr(to)) + `
    <div class="payrow noprint" style="flex-wrap:wrap">
      ${presets.map(([v,l])=>`<button class="${repPreset===v?'on':''}" style="flex:1 1 28%"
@@ -2974,23 +3087,33 @@ function reportHTML(){
    </div>
    <div class="rowbtns noprint" style="margin:0 0 12px">
      <select id="repDiscSel" onchange="repDisc=this.value;rerender()">
-       <option value="">All sales — with or without discount</option>
-       <option value="only" ${repDisc==='only'?'selected':''}>💸 Discounted sales only</option>
+       <option value="">All sales — full price and marked down together</option>
+       <option value="line" ${repDisc==='line'?'selected':''}>💸 Only the items that were sold below shelf price</option>
+       <option value="sale" ${repDisc==='sale'?'selected':''}>🧾 Whole sales that carried a volume discount</option>
      </select>
    </div>
+   ${repDisc==='sale'?`<p class="muted noprint" style="margin:-6px 0 12px">A volume discount is taken off the
+     <b>whole sale</b> and spread across its lines. Some items on these sales still went out at full shelf price —
+     the money came off the others. To see only what was actually marked down, pick the first option instead.</p>`:''}
+   ${repDisc==='line'?`<p class="muted noprint" style="margin:-6px 0 12px">Every line below was genuinely charged
+     less than its shelf price. Tap any row to see which sale it was on and why.</p>`:''}
    <button class="btn gray noprint" style="margin-bottom:12px" onclick="window.print()">🖨 Print / Save as PDF</button>
    <div class="statgrid">
      <div class="stat green"><div class="v">${fmt(rev)}</div><div class="l">Revenue (${nSales} sales)</div></div>
      <div class="stat gold"><div class="v">${units}</div><div class="l">Units sold${repItem?' — '+esc(repItem):''}</div></div>
-     ${discTotal>0.005?`<div class="stat red"><div class="v">−${fmt(discTotal)}</div><div class="l">Discounts given (${sales.filter(s=>s.discount).length} sales)</div></div>`:''}
+     ${offList>0.005?`<div class="stat red" style="cursor:pointer" onclick="repDrill('off','')">
+       <div class="v">−${fmt(offList)}</div>
+       <div class="l">Off shelf price (${cutLines} line${cutLines===1?'':'s'}${volSales?', '+volSales+' with a volume discount':''}) — tap</div></div>`:''}
      <div class="stat red"><div class="v">${fmt(cogs)}</div><div class="l">Cost of goods sold</div></div>
      <div class="stat gold"><div class="v">${fmt(profit)}</div><div class="l">Profit</div></div>
      <div class="stat"><div class="v">${fmt(rev-toSellers)}</div><div class="l">Net to club (rev − seller share)</div></div>
    </div>
    <h2>By type of sale</h2>
+   <p class="muted noprint" style="margin:-6px 0 8px">Tap any row on this page to see the actual sales behind
+     it — the date, who rang it up, how it was paid, and the shelf price against what was really charged.</p>
    <div class="card"><table><tr><th>Type of sale</th><th class="r">Sales</th><th class="r">Units</th><th class="r">Revenue</th><th class="r">Profit</th></tr>
    ${SALE_GROUPS.filter(g=>byGroup[g]).map(g=>{ const e=byGroup[g];
-     return `<tr><td>${GRP_LABEL[g]}</td><td class="r">${e.n}</td><td class="r"><b>${e.units}</b></td>
+     return `<tr class="drillrow" onclick="repDrill('group','${jsq(g)}')"><td>${GRP_LABEL[g]} <span class="muted">›</span></td><td class="r">${e.n}</td><td class="r"><b>${e.units}</b></td>
        <td class="r">${fmt(e.rev)}</td><td class="r">${fmt(e.prof)}</td></tr>`; }).join('')
      ||'<tr><td colspan="5" class="empty">No sales match these filters.</td></tr>'}
    ${Object.keys(byGroup).length>1?`<tr><td><b>Total</b></td><td class="r"><b>${nSales}</b></td><td class="r"><b>${units}</b></td>
@@ -3000,12 +3123,12 @@ function reportHTML(){
      return `<h2 style="margin-top:14px">${GRP_LABEL[g]} — what sold</h2>
      <div class="card"><table><tr><th>Item</th><th class="r">Units sold</th><th class="r">Revenue</th></tr>
      ${Object.entries(e.items).sort((a,b)=>b[1].rev-a[1].rev).map(([k,x])=>
-       `<tr><td>${esc(k)}</td><td class="r"><b>${x.qty}</b></td><td class="r">${fmt(x.rev)}</td></tr>`).join('')}
+       `<tr class="drillrow" onclick="repDrill('item','${jsq(k)}')"><td>${esc(k)} <span class="muted">›</span></td><td class="r"><b>${x.qty}</b></td><td class="r">${fmt(x.rev)}</td></tr>`).join('')}
      <tr><td><b>Total</b></td><td class="r"><b>${e.units}</b></td><td class="r"><b>${fmt(e.rev)}</b></td></tr>
      </table></div>`; }).join('')}
    <h2>By seller${repItem?' — '+esc(repItem)+' only':''}</h2>
    <div class="card"><table><tr><th>Seller</th><th class="r">Sales</th><th class="r">Units</th><th class="r">Revenue</th><th class="r">Profit</th><th class="r">Seller keeps</th><th class="r">To club</th></tr>
-   ${Object.entries(bySeller).map(([n,e])=>`<tr><td>${esc(n)}</td><td class="r">${e.n}</td><td class="r"><b>${e.units}</b></td>
+   ${Object.entries(bySeller).map(([n,e])=>`<tr class="drillrow" onclick="repDrill('seller','${jsq(n)}')"><td>${esc(n)} <span class="muted">›</span></td><td class="r">${e.n}</td><td class="r"><b>${e.units}</b></td>
      <td class="r">${fmt(e.rev)}</td><td class="r">${fmt(e.prof)}</td>
      <td class="r goldtxt">${fmt(e.toSeller)}</td><td class="r pos">${fmt(e.rev-e.toSeller)}</td></tr>`).join('')
      ||'<tr><td colspan="7" class="empty">No sales match these filters.</td></tr>'}
@@ -3013,7 +3136,7 @@ function reportHTML(){
    <h2>By item${repSeller?' — sold by '+esc(repSeller):''}</h2>
    <div class="card"><table><tr><th>Item</th><th class="r">Units sold</th><th class="r">Revenue</th></tr>
    ${Object.entries(byItem).sort((a,b)=>b[1].rev-a[1].rev).map(([k,e])=>
-     `<tr><td>${esc(k)}</td><td class="r"><b>${e.qty}</b></td><td class="r">${fmt(e.rev)}</td></tr>`).join('')
+     `<tr class="drillrow" onclick="repDrill('item','${jsq(k)}')"><td>${esc(k)} <span class="muted">›</span></td><td class="r"><b>${e.qty}</b></td><td class="r">${fmt(e.rev)}</td></tr>`).join('')
      ||'<tr><td colspan="3" class="empty">—</td></tr>'}
    </table></div>
    ${invValueHTML()}`;
