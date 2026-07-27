@@ -281,7 +281,7 @@
 
 <!-- SALES LOG -->
 <div id="saleslog" class="view">
-  <h2>Sales — Today</h2>
+  <h2 id="salesTitle">Sales — Today</h2>
   <div id="salesList"></div>
 </div>
 
@@ -324,7 +324,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.9.2';
+const APP_VERSION = 'v3.10';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -550,6 +550,11 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const fmt=n=>'$'+(Math.round(n*100)/100).toLocaleString('en-CA',{minimumFractionDigits:2,maximumFractionDigits:2});
 const meU=()=>S.users[me];
 const isAdmin=()=>me && meU() && meU().role==='admin';
+// Point of sale ("retail") — sells like a member, but gets the full Sales
+// screen: any date range, totals per sales group and a complete itemized
+// listing of what was sold. Still never sees costs, profit or the books.
+const isRetail=()=>me && meU() && meU().role==='retail';
+const canReport=()=>isAdmin()||isRetail();
 // Club records (Books + Attendance + member Club tab) stay hidden everywhere
 // until the admin flips the switch in Settings. Data is kept either way.
 const clubRecOn=()=>!!(S.settings&&S.settings.clubRecords);
@@ -590,6 +595,51 @@ function colorDot(it){
   return '';
 }
 function today0(){ const d=new Date(); d.setHours(0,0,0,0); return d.getTime(); }
+
+/* ------------------------- SALES GROUPS -----------------------------------
+   Every item belongs to ONE sales group, so a picnic reconciles by type:
+   Clothing & Apparel / Raffle / Bocce Entry (plus Other for anything else).
+   Set it per item in Admin → Items (or tag them all at once with the
+   "Sales groups" button). A sale line resolves its group through its item,
+   so re-tagging an item fixes its whole sales history too — that's how last
+   year's and yesterday's sales get split without re-entering anything.     */
+const SALE_GROUPS=['Clothing','Raffle','Bocce','Other'];
+const GRP_LABEL={Clothing:'👕 Clothing & Apparel', Raffle:'🎟 Raffle',
+                 Bocce:'🎳 Bocce Entry', Other:'📦 Other'};
+function guessGroup(name,cat){
+  const n=((name||'')+' '+(cat||'')).toLowerCase();
+  if(/raffle|50\/50|draw ticket/.test(n)) return 'Raffle';
+  if(/bocce|bocci|tournament/.test(n))    return 'Bocce';
+  return 'Clothing';
+}
+function groupOf(it){
+  if(!it) return 'Other';
+  return SALE_GROUPS.includes(it.grp) ? it.grp : guessGroup(it.name,it.cat);
+}
+function lineGroup(l){                      // group of one line on a sale
+  const it=(S.items||{})[l.itemId];
+  if(it) return groupOf(it);                // live — re-tagging fixes history
+  if(SALE_GROUPS.includes(l.grp)) return l.grp;   // item since deleted
+  return guessGroup(l.item,'');
+}
+function saleUnits(s){ return (s.lines||[]).reduce((n,l)=>n+l.qty,0); }
+// Roll a list of sales up into {group:{n,units,rev,items:{'Item — Size':{qty,rev}}}}
+function groupRollup(sales){
+  const g={};
+  const row=k=>g[k]=g[k]||{n:0,units:0,rev:0,items:{}};
+  sales.forEach(s=>{
+    const seen={};
+    (s.lines||[]).forEach(l=>{
+      const k=lineGroup(l), e=row(k), r=l.price*l.qty;
+      e.units+=l.qty; e.rev+=r;
+      if(!seen[k]){ seen[k]=1; e.n++; }
+      const ik=l.item+' — '+l.size;
+      e.items[ik]=e.items[ik]||{qty:0,rev:0};
+      e.items[ik].qty+=l.qty; e.items[ik].rev+=r;
+    });
+  });
+  return g;
+}
 
 /* ============================== RENDERING ================================= */
 function rerender(){
@@ -857,7 +907,7 @@ async function checkout(){
       discount: cartDisc? {type:cartDisc.type, value:cartDisc.value, amount:discAmt, by:cartDisc.by||u.name} : null,
       lines:base.map(x=>({itemId:x.l.itemId,item:x.l.item,size:x.l.size,qty:x.l.qty,
         price:x.unit, orig:(x.unit!==(x.l.regular??x.l.price))?(x.l.regular??x.l.price):null,
-        salePct:x.l.salePct||0,
+        salePct:x.l.salePct||0, grp:groupOf(S.items[x.l.itemId]),
         cost:x.l.cost, member:!!x.l.member, adhoc:!!x.l.adhoc})),
       total};
     await DB.push(['sales'], sale);
@@ -922,27 +972,134 @@ function renderStock(){
 
 /* ----------------------------- SALES LOG ---------------------------------- */
 function salesSorted(){ return Object.entries(S.sales||{}).sort((a,b)=>b[1].ts-a[1].ts); }
+/* The Sales screen. Anyone can look at today. Admins and point-of-sale users
+   get any date range they like, totals split by sales group (clothing /
+   raffle / bocce entry) and a full itemized listing underneath each one.  */
+let slPreset='today', slFrom=null, slTo=null, slGroup='', slWho='all', slOpen={};
+function slRange(){
+  const now=new Date();
+  if(!canReport()) return [today0(), today0()+86400000-1];
+  if(slPreset==='custom') return [slFrom??today0(), slTo??(today0()+86400000-1)];
+  if(slPreset==='today')  return [today0(), today0()+86400000-1];
+  if(slPreset==='yday')   return [today0()-86400000, today0()-1];
+  if(slPreset==='week'){ const d=new Date(); const dow=(d.getDay()+6)%7;   // Monday start
+    d.setHours(0,0,0,0); d.setDate(d.getDate()-dow); return [d.getTime(), Date.now()]; }
+  if(slPreset==='month') return [new Date(now.getFullYear(),now.getMonth(),1).getTime(), Date.now()];
+  if(slPreset==='year')  return [new Date(now.getFullYear(),0,1).getTime(), Date.now()];
+  return [0, Date.now()];   // all time
+}
+function slLabel(from,to){
+  const d1=dstr(from), d2=dstr(to);
+  return d1===d2 ? new Date(from).toLocaleDateString('en-CA',{weekday:'long',year:'numeric',month:'long',day:'numeric'})
+                 : d1+' to '+d2;
+}
 function renderSales(){
-  const t0=today0();
-  const list=salesSorted().filter(([,s])=>s.ts>=t0);
-  const tot=list.filter(([,s])=>!s.voided).reduce((a,[,s])=>a+s.total,0);
-  const mine=list.filter(([,s])=>!s.voided&&s.sellerId===me).reduce((a,[,s])=>a+s.total,0);
-  $('salesList').innerHTML= printHead('Daily Sales', new Date().toLocaleDateString('en-CA'))+
-    `<button class="btn gray noprint" style="margin-bottom:12px" onclick="window.print()">🖨 Print / Save as PDF</button>
+  const [from,to]=slRange(), full=canReport();
+  let list=salesSorted().filter(([,s])=>s.ts>=from&&s.ts<=to);
+  if(slWho==='mine') list=list.filter(([,s])=>s.sellerId===me);
+  else if(slWho!=='all') list=list.filter(([,s])=>s.sellerName===slWho);
+  const live=list.filter(([,s])=>!s.voided).map(([,s])=>s);
+  // group filter applies to the sale list only — the totals always show every group
+  const shown = slGroup ? list.filter(([,s])=>(s.lines||[]).some(l=>lineGroup(l)===slGroup)) : list;
+  const tot=live.reduce((a,s)=>a+s.total,0);
+  const units=live.reduce((a,s)=>a+saleUnits(s),0);
+  const mine=live.filter(s=>s.sellerId===me).reduce((a,s)=>a+s.total,0);
+  const roll=groupRollup(live);
+  const sellerNames=[...new Set(salesSorted().map(([,s])=>s.sellerName))].sort((a,b)=>a.localeCompare(b));
+  const presets=[['today','Today'],['yday','Yesterday'],['week','This week'],
+                 ['month','This month'],['year','This year'],['all','All time']];
+  $('salesTitle').textContent = full ? 'Sales' : 'Sales — Today';
+
+  const controls = !full ? '' : `
+    <div class="payrow noprint" style="flex-wrap:wrap;margin-bottom:6px">
+      ${presets.map(([v,l])=>`<button class="${slPreset===v?'on':''}" style="flex:1 1 30%"
+        onclick="slPreset='${v}';rerender()">${l}</button>`).join('')}
+    </div>
+    <div class="rowbtns noprint" style="margin:0 0 8px">
+      <input type="date" value="${dstr(from)}" onchange="slPreset='custom';slFrom=new Date(this.value+'T00:00').getTime();rerender()">
+      <input type="date" value="${dstr(to)}" onchange="slPreset='custom';slTo=new Date(this.value+'T23:59:59').getTime();rerender()">
+    </div>
+    <div class="rowbtns noprint" style="margin:0 0 12px">
+      <select onchange="slWho=this.value;rerender()">
+        <option value="all" ${slWho==='all'?'selected':''}>👥 Everyone's sales</option>
+        <option value="mine" ${slWho==='mine'?'selected':''}>🙋 Just mine (${esc(meU().name)})</option>
+        ${isAdmin()?sellerNames.map(n=>`<option value="${esc(n)}" ${slWho===n?'selected':''}>👤 ${esc(n)}</option>`).join(''):''}
+      </select>
+    </div>`;
+
+  const groupCards = SALE_GROUPS.filter(g=>roll[g]).map(g=>{
+    const e=roll[g], open=!!slOpen[g];
+    const items=Object.entries(e.items).sort((a,b)=>b[1].qty-a[1].qty);
+    return `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer"
+        onclick="slOpen['${g}']=${open?'false':'true'};rerender()">
+        <div><b>${GRP_LABEL[g]}</b>
+          <div class="muted">${e.n} sale${e.n===1?'':'s'} · ${e.units} item${e.units===1?'':'s'} · ${items.length} different product${items.length===1?'':'s'}</div></div>
+        <div style="text-align:right"><b class="pos" style="font-size:18px">${fmt(e.rev)}</b>
+          <div class="muted noprint">${open?'▾ hide':'▸ what sold'}</div></div>
+      </div>
+      ${(open||_printing)?`<table style="margin-top:8px">
+        <tr><th>What sold</th><th class="r">Qty</th><th class="r">Revenue</th></tr>
+        ${items.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="r"><b>${v.qty}</b></td><td class="r">${fmt(v.rev)}</td></tr>`).join('')}
+        <tr class="totrow"><td><b>Total ${esc(GRP_LABEL[g].replace(/^\S+\s/,''))}</b></td>
+          <td class="r"><b>${e.units}</b></td><td class="r"><b>${fmt(e.rev)}</b></td></tr>
+      </table>`:''}
+    </div>`;
+  }).join('');
+
+  $('salesList').innerHTML= printHead('Sales', slLabel(from,to)+(slWho==='all'?'':' · '+(slWho==='mine'?meU().name:slWho)))+
+    controls+
+    `<div class="rowbtns noprint" style="margin:0 0 12px">
+      <button class="btn gray" onclick="window.print()">🖨 Print / Save as PDF</button>
+      ${full?`<button class="btn gray" onclick="exportShownSalesCSV()">⬇ Export to Excel</button>`:''}
+    </div>
     <div class="statgrid">
-      <div class="stat green"><div class="v">${fmt(tot)}</div><div class="l">Today — everyone</div></div>
-      <div class="stat gold"><div class="v">${fmt(mine)}</div><div class="l">Today — ${esc(meU().name)}</div></div>
-    </div>`+
-    (list.map(([id,s])=>`<div class="card salecard ${s.voided?'voided':''}">
-      <div class="hd"><span>${new Date(s.ts).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}
+      <div class="stat green"><div class="v">${fmt(tot)}</div><div class="l">${full?esc(slLabel(from,to)):'Today'} — ${live.length} sale${live.length===1?'':'s'}</div></div>
+      <div class="stat gold"><div class="v">${units}</div><div class="l">Items sold</div></div>
+      ${slWho==='all'?`<div class="stat"><div class="v">${fmt(mine)}</div><div class="l">Your own sales — ${esc(meU().name)}</div></div>`:''}
+    </div>
+    <h2>By type of sale</h2>
+    <p class="muted noprint" style="margin:0 0 8px">Tap a type to see exactly which items and sizes were sold. Set what belongs where in ${isAdmin()?'Admin → Items → 🏷 Sales groups':'Admin → Items'}.</p>
+    ${groupCards||'<div class="empty">Nothing sold in this period.</div>'}
+    <h2>Every sale${slGroup?' — '+esc(GRP_LABEL[slGroup]):''}</h2>
+    ${full?`<div class="rowbtns noprint" style="margin:0 0 10px">
+      <select onchange="slGroup=this.value;rerender()">
+        <option value="">🧾 All types of sale</option>
+        ${SALE_GROUPS.map(g=>`<option value="${g}" ${slGroup===g?'selected':''}>${GRP_LABEL[g]}</option>`).join('')}
+      </select></div>`:''}`+
+    (shown.map(([id,s])=>{
+      const lines = slGroup ? s.lines.filter(l=>lineGroup(l)===slGroup) : s.lines;
+      const sub = slGroup ? lines.reduce((a,l)=>a+l.price*l.qty,0) : s.total;
+      return `<div class="card salecard ${s.voided?'voided':''}">
+      <div class="hd"><span>${full&&dstr(from)!==dstr(to)?new Date(s.ts).toLocaleDateString('en-CA')+' ':''}${new Date(s.ts).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}
         · ${esc(s.sellerName)} ${s.voided?'<span class="voidtag">VOIDED</span>':''}${s.edited?' <span class="voidtag" style="color:var(--gold)">EDITED</span>':''}</span>
-        <span>${fmt(s.total)}</span></div>
-      <div class="lines">${s.lines.map(l=>`${l.qty}× ${esc(l.item)} ${esc(l.size)}${l.member?' (member)':''}`).join(' · ')}
+        <span>${fmt(sub)}${slGroup&&Math.abs(sub-s.total)>0.005?` <span class="muted">of ${fmt(s.total)}</span>`:''}</span></div>
+      <div class="lines">${lines.map(l=>`${l.qty}× ${esc(l.item)} ${esc(l.size)}${l.member?' (member)':''}`).join(' · ')}
         · ${esc(s.payment)}${s.payment==='Pay Later'&&s.buyer?` — <b>${esc(s.buyer)} owes</b>`:''}${s.discount?` · <b class="neg">−${fmt(s.discount.amount)} discount</b> <span class="muted">(by ${esc(s.discount.by||s.sellerName)})</span>`:''}</div>
-      ${isAdmin()&&!s.voided?`<div class="rowbtns">
+      <div class="lines muted">${[...new Set(lines.map(lineGroup))].map(g=>GRP_LABEL[g]).join(' · ')}</div>
+      ${isAdmin()&&!s.voided?`<div class="rowbtns noprint">
         <button class="btn small gray" onclick="pinConfirm('Edit this sale? Quantities, prices and payment can be changed — stock adjusts automatically.',()=>editSale('${id}'))">✎ Edit sale</button>
         <button class="btn small red" onclick="voidSale('${id}')">Void &amp; restock</button></div>`:''}
-    </div>`).join('')||'<div class="empty">No sales yet today. 🤞</div>');
+    </div>`;}).join('')||'<div class="empty">No sales in this period. 🤞</div>');
+}
+// When printing we open every group so the whole breakdown lands on paper.
+let _printing=false;
+window.addEventListener('beforeprint',()=>{ if(view==='saleslog'){ _printing=true; renderSales(); } });
+window.addEventListener('afterprint',()=>{ if(_printing){ _printing=false; renderSales(); } });
+function exportShownSalesCSV(){
+  const [from,to]=slRange();
+  let list=salesSorted().reverse().filter(([,s])=>s.ts>=from&&s.ts<=to);
+  if(slWho==='mine') list=list.filter(([,s])=>s.sellerId===me);
+  else if(slWho!=='all') list=list.filter(([,s])=>s.sellerName===slWho);
+  const rows=[['Date','Time','Type of sale','Seller','Item','Size','Qty','Unit Price','Line Total','Payment','Owed By','Voided']];
+  list.forEach(([,s])=>{ const d=new Date(s.ts);
+    s.lines.filter(l=>!slGroup||lineGroup(l)===slGroup).forEach(l=>rows.push([
+      d.toLocaleDateString('en-CA'), d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}),
+      GRP_LABEL[lineGroup(l)].replace(/^\S+\s/,''), s.sellerName, l.item, l.size, l.qty, l.price,
+      Math.round(l.price*l.qty*100)/100, s.payment, s.buyer||'', s.voided?'Y':'']));
+  });
+  dl('three-aces-sales-'+dstr(from)+'-to-'+dstr(to)+'.csv', rows.map(r=>r.map(csvCell).join(',')).join('\n'));
+  toast('Exported '+(rows.length-1)+' lines');
 }
 async function voidSale(id){
   if(!confirm('Void this sale and put the items back in stock?')) return;
@@ -1606,14 +1763,29 @@ function renderMyClub(){
     const r=(A.roster||[]).find(x=>(x.name||'').trim().toLowerCase()===(u.name||'').trim().toLowerCase());
     const Y=(A.years||{})[String(yr)]||{};
     const myMarks=r? ((Y.marks||{})[r.id]||{}) : {};
+    const notes=(Y.notes||{});
+    const MARKNAME={P:'Present',L:'Late',A:'Absent',AN:'Absent — with notice',NP:'No patch'};
+    const missed=MONTHS.map((m,i)=>({m,mi:i+1,v:myMarks['m'+(i+1)]||''}))
+      .filter(x=>x.v==='A'||x.v==='AN');
     html+=`<h2>📅 Meetings & my attendance — ${yr}</h2>
       <div class="card"><table>
-        <tr><th>Month</th><th>Meeting</th><th class="r">Me</th></tr>
+        <tr><th>Month</th><th>Meeting</th><th class="r">Me</th><th>Note for that meeting</th></tr>
         ${MONTHS.map((m,i)=>{ const d=meetDate(yr,i+1); const ov=!!((Y.mdates||{})['m'+(i+1)]);
-          const v=myMarks['m'+(i+1)]||'';
-          return `<tr><td>${m}</td><td>${d.toLocaleDateString('en-CA',{weekday:'short',month:'short',day:'numeric'})}${ov?' <span class="memberflag">changed</span>':''}</td>
-            <td class="r"><b>${v||'·'}</b></td></tr>`; }).join('')}
+          const v=myMarks['m'+(i+1)]||'', nt=notes['m'+(i+1)]||'';
+          const out=(v==='A'||v==='AN');
+          return `<tr${out?' style="background:rgba(210,31,38,.08)"':''}><td>${m}</td><td>${d.toLocaleDateString('en-CA',{weekday:'short',month:'short',day:'numeric'})}${ov?' <span class="memberflag">changed</span>':''}</td>
+            <td class="r"><b>${v||'·'}</b></td><td style="font-size:12px">${nt?esc(nt):'<span class="muted">—</span>'}</td></tr>`; }).join('')}
       </table></div>`;
+    if(missed.length){
+      html+=`<h2>🚩 Meetings I missed — ${yr}</h2>
+        <div class="card">${missed.map(x=>{
+          const nt=notes['m'+x.mi]||'';
+          return `<div style="padding:6px 0;border-bottom:1px solid var(--line)">
+            <b>${x.m} ${meetDate(yr,x.mi).getDate()}</b> — ${MARKNAME[x.v]||x.v}
+            <div class="muted" style="font-size:12px">${nt?'Note on the register: '+esc(nt):'No note was written for this meeting.'}</div>
+          </div>`; }).join('')}</div>
+        <p class="muted">The note is what the secretary wrote on the register for that meeting — it may mention more than one member. If something here looks wrong, speak to an admin.</p>`;
+    }
     if(r){
       const cnt={P:0,L:0,AN:0,A:0,NP:0};
       Object.values(myMarks).forEach(v=>{ if(cnt[v]!==undefined) cnt[v]++; });
@@ -1859,7 +2031,7 @@ function printHead(title,sub){
     <p>Italian Canadian Cultural Club — ${esc(title)}</p>
     <p>${esc(sub)} · printed ${new Date().toLocaleString('en-CA')}</p></div>`;
 }
-let repFrom=null, repTo=null, repPreset='today', repSeller='', repItem='', repDisc='';
+let repFrom=null, repTo=null, repPreset='today', repSeller='', repItem='', repDisc='', repGroup='';
 function repRange(){
   const now=new Date();
   if(repPreset==='custom') return [repFrom??today0(), repTo??(today0()+86400000-1)];
@@ -1878,18 +2050,25 @@ function reportHTML(){
   if(repDisc==='only') sales=sales.filter(s=>s.discount);
   const discTotal=sales.reduce((a,s)=>a+((s.discount&&s.discount.amount)||0),0);
   let rev=0,cogs=0,units=0,nSales=0;
-  const bySeller={}, byItem={};
+  const bySeller={}, byItem={}, byGroup={};
   sales.forEach(s=>{
-    const lines = repItem ? s.lines.filter(l=>l.item===repItem) : s.lines;
+    let lines = repItem ? s.lines.filter(l=>l.item===repItem) : s.lines;
+    if(repGroup) lines = lines.filter(l=>lineGroup(l)===repGroup);
     if(!lines.length) return;
     nSales++;
     const pct=(s.sellerPct||0)/100;
     let sRev=0,sProf=0,sUnits=0;
+    const seenG={};
     lines.forEach(l=>{
       const r=l.price*l.qty, c=l.cost*l.qty;
       rev+=r; cogs+=c; units+=l.qty; sRev+=r; sProf+=(r-c); sUnits+=l.qty;
       const k=l.item+' — '+l.size;
       byItem[k]=byItem[k]||{qty:0,rev:0}; byItem[k].qty+=l.qty; byItem[k].rev+=r;
+      const g=lineGroup(l);
+      const ge=byGroup[g]=byGroup[g]||{n:0,units:0,rev:0,prof:0,items:{}};
+      if(!seenG[g]){ seenG[g]=1; ge.n++; }
+      ge.units+=l.qty; ge.rev+=r; ge.prof+=(r-c);
+      ge.items[k]=ge.items[k]||{qty:0,rev:0}; ge.items[k].qty+=l.qty; ge.items[k].rev+=r;
     });
     const e=bySeller[s.sellerName]=bySeller[s.sellerName]||{n:0,units:0,rev:0,prof:0,toSeller:0};
     e.n++; e.units+=sUnits; e.rev+=sRev; e.prof+=sProf; e.toSeller+=sProf*pct;
@@ -1901,7 +2080,8 @@ function reportHTML(){
   const itemNames=[...new Set(salesSorted().flatMap(([,s])=>s.lines.map(l=>l.item))
     .concat(allItemsSorted().map(([,i])=>i.name)))].sort((a,b)=>a.localeCompare(b));
   const presets=[['today','Today'],['week','This week'],['month','This month'],['year','This year'],['all','All time']];
-  const filterSub=(repSeller?'seller: '+repSeller+' · ':'')+(repItem?'item: '+repItem+' · ':'')+(repDisc==='only'?'discounted sales only · ':'');
+  const filterSub=(repSeller?'seller: '+repSeller+' · ':'')+(repItem?'item: '+repItem+' · ':'')
+    +(repGroup?'type: '+GRP_LABEL[repGroup].replace(/^\S+\s/,'')+' · ':'')+(repDisc==='only'?'discounted sales only · ':'');
   return printHead('Sales Report', filterSub + dstr(from)+' to '+dstr(to)) + `
    <div class="payrow noprint" style="flex-wrap:wrap">
      ${presets.map(([v,l])=>`<button class="${repPreset===v?'on':''}" style="flex:1 1 28%"
@@ -1922,6 +2102,12 @@ function reportHTML(){
      </select>
    </div>
    <div class="rowbtns noprint" style="margin:0 0 12px">
+     <select id="repGroupSel" onchange="repGroup=this.value;rerender()">
+       <option value="">🧾 All types of sale — clothing, raffle and bocce together</option>
+       ${SALE_GROUPS.map(g=>`<option value="${g}" ${repGroup===g?'selected':''}>${GRP_LABEL[g]} only</option>`).join('')}
+     </select>
+   </div>
+   <div class="rowbtns noprint" style="margin:0 0 12px">
      <select id="repDiscSel" onchange="repDisc=this.value;rerender()">
        <option value="">All sales — with or without discount</option>
        <option value="only" ${repDisc==='only'?'selected':''}>💸 Discounted sales only</option>
@@ -1936,6 +2122,22 @@ function reportHTML(){
      <div class="stat gold"><div class="v">${fmt(profit)}</div><div class="l">Profit</div></div>
      <div class="stat"><div class="v">${fmt(rev-toSellers)}</div><div class="l">Net to club (rev − seller share)</div></div>
    </div>
+   <h2>By type of sale</h2>
+   <div class="card"><table><tr><th>Type of sale</th><th class="r">Sales</th><th class="r">Units</th><th class="r">Revenue</th><th class="r">Profit</th></tr>
+   ${SALE_GROUPS.filter(g=>byGroup[g]).map(g=>{ const e=byGroup[g];
+     return `<tr><td>${GRP_LABEL[g]}</td><td class="r">${e.n}</td><td class="r"><b>${e.units}</b></td>
+       <td class="r">${fmt(e.rev)}</td><td class="r">${fmt(e.prof)}</td></tr>`; }).join('')
+     ||'<tr><td colspan="5" class="empty">No sales match these filters.</td></tr>'}
+   ${Object.keys(byGroup).length>1?`<tr><td><b>Total</b></td><td class="r"><b>${nSales}</b></td><td class="r"><b>${units}</b></td>
+     <td class="r"><b>${fmt(rev)}</b></td><td class="r"><b>${fmt(profit)}</b></td></tr>`:''}
+   </table></div>
+   ${SALE_GROUPS.filter(g=>byGroup[g]).map(g=>{ const e=byGroup[g];
+     return `<h2 style="margin-top:14px">${GRP_LABEL[g]} — what sold</h2>
+     <div class="card"><table><tr><th>Item</th><th class="r">Units sold</th><th class="r">Revenue</th></tr>
+     ${Object.entries(e.items).sort((a,b)=>b[1].rev-a[1].rev).map(([k,x])=>
+       `<tr><td>${esc(k)}</td><td class="r"><b>${x.qty}</b></td><td class="r">${fmt(x.rev)}</td></tr>`).join('')}
+     <tr><td><b>Total</b></td><td class="r"><b>${e.units}</b></td><td class="r"><b>${fmt(e.rev)}</b></td></tr>
+     </table></div>`; }).join('')}
    <h2>By seller${repItem?' — '+esc(repItem)+' only':''}</h2>
    <div class="card"><table><tr><th>Seller</th><th class="r">Sales</th><th class="r">Units</th><th class="r">Revenue</th><th class="r">Profit</th><th class="r">Seller keeps</th><th class="r">To club</th></tr>
    ${Object.entries(bySeller).map(([n,e])=>`<tr><td>${esc(n)}</td><td class="r">${e.n}</td><td class="r"><b>${e.units}</b></td>
@@ -2304,6 +2506,8 @@ function itemsHTML(){
       mode==='alpha' ? 'Items are listed alphabetically on every phone.' :
       'Items appear in the order below — use the ▲ ▼ arrows to move them up or down.'}</p>
     <button class="btn" onclick="editItem(null)">＋ Add New Item</button>
+    <div style="height:8px"></div>
+    <button class="btn gray" onclick="groupTagModal()">🏷 Sales groups — say what's clothing, raffle or bocce</button>
     <p class="muted" style="margin:10px 2px">Hidden items don't appear on the Sell or Stock screens or the Reorder list — use Hide for products you're not carrying right now. Nothing is lost; tap Show to bring one back.</p>`+
     ordered.map(([id,it],idx,arr)=>{
       const hidden=it.active===false;
@@ -2316,10 +2520,39 @@ function itemsHTML(){
         </div>`:''}
         <div style="flex:1;cursor:pointer" onclick="editItem('${id}')">
           <b>${colorDot(it)}${esc(it.name)}</b>${hidden?' <span class="voidtag">HIDDEN</span>':''}${it.salePct?`<span class="saleflag">${it.salePct}% OFF</span>`:''}
-          <div class="muted">${esc(it.cat||'')} · ${sizes.length} sizes · ${tot} in stock · ${m[id]||0} sold · <span class="goldtxt">edit ›</span></div></div>
+          <div class="muted">${GRP_LABEL[groupOf(it)]} · ${esc(it.cat||'')} · ${sizes.length} sizes · ${tot} in stock · ${m[id]||0} sold · <span class="goldtxt">edit ›</span></div></div>
         <button class="btn small ${hidden?'':'gray'}" onclick="toggleItemActive('${id}')">${hidden?'Show':'Hide'}</button>
       </div>`;
     }).join('');
+}
+/* Tag every product at once. Anything never tagged is guessed from its name
+   (anything with "raffle" in it → Raffle, "bocce" → Bocce, the rest →
+   Clothing), and the guess is shown greyed until you confirm it. Because a
+   sale looks its group up through the item, tagging here also splits every
+   sale that has ALREADY been recorded — that's what makes an event that was
+   rung up before this feature existed reconcile properly.                  */
+function groupTagModal(){
+  const rows=allItemsSorted().map(([id,it])=>{
+    const g=groupOf(it), guessed=!SALE_GROUPS.includes(it.grp);
+    return `<div style="padding:8px 0;border-bottom:1px solid var(--line)">
+      <div style="font-size:14px;margin-bottom:5px">${colorDot(it)}<b>${esc(it.name)}</b>
+        ${guessed?'<span class="muted" style="font-size:11px"> · guessed</span>':''}</div>
+      <div class="payrow" style="margin:0">
+        ${SALE_GROUPS.map(x=>`<button class="${g===x&&!guessed?'on':''}" style="flex:1 1 24%;font-size:11px;${g===x&&guessed?'opacity:.75;border-color:var(--gold)':''}"
+          onclick="setItemGroup('${id}','${x}')">${GRP_LABEL[x].split(' ')[0]}<br>${esc(GRP_LABEL[x].replace(/^\S+\s/,'').replace(' & Apparel','').replace(' Entry',''))}</button>`).join('')}
+      </div></div>`;
+  }).join('');
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>🏷 Sales groups</h3>
+    <p class="muted">Every product belongs to one of these, and that's how the Sales screen splits your totals.
+    Tagging here also fixes sales that were <b>already recorded</b> — so an event you rang up before today
+    still reconciles by type. Greyed buttons are the app's guess; tap one to make it certain.</p>
+    <div style="max-height:56vh;overflow:auto">${rows||'<div class="empty">No products yet.</div>'}</div>
+    <div style="height:12px"></div>
+    <button class="btn" onclick="closeModal();rerender()">Done</button>`);
+}
+async function setItemGroup(id,g){
+  await DB.set(['items',id,'grp'],g);
+  groupTagModal();
 }
 async function moveItem(id,dir){
   const list=allItemsSorted();
@@ -2346,6 +2579,10 @@ function editItem(id){
       ${it.cat?'':'<option value="" selected disabled>Pick a category…</option>'}
       ${cats.map(c=>`<option ${c===it.cat?'selected':''}>${esc(c)}</option>`).join('')}
       <option value="__new">＋ New category…</option>
+    </select>
+    <label>Type of sale — how this is counted on the Sales screen and reports</label>
+    <select id="ei_grp">
+      ${SALE_GROUPS.map(g=>`<option value="${g}" ${groupOf(it)===g?'selected':''}>${GRP_LABEL[g]}</option>`).join('')}
     </select>
     <label>Colour dot — the little circle sellers see beside the item name</label>
     <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
@@ -2428,11 +2665,12 @@ async function saveItem(id){
   const color = $('ei_dot').checked ? $('ei_color').value : 'none';
   const adhoc = $('ei_adhoc').classList.contains('on');
   const salePct = Math.min(90, Math.max(0, Math.round(parseFloat(String($('ei_sale').value).replace(/[^0-9.]/g,''))||0)));
+  const grp = SALE_GROUPS.includes($('ei_grp').value) ? $('ei_grp').value : 'Clothing';
   if(id){ const it=S.items[id];
-    await DB.set(['items',id],{...it,name,cat,sizes,color,adhoc,salePct});
+    await DB.set(['items',id],{...it,name,cat,sizes,color,adhoc,salePct,grp});
   }else{
     const order=Math.max(0,...itemsSorted().map(([,i])=>i.order??0))+1;
-    await DB.set(['items',newId()],{name,cat,sizes,color,adhoc,salePct,order,active:true});
+    await DB.set(['items',newId()],{name,cat,sizes,color,adhoc,salePct,grp,order,active:true});
   }
   closeModal(); toast('Item saved'); rerender();
 }
@@ -2443,7 +2681,7 @@ function usersHTML(){
      <div class="card" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;${u.active===false?'opacity:.5':''}"
        onclick="editUser('${id}')">
        <div><b>${esc(u.name)}</b>
-        <div class="muted">${u.role==='admin'?'⭐ Admin — full access':'Club member — sales only'} · keeps ${u.profitPct||0}% of profit${u.active===false?' · disabled':''}</div></div>
+        <div class="muted">${u.role==='admin'?'⭐ Admin — full access':u.role==='retail'?'🛒 Point of sale — sells + full sales reporting':'Club member — sales only'} · keeps ${u.profitPct||0}% of profit${u.active===false?' · disabled':''}</div></div>
        <div class="goldtxt">edit ›</div></div>`).join('');
 }
 function editUser(id){
@@ -2452,8 +2690,12 @@ function editUser(id){
     <label>Name</label><input id="eu_name" value="${esc(u.name)}">
     <label>4-digit PIN</label><input id="eu_pin" inputmode="numeric" maxlength="4" value="${esc(u.pin)}">
     <label>Permission level</label><select id="eu_role">
-      <option value="seller" ${u.role!=='admin'?'selected':''}>Club member — can sell, never sees costs or profit</option>
+      <option value="seller" ${(u.role!=='admin'&&u.role!=='retail')?'selected':''}>Club member — can sell, never sees costs or profit</option>
+      <option value="retail" ${u.role==='retail'?'selected':''}>Point of sale — sells, plus full sales reporting (no costs or profit)</option>
       <option value="admin" ${u.role==='admin'?'selected':''}>Admin — full access (costs, profit, reports, users)</option></select>
+    <p class="muted" style="margin:2px 2px 10px">A <b>point of sale</b> user — the table at the picnic, say — gets the Sales screen
+      for any date range: totals split into clothing, raffle and bocce entry, and a full itemized listing of everything
+      they sold. They still can't see what anything cost, what the club makes on it, or any of the books.</p>
     <label>% of profit this member keeps on their own sales
       <span style="text-transform:none">(0 = everything to club, 100 = e.g. President)</span></label>
     <input id="eu_pct" type="number" min="0" max="100" value="${u.profitPct||0}">
@@ -2461,7 +2703,9 @@ function editUser(id){
       <button class="toggle ${u.active!==false?'on':''}" id="eu_act" onclick="this.classList.toggle('on')"></button></div>
     <div style="height:10px"></div>
     <button class="btn" onclick="saveUser(${id?`'${id}'`:'null'})">Save Member</button>
-    ${id?`<div style="height:8px"></div><button class="btn red" onclick="deleteUser('${id}')">🗑 Delete this member permanently</button>`:''}`);
+    ${id?`<div style="height:8px"></div>
+      <button class="btn gray" onclick="fixShareModal('${id}')">⟳ Fix the profit share on past sales</button>
+      <div style="height:8px"></div><button class="btn red" onclick="deleteUser('${id}')">🗑 Delete this member permanently</button>`:''}`);
 }
 function otherActiveAdminExists(exceptId){
   return Object.entries(S.users||{}).some(([uid,u])=>uid!==exceptId && u.role==='admin' && u.active!==false);
@@ -2473,8 +2717,77 @@ async function saveUser(id){
     active:$('eu_act').classList.contains('on')};
   if(id && (u.role!=='admin'||!u.active) && !otherActiveAdminExists(id)){
     toast('You need at least one active admin',1); return; }
+  const oldPct = id ? (S.users[id].profitPct||0) : null;
   await DB.set(['users', id||newId()], u);
-  closeModal(); toast('Member saved'); rerender();
+  closeModal(); toast('Member saved');
+  // Changing someone's share only changes NEW sales — every sale already
+  // recorded still carries the share it was rung up at. If that matters,
+  // offer to go back and correct them right now.
+  if(id && oldPct!==null && oldPct!==u.profitPct && countSharePast(id,u.profitPct)>0){
+    setTimeout(()=>fixShareModal(id, oldPct), 250);
+    return;
+  }
+  rerender();
+}
+/* ------------- PROFIT SHARE ON SALES ALREADY RECORDED ---------------------
+   Each sale stores the seller's % at the moment it was rung up, so the
+   history of what someone was actually owed can never be silently rewritten
+   by a later settings change. The flip side is that correcting a mistake —
+   a member left on 50% by accident all day — needs a deliberate repair, and
+   this is it.                                                              */
+function pastShareSales(userId){
+  return Object.entries(S.sales||{})
+    .filter(([,s])=>s.sellerId===userId && !s.voided)
+    .sort((a,b)=>b[1].ts-a[1].ts);
+}
+function countSharePast(userId,pct){
+  return pastShareSales(userId).filter(([,s])=>(s.sellerPct||0)!==pct).length;
+}
+let _fsFrom=null;
+function fixShareModal(userId, oldPct){
+  const u=S.users[userId], now=u.profitPct||0;
+  const all=pastShareSales(userId);
+  const wrong=all.filter(([,s])=>(s.sellerPct||0)!==now);
+  const byPct={};
+  all.forEach(([,s])=>{ const p=s.sellerPct||0; byPct[p]=byPct[p]||{n:0,rev:0};
+    byPct[p].n++; byPct[p].rev+=s.total; });
+  if(_fsFrom===null) _fsFrom = all.length ? dstr(Math.min(...all.map(([,s])=>s.ts))) : dstr(today0());
+  openModal(`<h3><button class="x" onclick="closeModal();rerender()">✕</button>⟳ Profit share on past sales</h3>
+    <p class="muted"><b>${esc(u.name)}</b> now keeps <b>${now}%</b> of the profit on their own sales${
+      oldPct!==undefined?` (was ${oldPct}%)`:''}. That new figure applies to sales from here on.
+      Sales <b>already recorded</b> still carry the share they were rung up at — deliberately, so nobody's history
+      changes behind their back. If the old figure was a mistake, correct it here.</p>
+    <div class="card"><table>
+      <tr><th>Recorded at</th><th class="r">Sales</th><th class="r">Value</th></tr>
+      ${Object.entries(byPct).sort((a,b)=>b[0]-a[0]).map(([p,e])=>
+        `<tr><td>${p}%${+p===now?' <span class="muted">— current</span>':''}</td>
+         <td class="r">${e.n}</td><td class="r">${fmt(e.rev)}</td></tr>`).join('')
+        ||'<tr><td colspan="3" class="empty">No sales recorded for this member yet.</td></tr>'}
+    </table></div>
+    ${wrong.length?`
+    <label>Correct every sale on or after this date</label>
+    <input type="date" id="fs_from" value="${_fsFrom}" onchange="_fsFrom=this.value;fixShareModal('${userId}')">
+    <p class="muted" style="margin:2px 2px 10px">${
+      pastShareSales(userId).filter(([,s])=>(s.sellerPct||0)!==now && s.ts>=new Date(_fsFrom+'T00:00').getTime()).length
+      } sale(s) on or after ${esc(_fsFrom)} would be changed to ${now}%. Stock, prices and totals are untouched —
+      only who keeps the profit changes, so the Money screen and everyone's balances re-add themselves.</p>
+    <button class="btn" onclick="pinConfirm('Rewrite the profit share to ${now}% on ${esc(u.name)}\\'s sales from ${esc(_fsFrom)} onwards? Sale amounts and stock are not touched.',()=>applyPctToSales('${userId}',${now},new Date('${_fsFrom}'+'T00:00').getTime()))">
+      ⟳ Correct those sales to ${now}%</button>
+    <div style="height:8px"></div>
+    <button class="btn gray" onclick="pinConfirm('Rewrite the profit share to ${now}% on ALL ${wrong.length} of ${esc(u.name)}\\'s past sales?',()=>applyPctToSales('${userId}',${now},0))">
+      ⟳ Correct all ${wrong.length} of them</button>
+    <div style="height:8px"></div>`:'<p class="muted">Every recorded sale already sits at '+now+'% — nothing to correct.</p>'}
+    <button class="btn gray" onclick="closeModal();rerender()">Leave the history as it is</button>`);
+}
+async function applyPctToSales(userId,pct,fromTs){
+  const hits=pastShareSales(userId).filter(([,s])=>s.ts>=fromTs && (s.sellerPct||0)!==pct);
+  for(const [id] of hits){
+    await DB.set(['sales',id,'sellerPct'],pct);
+    await DB.set(['sales',id,'shareFixed'],{ts:Date.now(), by:meU().name, pct});
+  }
+  _fsFrom=null; closeModal();
+  toast(hits.length? hits.length+' sale(s) corrected to '+pct+'%' : 'Nothing needed changing');
+  rerender();
 }
 async function deleteUser(id){
   const u=S.users[id];
@@ -2653,11 +2966,11 @@ function dl(name,text){
 }
 function csvCell(v){ v=String(v??''); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
 function exportSalesCSV(){
-  const rows=[['Date','Time','Event','Seller','Item','Size','Qty','Unit Price','Orig Price','Unit Cost','Line Total','Line Profit','Member Sale','Payment','Owed By','Order Discount','Discount By','Voided']];
+  const rows=[['Date','Time','Event','Seller','Type of sale','Item','Size','Qty','Unit Price','Orig Price','Unit Cost','Line Total','Line Profit','Member Sale','Payment','Owed By','Order Discount','Discount By','Voided']];
   salesSorted().reverse().forEach(([,s])=>{
     const d=new Date(s.ts);
     s.lines.forEach(l=>rows.push([d.toLocaleDateString('en-CA'),d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}),
-      s.eventName||'',s.sellerName,l.item,l.size,l.qty,l.price,l.orig||'',l.cost,
+      s.eventName||'',s.sellerName,GRP_LABEL[lineGroup(l)].replace(/^\S+\s/,''),l.item,l.size,l.qty,l.price,l.orig||'',l.cost,
       Math.round(l.price*l.qty*100)/100,Math.round((l.price-l.cost)*l.qty*100)/100,
       l.member?'Y':'',s.payment,s.buyer||'',s.discount?s.discount.amount:'',
       s.discount?(s.discount.by||s.sellerName):'',s.voided?'Y':'']));
