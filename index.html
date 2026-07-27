@@ -204,6 +204,12 @@
   tr.drill td:first-child::after{content:' ›';color:var(--gold);font-weight:800;}
   tr.drill:active td{background:var(--panel2);}
   .drilltot td{border-top:2px solid var(--line);background:var(--panel2);font-weight:800;}
+  .stat .sub{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.35;}
+  .stat.drilltile{cursor:pointer;position:relative;}
+  .stat.drilltile::after{content:'›';position:absolute;top:8px;right:11px;color:var(--gold);
+    font-weight:800;font-size:17px;line-height:1;}
+  .stat.drilltile:active{background:var(--panel2);}
+  @media print{ .stat.drilltile::after{content:'' !important;} }
   .switchrow{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #222;}
   .switchrow .t{font-size:14px;} .switchrow .s{font-size:12px;color:var(--muted);}
   .toggle{width:52px;height:30px;border-radius:15px;background:var(--togoff);border:none;position:relative;cursor:pointer;flex:0 0 auto;}
@@ -340,15 +346,15 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.12';
+const APP_VERSION = 'v3.14';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
   databaseURL: "https://three-aces-default-rtdb.firebaseio.com",
   projectId: "three-aces",
   storageBucket: "three-aces.firebasestorage.app",
-  messagingSenderId: "1078244282125",
-  appId: "1:1078244282125:web:14fa73c7622a41640c6a44"
+  messagingSenderId: "402216379186",
+  appId: "1:402216379186:web:2f01aa0f5f0e0b8ec9b1a6"
 };
 
 /* =========================== STARTING DATA ================================
@@ -1411,7 +1417,10 @@ function renderSales(){
       ${s.note?`<div class="lines" style="color:var(--gold)">📝 ${esc(s.note)}</div>`:''}
       ${isAdmin()&&!s.voided?`<div class="rowbtns noprint">
         <button class="btn small gray" onclick="pinConfirm('Edit this sale? Quantities, prices, payment, the date it happened and a note can all be changed — stock adjusts automatically.',()=>editSale('${id}'))">✎ Edit sale</button>
-        <button class="btn small red" onclick="voidSale('${id}')">Void &amp; restock</button></div>`:''}
+        <button class="btn small red" onclick="voidSale('${id}')">Void &amp; restock</button>
+        <button class="btn small red" onclick="deleteSaleAsk('${id}')">🗑 Delete</button></div>`:''}
+      ${isAdmin()&&s.voided?`<div class="rowbtns noprint">
+        <button class="btn small red" onclick="deleteSaleAsk('${id}')">🗑 Delete permanently</button></div>`:''}
     </div>`;}).join('')||'<div class="empty">No sales in this period. 🤞</div>');
 }
 // When printing we open every group so the whole breakdown lands on paper.
@@ -1434,12 +1443,44 @@ function exportShownSalesCSV(){
   dl('three-aces-sales-'+dstr(from)+'-to-'+dstr(to)+'.csv', rows.map(r=>r.map(csvCell).join(',')).join('\n'));
   toast('Exported '+(rows.length-1)+' lines');
 }
-async function voidSale(id){
-  if(!confirm('Void this sale and put the items back in stock?')) return;
-  const s=S.sales[id];
-  for(const l of s.lines){ if(!l.adhoc && S.items[l.itemId]) await DB.txnStock(l.itemId,l.size,l.qty); }
+function voidSale(id){
+  const s=(S.sales||{})[id]; if(!s) return;
+  const what=(s.lines||[]).map(l=>l.qty+'× '+l.item+' '+l.size).join(', ');
+  pinConfirm('Void this sale — '+fmt(s.total)+(what?' ('+what+')':'')+', rung up by '
+    +(s.sellerName||'—')+' on '+new Date(s.ts).toLocaleDateString('en-CA')
+    +'. The items go back into stock and the sale is crossed out everywhere, but the record stays '
+    +'in the log so the books can still be audited.',
+    ()=>voidSaleGo(id));
+}
+async function voidSaleGo(id){
+  const s=(S.sales||{})[id]; if(!s || s.voided) return;
+  for(const l of (s.lines||[])){ if(!l.adhoc && S.items[l.itemId]) await DB.txnStock(l.itemId,l.size,l.qty); }
   await DB.set(['sales',id,'voided'],true);
   toast('Sale voided — stock restored');
+}
+/* Voiding keeps the record and crosses it out, which is what an auditor wants.
+   Sometimes you just want the thing gone — a test sale, a double-tap, something
+   rung up on the wrong phone. That is this, and it takes a PIN because there is
+   no undo: the record is removed from the database entirely. */
+function deleteSaleAsk(id){
+  const s=(S.sales||{})[id]; if(!s) return;
+  const what=(s.lines||[]).map(l=>l.qty+'× '+l.item+' '+l.size).join(', ');
+  pinConfirm('Delete this sale completely — '+fmt(s.total)+(what?' ('+what+')':'')+', rung up by '
+    +(s.sellerName||'—')+' on '+new Date(s.ts).toLocaleDateString('en-CA')+'. '
+    +(s.voided?'The stock went back on the shelf when it was voided, so it stays as it is. '
+              :'The items go back into stock. ')
+    +'Unlike voiding, nothing is left behind: it disappears from the sales log, the reports, the money '
+    +'screen and the books. This cannot be undone.',
+    ()=>deleteSaleGo(id));
+}
+async function deleteSaleGo(id){
+  const s=(S.sales||{})[id]; if(!s) return;
+  // A voided sale has already had its stock put back — don't credit it twice.
+  if(!s.voided){
+    for(const l of (s.lines||[])){ if(!l.adhoc && S.items[l.itemId]) await DB.txnStock(l.itemId,l.size,l.qty); }
+  }
+  await DB.set(['sales',id],null);
+  toast('Sale deleted — no record kept');
 }
 
 /* ----------------------------- CLUB BOOKS ---------------------------------
@@ -1495,6 +1536,88 @@ FIN_SEED.txns=FIN_TXNS_2026;
 const ATT_CODES=['','P','L','AN','A','NP'];
 const ATT_SEED={"legend":"L = LATE; A = ABSENT; P = PRESENT; NP = NO PATCH; AN = ABSENT W NOTICE","roster":[{"id":"m01","name":"Charlie","hidden":false},{"id":"m02","name":"Luca","hidden":false},{"id":"m03","name":"Vito","hidden":false},{"id":"m04","name":"Steve","hidden":true},{"id":"m05","name":"Mike V.","hidden":true},{"id":"m06","name":"Rob","hidden":false},{"id":"m07","name":"Mike R.","hidden":true},{"id":"m08","name":"Luigi","hidden":true},{"id":"m09","name":"Anthony","hidden":true},{"id":"m10","name":"Rocco","hidden":true},{"id":"m11","name":"Paul","hidden":true},{"id":"m12","name":"Giancarlo","hidden":true},{"id":"m13","name":"Johnny Mustang","hidden":true},{"id":"m14","name":"Johnny","hidden":true},{"id":"m15","name":"Billy","hidden":true},{"id":"m16","name":"Calogero","hidden":false}],"baseline":{"m01":{"owed":50,"paid":0,"cash":8760},"m02":{"owed":0,"paid":0,"cash":8760},"m03":{"owed":400,"paid":0,"cash":8760},"m04":{"owed":100,"paid":100,"cash":7930},"m05":{"owed":50,"paid":150,"cash":6290},"m06":{"owed":100,"paid":0,"cash":7260},"m07":{"owed":100,"paid":0,"cash":6860},"m08":{"owed":0,"paid":0,"cash":2800},"m09":{"owed":0,"paid":0,"cash":1120},"m10":{"owed":600,"paid":200,"cash":3310},"m11":{"owed":100,"paid":0,"cash":1850},"m12":{"owed":0,"paid":0,"cash":1480},"m13":{"owed":0,"paid":0,"cash":800},"m14":{"owed":0,"paid":0,"cash":5540},"m15":{"owed":0,"paid":0,"cash":450},"m16":{"owed":0,"paid":0,"cash":1440}},"years":{"2013":{"marks":{"m01":{"m3":"P","m4":"L","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"A","m11":"P","m12":"P"},"m03":{"m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"A","m11":"P","m12":"P"},"m04":{"m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m10":{"m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m15":{"m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"A","m9":"P","m10":"A","m11":"A"}},"locked":{"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2014":{"marks":{"m01":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"L"},"m03":{"m1":"P","m2":"A","m3":"P","m4":"L","m5":"L","m6":"P","m7":"P","m8":"P","m9":"L","m10":"P","m11":"P","m12":"L"},"m04":{"m1":"P","m2":"A","m3":"L","m4":"L","m5":"A","m6":"L","m7":"P","m8":"P","m9":"P","m10":"L","m11":"P","m12":"P"},"m10":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"A","m6":"P","m7":"P","m8":"A","m9":"L","m10":"P","m11":"P","m12":"P"},"m14":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"A","m10":"P","m11":"A","m12":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2015":{"marks":{"m01":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m04":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"A","m7":"P","m8":"P","m9":"P","m10":"P","m11":"L","m12":"P"},"m05":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"A","m7":"P","m8":"P","m9":"A","m10":"P","m11":"P","m12":"P"},"m06":{"m9":"P","m10":"P","m11":"P","m12":"P"},"m07":{"m9":"P","m10":"P","m11":"P","m12":"P"},"m10":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"A","m7":"A","m8":"P","m9":"A","m10":"P","m11":"A","m12":"P"},"m11":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"A","m9":"P","m10":"P","m11":"P","m12":"P"},"m12":{"m10":"P","m11":"P","m12":"P"},"m14":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"A","m7":"P","m8":"P","m9":"AN","m10":"P","m11":"P","m12":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2016":{"marks":{"m01":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"AN","m11":"AN","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"AN","m11":"AN","m12":"P"},"m04":{"m1":"A","m2":"P","m3":"P","m4":"P","m5":"P","m6":"AN","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m05":{"m1":"L","m2":"A","m3":"P","m4":"P","m5":"P","m6":"P","m7":"AN","m8":"AN","m9":"P","m10":"L","m11":"P","m12":"L"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"AN","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m07":{"m1":"P","m2":"AN","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m10":{"m1":"P","m2":"AN","m3":"A","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"A","m10":"AN","m11":"AN","m12":"P"},"m11":{"m1":"P","m2":"P","m3":"AN","m4":"P","m5":"P","m6":"AN","m7":"P","m8":"AN","m9":"P","m10":"P","m11":"P","m12":"P"},"m12":{"m1":"P","m2":"P","m3":"AN","m4":"P","m5":"P","m6":"A","m7":"P","m8":"AN","m9":"P","m10":"P","m11":"P","m12":"AN"},"m13":{"m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m14":{"m1":"P","m2":"P","m3":"P","m4":"AN","m5":"P","m6":"A","m7":"P","m8":"P","m9":"AN","m10":"P","m11":"P","m12":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2017":{"marks":{"m01":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"AN","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"AN","m11":"P","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"AN","m7":"P","m8":"P","m9":"P","m10":"AN","m11":"P","m12":"P"},"m04":{"m1":"AN","m2":"AN","m3":"P","m4":"P","m5":"A","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m05":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"L","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m07":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m10":{"m1":"AN","m2":"AN","m3":"P","m4":"P","m5":"A","m6":"AN","m7":"P","m8":"P","m9":"P","m10":"A","m11":"AN","m12":"P"},"m11":{"m1":"P","m2":"AN","m3":"AN","m4":"P","m5":"AN","m6":"AN","m7":"P","m8":"AN","m9":"AN","m10":"A","m11":"P","m12":"P"},"m12":{"m1":"P","m2":"P","m3":"AN","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m13":{"m1":"P","m2":"P","m3":"AN","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"AN","m10":"A","m11":"AN","m12":"AN"},"m14":{"m1":"P","m2":"AN","m3":"P","m4":"P","m5":"AN","m6":"P","m7":"P","m8":"AN","m9":"AN","m10":"P","m11":"P","m12":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2018":{"marks":{"m01":{"m1":"AN","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"AN","m8":"AN","m9":"P","m10":"P","m11":"P","m12":"P"},"m04":{"m1":"AN","m2":"P","m3":"P","m4":"A","m5":"P","m6":"P","m7":"P","m8":"A","m9":"P","m10":"P","m11":"AN","m12":"P"},"m05":{"m1":"P","m2":"P","m3":"A","m4":"P","m5":"P","m6":"A","m7":"P","m8":"A","m9":"P","m10":"A","m11":"AN","m12":"P"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m07":{"m1":"AN","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m10":{"m1":"P","m2":"A","m3":"AN","m4":"A"},"m11":{"m1":"P","m2":"AN"},"m12":{"m1":"P","m2":"P","m3":"P"},"m13":{"m1":"AN","m2":"AN","m3":"AN","m4":"AN","m5":"AN","m6":"AN","m7":"AN","m8":"AN","m9":"AN","m10":"AN","m11":"AN"},"m14":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"A","m9":"P","m10":"P","m11":"P","m12":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2019":{"marks":{"m01":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"AN","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"A","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m04":{"m1":"AN","m2":"P","m3":"AN","m4":"A","m5":"P","m6":"P","m7":"A","m8":"P","m9":"AN","m10":"AN","m11":"AN","m12":"P"},"m05":{"m1":"A","m2":"A","m3":"A","m4":"A","m5":"A","m6":"A","m7":"P","m8":"P","m9":"P","m10":"AN","m11":"AN","m12":"P"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"A","m7":"P","m8":"P","m9":"P","m10":"P","m11":"AN","m12":"P"},"m07":{"m1":"AN","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m14":{"m1":"P","m2":"P","m3":"AN","m4":"A","m5":"P","m6":"A","m7":"P","m8":"P","m9":"P","m10":"A","m11":"L","m12":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2020":{"marks":{"m01":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"A","m12":"A"},"m04":{"m1":"P","m2":"AN","m3":"P","m4":"P","m5":"P","m6":"A","m7":"A","m8":"P","m9":"P","m10":"A","m11":"A","m12":"A"},"m05":{"m1":"P","m2":"AN","m3":"P","m4":"P","m5":"A","m6":"A","m7":"A","m8":"P","m9":"P","m10":"A","m11":"A","m12":"P"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m07":{"m1":"AN","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m08":{"m9":"P","m10":"P","m11":"P","m12":"P"},"m14":{"m1":"A","m2":"A","m3":"P","m4":"P","m5":"A","m6":"A","m7":"A","m8":"A","m9":"A","m10":"A","m11":"A","m12":"A"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2021":{"marks":{"m01":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m04":{"m1":"P","m2":"A","m3":"A","m4":"P","m5":"A","m6":"A","m7":"P","m8":"A","m9":"A","m10":"A","m11":"A","m12":"P"},"m05":{"m1":"P","m2":"A","m3":"P","m4":"A","m5":"A","m6":"A","m7":"P","m8":"A","m9":"A","m10":"P","m11":"A","m12":"P"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"A","m11":"P","m12":"P"},"m07":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"A","m7":"P","m8":"P","m9":"A","m10":"P","m11":"P","m12":"P"},"m08":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m14":{"m1":"A","m2":"A","m3":"A","m4":"A","m5":"A","m6":"A"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2022":{"marks":{"m01":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"A","m9":"P","m10":"P","m11":"P","m12":"P"},"m04":{"m1":"AN","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m05":{"m1":"P","m2":"A","m3":"A","m4":"A","m5":"A","m6":"P","m7":"P","m8":"A","m9":"A"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m07":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m08":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m09":{"m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m16":{"m11":"P","m12":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2023":{"marks":{"m01":{"m1":"L","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m04":{"m1":"P","m2":"P","m3":"P","m4":"A","m5":"P","m6":"P","m7":"P"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m07":{"m1":"AN","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m08":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P"},"m09":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"A"},"m16":{"m1":"AN","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2024":{"marks":{"m01":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m07":{"m1":"A","m2":"P"},"m16":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"A","m10":"P","m11":"P","m12":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2025":{"marks":{"m01":{"m1":"A","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m02":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m03":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"A"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"},"m16":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P","m7":"P","m8":"P","m9":"P","m10":"P","m11":"P","m12":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true,"m7":true,"m8":true,"m9":true,"m10":true,"m11":true,"m12":true}},"2026":{"marks":{"m01":{"m1":"P","m2":"A","m3":"P","m4":"P","m5":"P","m6":"P"},"m02":{"m1":"P","m2":"A","m3":"P","m4":"P","m5":"P","m6":"P"},"m03":{"m1":"A","m2":"A","m3":"P","m4":"P","m5":"P","m6":"P"},"m06":{"m1":"P","m2":"P","m3":"P","m4":"A","m5":"P","m6":"P"},"m16":{"m1":"P","m2":"P","m3":"P","m4":"P","m5":"P","m6":"P"}},"locked":{"m1":true,"m2":true,"m3":true,"m4":true,"m5":true,"m6":true},"notes":{"m1":"Vito: sick","m2":"Luca: in Italy","m4":"Rob: missed because of Joey hockey tryouts"}}}};
 let finYear=new Date().getFullYear(), _finInit=false;
+
+/* ------------------------- THE SPONSOR YEAR --------------------------------
+   The club's sponsor year is NOT the calendar year: it runs Aug 1 → Jul 31,
+   so it starts fresh right after the picnic. Everything below is derived from
+   the date alone — no stored "current year", no button to press, nothing to
+   re-upload. At one minute past midnight on Aug 1 the board is simply reading
+   a different year, and every member is back to owing their sponsor.         */
+function sponsorYearOf(ts){
+  const d=new Date(ts);
+  // Aug (month 7) through Dec belong to the NEXT year's sponsor season.
+  return d.getMonth()>=7 ? d.getFullYear()+1 : d.getFullYear();
+}
+function currentSponsorYear(){ return sponsorYearOf(Date.now()); }
+function sponsorYearLabel(y){ return 'Aug 1 '+(y-1)+' → Jul 31 '+y; }
+function sponsorYearStart(y){ return new Date(y-1,7,1); }
+function sponsorYearEnd(y){ return new Date(y,6,31); }
+// null = "whatever year it is today", which is what makes the rollover automatic.
+let sponsorYr=null;
+function sponsorYrShown(){ return sponsorYr||currentSponsorYear(); }
+// Which sponsor years do we have anything to show for? Always include this one
+// and the one that starts next, so the board exists before the first donation.
+function sponsorYears(){
+  const cur=currentSponsorYear();
+  const ys=Object.values((S.finance||{}).txns||{})
+    .filter(t=>t.kind==='income'&&t.cat==='Donations'&&t.member)
+    .map(t=>sponsorYearOf(t.ts));
+  return [...new Set(ys.concat([cur,cur+1]))].sort();
+}
+// Donations credited to each member, for one sponsor year. Reads the RAW txns,
+// not the calendar-year-filtered list the rest of the books uses.
+function sponsorSecured(y){
+  const out={};
+  Object.values((S.finance||{}).txns||{})
+    .filter(t=>t.kind==='income'&&t.cat==='Donations'&&t.member&&sponsorYearOf(t.ts)===y)
+    .forEach(t=>{ out[t.member]=(out[t.member]||0)+t.amount; });
+  return out;
+}
+/* The app says the rule out loud, on its own, in both the admin books and the
+   member's own Club tab. In the last weeks of a season it counts down; in the
+   first weeks of a new one it explains why everybody is back at zero.        */
+function sponsorNoticeHTML(target,shownArg){
+  const now=new Date(), y=currentSponsorYear(), shown=shownArg||sponsorYrShown();
+  const day=86400000;
+  const start=sponsorYearStart(y), next=sponsorYearStart(y+1);
+  const inDays=Math.floor((now-start)/day), toGo=Math.ceil((next-now)/day);
+  const rule=`Every member secures a ${fmt(target)} sponsor — or self-sponsors — once per <b>sponsor year</b>,
+    and the sponsor year runs <b>Aug 1 to Jul 31</b>, so it turns over right after the picnic.
+    The board clears itself on Aug 1 automatically: nobody resets anything and no new file is needed.`;
+  if(shown!==y) return `<div class="card"><b>📚 You are looking at a past sponsor year — ${sponsorYearLabel(shown)}</b>
+    <p class="muted">${rule} The live season is ${sponsorYearLabel(y)}.</p></div>`;
+  if(toGo<=45) return `<div class="card" style="border-color:var(--gold)">
+    <b>⏳ ${toGo} day${toGo===1?'':'s'} left in the ${shown} sponsor year — it ends Jul 31 ${shown}</b>
+    <p class="muted">${rule} On <b>Aug 1 ${shown}</b> this board starts over at zero for ${sponsorYearLabel(shown+1)},
+      by itself. Anything still showing as owed below is owed for <i>this</i> season, so now is the time.</p></div>`;
+  if(inDays<=45) return `<div class="card" style="border-color:var(--gold)">
+    <b>🆕 A new sponsor year began on ${start.toLocaleDateString('en-CA',{month:'long',day:'numeric',year:'numeric'})}</b>
+    <p class="muted">${rule} That is why everyone is back to ${fmt(target)} to go for ${sponsorYearLabel(shown)} —
+      last season closed on Jul 31 and its board is still there under the year buttons.</p></div>`;
+  return `<p class="muted">${rule}</p>`;
+}
+
+/* ------------------- WHO IS A MEMBER, WHO IS JUST STAFF --------------------
+   The point-of-sale person runs the till on the day. They are not a member of
+   the club: no sponsor to secure and no meeting attendance to keep. A roster
+   row can say so outright (staff true or false); if it says nothing, we look
+   the name up in the user list and treat the 'retail' role as staff.         */
+function roleOfName(name){
+  const n=(name||'').trim().toLowerCase();
+  const u=Object.values(S.users||{}).find(x=>(x.name||'').trim().toLowerCase()===n);
+  return u? (u.role||'seller') : null;
+}
+function isStaffRow(r){
+  if(r && typeof r.staff==='boolean') return r.staff;
+  return roleOfName(r&&r.name)==='retail';
+}
+function isStaffName(name){
+  const n=(name||'').trim().toLowerCase();
+  const r=attRoster().find(x=>(x.name||'').trim().toLowerCase()===n);
+  if(r && typeof r.staff==='boolean') return r.staff;
+  return roleOfName(name)==='retail';
+}
+
 function finCalc(y){
   const F=S.finance, op=F.opening;
   if(y<op.year){ const h=(F.history||{})[String(y)];
@@ -1507,8 +1630,14 @@ function finCalc(y){
   const incCash=tx.filter(t=>t.kind==='income'&&!t.inkind).reduce((a,t)=>a+t.amount,0);
   const inkind=tx.filter(t=>t.kind==='income'&&t.inkind).reduce((a,t)=>a+t.amount,0);
   const expenses=tx.filter(t=>t.kind==='expense').reduce((a,t)=>a+t.amount,0);
-  const totalIn=prev+salesAuto+incCash;
-  return {prev, salesAuto, incCash, inkind, expenses, tx,
+  // Cash handed in for something the club did off the app (card game, hall rental).
+  // It is logged once, on the Money screen, and flows in here so the balance is right —
+  // there is no second entry to make and nothing to keep in step by hand.
+  const miscAuto=Object.entries(S.payments||{}).map(([,p])=>p)
+    .filter(p=>p.kind==='misc'&&new Date(p.ts).getFullYear()===y)
+    .reduce((a,p)=>a+(p.amount||0),0);
+  const totalIn=prev+salesAuto+incCash+miscAuto;
+  return {prev, salesAuto, incCash, inkind, expenses, tx, miscAuto,
     totalIn, balance:Math.round((totalIn-expenses)*100)/100,
     pctSpent: totalIn>0? expenses/totalIn : 0};
 }
@@ -1640,12 +1769,31 @@ function finDrill(kind,cat){
     const cats=[...new Set(tx.filter(t=>t.kind==='income'&&!t.inkind).map(t=>t.cat))];
     const rows=[['Previous Balance (carried from '+(finYear-1)+')',c.prev],
                 ['Picnic + Apparel Sales — live from this app',c.salesAuto]]
+      .concat(c.miscAuto>0.005?[['Miscellaneous cash in — from the Money screen',c.miscAuto]]:[])
       .concat(cats.map(x=>[x, tx.filter(t=>t.kind==='income'&&t.cat===x&&!t.inkind).reduce((a,t)=>a+t.amount,0)]));
     if(c.inkind>0.005) rows.push(['In-kind donations — tracked, deliberately NOT added in',c.inkind,true]);
     return openModal(_drillTitle('TOTAL INCOME',
       'Everything the club has had available in '+finYear+', including what was carried in.', c.totalIn,'green')
       + _drillSum(rows,'TOTAL INCOME',c.totalIn,
         'Tap any single line back in the Books screen to see the individual entries behind it.'));
+  }
+  if(kind==='misc'){
+    const mp=Object.entries(S.payments||{}).map(([id,p])=>({id,...p}))
+      .filter(p=>p.kind==='misc'&&new Date(p.ts).getFullYear()===finYear).sort((a,b)=>a.ts-b.ts);
+    return openModal(_drillTitle('Miscellaneous cash in',
+      'Cash handed to the club in '+finYear+' for something that never went through the till. '
+      +'These are logged on the <b>Money</b> screen with ＋ Record money received by club, and flow in here on their own.',
+      c.miscAuto,'green')
+      + `<div class="card"><table>
+          <tr><th>Date</th><th>What it was for</th><th class="r">Amount</th></tr>
+          ${mp.map(p=>`<tr>
+            <td style="white-space:nowrap;vertical-align:top">${_dDate(p.ts)}</td>
+            <td><b>${esc(p.note||'—')}</b>
+              <div class="muted">handed in by ${esc(p.from||'—')}${p.by?' · recorded by '+esc(p.by):''}</div></td>
+            <td class="r pos" style="vertical-align:top"><b>${fmt(p.amount)}</b></td></tr>`).join('')
+            ||'<tr><td colspan="3" class="empty">Nothing recorded for '+finYear+'.</td></tr>'}
+          <tr class="drilltot"><td colspan="2">TOTAL MISCELLANEOUS CASH IN</td>
+            <td class="r">${fmt(c.miscAuto)}</td></tr></table></div>`);
   }
   if(kind==='totalexp'){
     const cats=[...new Set(tx.filter(t=>t.kind==='expense').map(t=>t.cat))];
@@ -1707,13 +1855,23 @@ function booksHTML(){
   const expCats=[...new Set((F.cats&&F.cats.expense||FIN_SEED.cats.expense)
     .filter(x=>!(hidCats.expense||[]).includes(x))
     .concat(c.tx.filter(t=>t.kind==='expense').map(t=>t.cat)))];
-  // sponsor quota board — driven by the member ROSTER (plus anyone credited)
+  // Sponsor quota board — driven by the member ROSTER (plus anyone credited).
+  // It runs on the SPONSOR year, Aug 1 → Jul 31, so it reads the raw txns and
+  // not c.tx, which is filtered to the calendar year showing in the books.
   const target=F.sponsorTarget||500;
-  const secured={};
-  c.tx.filter(t=>t.kind==='income'&&t.cat==='Donations'&&t.member).forEach(t=>{
-    secured[t.member]=(secured[t.member]||0)+t.amount; });
-  const roster=(S.attendance&&S.attendance.roster||ATT_SEED.roster).filter(r=>!r.hidden).map(r=>r.name);
-  const boardNames=[...new Set(roster.concat(Object.keys(secured)))];
+  const spYr=sponsorYrShown(), spYears=sponsorYears();
+  const secured=sponsorSecured(spYr);
+  // The point-of-sale person is staff, not a member — no sponsor expected of them.
+  const roster=(S.attendance&&S.attendance.roster||ATT_SEED.roster)
+    .filter(r=>!r.hidden&&!isStaffRow(r)).map(r=>r.name);
+  const boardNames=[...new Set(roster.concat(Object.keys(secured).filter(n=>!isStaffName(n))))];
+  const spTot=boardNames.reduce((a,m)=>a+Math.min(secured[m]||0,target),0);
+  const spDone=boardNames.filter(m=>(secured[m]||0)>=target).length;
+  const spAllIn=boardNames.length>0 && spDone===boardNames.length;
+  const spBtns=`<div class="payrow noprint" style="flex-wrap:wrap">
+    ${spYears.map(y=>`<button class="${spYr===y?'on':''}" style="flex:1 1 22%;padding:9px 4px"
+      onclick="sponsorYr=${y};rerender()">${y===currentSponsorYear()?'▶ ':''}${y}</button>`).join('')}
+    </div>`;
   // entries grouped by category, subtotal per group
   const groups={};
   c.tx.forEach(t=>{ (groups[t.cat]=groups[t.cat]||[]).push(t); });
@@ -1748,6 +1906,7 @@ function booksHTML(){
       <tr><th>Item</th><th class="r">Amount</th></tr>
       ${incCats.map(cat=>`<tr class="drill" onclick="finDrill('income','${jsq(cat)}')"><td>${esc(cat)}</td><td class="r">${fmt(catSum('income',cat))}</td></tr>`).join('')}
       <tr class="drill" onclick="finDrill('sales')"><td>Picnic + Apparel Sales — 🛒 live from this app</td><td class="r pos">${fmt(c.salesAuto)}</td></tr>
+      ${c.miscAuto>0.005?`<tr class="drill" onclick="finDrill('misc')"><td>Miscellaneous cash in — 🧾 from the Money screen</td><td class="r pos">${fmt(c.miscAuto)}</td></tr>`:''}
       <tr class="drill" onclick="finDrill('prev')"><td>Previous Balance (carried from ${finYear-1})</td><td class="r">${fmt(c.prev)}</td></tr>
       <tr class="drill" onclick="finDrill('totalin')"><td><b>TOTAL INCOME</b></td><td class="r"><b>${fmt(c.totalIn)}</b></td></tr>
       ${c.inkind>0.005?`<tr class="drill" onclick="finDrill('inkind')"><td class="muted">In-kind donations (tracked, not in balance)</td><td class="r muted">${fmt(c.inkind)}</td></tr>`:''}
@@ -1767,13 +1926,23 @@ function booksHTML(){
       <div class="stat gold"><div class="v">${fmt(c.balance)}</div><div class="l">Balance</div></div>
       <div class="stat"><div class="v">${Math.round(c.pctSpent*100)}%</div><div class="l">Percentage of income spent</div></div>
     </div>
-    <h2>Sponsor rule — every member secures a ${fmt(target)} sponsor, or self-sponsors</h2>
-    <div class="card"><table><tr><th>Member</th><th class="r">Secured this year</th><th class="r">Status</th></tr>
+    <h2>⭐ Sponsor board — ${sponsorYearLabel(spYr)}</h2>
+    ${spBtns}
+    ${sponsorNoticeHTML(target)}
+    <div class="statgrid">
+      <div class="stat ${spAllIn?'green':'gold'}"><div class="v">${spDone} / ${boardNames.length}</div><div class="l">Members covered</div></div>
+      <div class="stat green"><div class="v">${fmt(spTot)}</div><div class="l">Counted toward the quota</div></div>
+      <div class="stat ${spAllIn?'green':'red'}"><div class="v">${fmt(Math.max(0,boardNames.length*target-spTot))}</div><div class="l">Still to be secured</div></div>
+    </div>
+    <div class="card"><table><tr><th>Member</th><th class="r">Secured — ${spYr} season</th><th class="r">Status</th></tr>
       ${boardNames.map(m=>{ const got=secured[m]||0;
         return `<tr><td>${esc(m)}</td><td class="r">${fmt(got)}</td>
           <td class="r ${got>=target?'pos':'neg'}"><b>${got>=target?'✔ covered':'owes '+fmt(target-got)}</b></td></tr>`;}).join('')}
     </table></div>
-    <p class="muted">A donation counts toward whoever is picked as "secured by". Self-sponsoring: record a donation with sponsor "(Self)" and pick the member.</p>
+    <p class="muted">A donation counts toward whoever is picked as "secured by", and it lands in the sponsor year its <b>date</b> falls in —
+      one dated Aug 2 counts for the new season, one dated Jul 30 for the season just closed.
+      Self-sponsoring: record a donation with sponsor "(Self)" and pick the member.
+      The point-of-sale person is not on this board: they run the till, they are not a member.</p>
     <h2>Entries — ${finYear} (grouped by category)</h2>
     ${entriesHTML||'<div class="empty">No entries yet for '+finYear+'. Sales income flows in automatically; add donations and expenses with the button above.</div>'}
     ${yoyHTML(years)}
@@ -1839,20 +2008,34 @@ function finEntryModal(id){
     </div>
     <label id="fe_memLab">${t.kind==='income'?'Secured / collected by (counts toward their sponsor quota)':'Paid to / reimbursed to (optional)'}</label>
     <select id="fe_member"><option value="">—</option>
-      ${members.map(m=>`<option ${t.member===m?'selected':''}>${esc(m)}</option>`).join('')}</select>
+      ${members.map(m=>`<option value="${esc(m)}" ${t.member===m?'selected':''}>${esc(m)}${isStaffName(m)?' — staff, no sponsor quota':''}</option>`).join('')}</select>
     <label>Invoice / receipt (optional — photo, PDF or Word file)</label>
     <img id="feInvPrev" src="${t.invoice&&t.invoice.startsWith('data:')?t.invoice:''}" style="max-height:130px;border-radius:8px;display:${t.invoice&&t.invoice.startsWith('data:')?'block':'none'};margin:4px 0">
     <div id="feInvName" class="muted" style="display:${t.invoice&&String(t.invoice).startsWith('file:')?'block':'none'};margin:4px 0">📎 Attachment saved with this entry</div>
     <div class="rowbtns">
-      <button class="btn gray" type="button" onclick="$('feInvFile').click()">📎 Attach photo / PDF / Word</button>
+      <button class="btn gray" type="button" onclick="$('feInvCam').click()">📷 Take a photo</button>
+      <button class="btn gray" type="button" onclick="$('feInvFile').click()">📎 Attach a file</button>
+    </div>
+    <div class="rowbtns">
       <button class="btn gray" type="button" onclick="window._feInv=null;window._feInvNew=null;$('feInvPrev').style.display='none';$('feInvName').style.display='none';toast('Invoice removed from this entry')">Remove</button>
     </div>
+    <p class="muted" style="margin:4px 0 0">📷 opens the camera on a phone or tablet so you can photograph the
+      receipt on the spot. 📎 picks a photo, PDF or Word file already on the device.</p>
+    <input type="file" id="feInvCam" accept="image/*" capture="environment" style="display:none" onchange="feInvoicePick(this)">
     <input type="file" id="feInvFile" accept="image/*,.pdf,.doc,.docx,application/pdf" style="display:none" onchange="feInvoicePick(this)">
     <label>Note (what/why — like your old cell notes)</label>
     <input id="fe_note" value="${esc(t.note||'')}">
     <div style="height:12px"></div>
     <button class="btn" onclick="saveFinEntry()">✓ Save Entry</button>
-    ${id?`<div style="height:8px"></div><button class="btn red" onclick="if(confirm('Delete this entry?'))DB.set(['finance','txns','${id}'],null).then(()=>{closeModal();rerender();})">Delete entry</button>`:''}`);
+    ${id?`<div style="height:8px"></div><button class="btn red" onclick="finDeleteEntry('${id}')">Delete entry</button>`:''}`);
+}
+// Deleting a figure out of the books needs the same PIN as changing one.
+function finDeleteEntry(id){
+  const t=(S.finance.txns||{})[id]||{};
+  pinConfirm('Delete this '+(t.kind==='income'?'income':'expense')+' entry — '
+    +fmt(t.amount||0)+(t.cat?' under '+t.cat:'')+(t.sponsor?' from '+t.sponsor:'')
+    +'. It comes straight back out of the club balance.',
+    async()=>{ await DB.set(['finance','txns',id],null); closeModal(); toast('Entry deleted'); });
 }
 function feKind(k){
   window._fe.kind=k;
@@ -1890,15 +2073,33 @@ async function saveFinEntry(){
     sponsor:k==='income'?($('fe_sponsor').value.trim()||null):null,
     inkind:k==='income'?$('fe_inkind').classList.contains('on'):false,
     note:$('fe_note').value.trim()||null, by:meU().name};
-  let inv=window._feInv||null;
-  if(window._feInvNew){          // a new photo/PDF/Word file → separate file store
-    const fid=newId();
-    try{ await fileSave(fid, window._feInvNew); inv='file:'+fid; }
-    catch(e){ toast('Could not save the attachment — check the connection',1); return; }
+  const editingId=window._fe.id, invNew=window._feInvNew, invOld=window._feInv||null;
+  // Everything above only READS the form. Everything below is the actual commit —
+  // it runs from captured values, so the PIN screen is free to replace the form.
+  const commit=async()=>{
+    let inv=invOld;
+    if(invNew){                  // a new photo/PDF/Word file → separate file store
+      const fid=newId();
+      try{ await fileSave(fid, invNew); inv='file:'+fid; }
+      catch(e){ toast('Could not save the attachment — check the connection',1); return; }
+    }
+    t.invoice=inv;
+    await DB.set(['finance','txns', editingId||newId()], t);
+    closeModal(); toast('Entry saved'); rerender();
+  };
+  // Changing a figure that is already in the books is a real accounting change —
+  // it moves the balance and the sponsor board. Adding a brand-new entry is not,
+  // so that stays one tap, the same way ringing up a sale does.
+  if(editingId){
+    const was=S.finance.txns[editingId]||{};
+    const changes=[];
+    if(Math.abs((was.amount||0)-t.amount)>0.005) changes.push(fmt(was.amount||0)+' → '+fmt(t.amount));
+    if((was.cat||'')!==t.cat) changes.push('category '+(was.cat||'—')+' → '+t.cat);
+    if(dstr(was.ts)!==dstr(t.ts)) changes.push('date '+dstr(was.ts)+' → '+dstr(t.ts));
+    return pinConfirm('You are changing a book entry that is already recorded'
+      +(changes.length?': '+changes.join(', '):'')+'. This moves the club balance.', commit);
   }
-  t.invoice=inv;
-  await DB.set(['finance','txns', window._fe.id||newId()], t);
-  closeModal(); toast('Entry saved'); rerender();
+  return commit();
 }
 function exportBooksCSV(){
   const rows=[['Date','Type','Category','Amount','In-Kind','Sponsor/Source','Member','Note','Recorded By']];
@@ -1956,12 +2157,16 @@ async function catHide(kind,i,hide){
   await DB.set(['finance','catsHidden',kind],list);
   manageCatsModal();
 }
-async function catDelete(kind,i){
+function catDelete(kind,i){
   const cat=S.finance.cats[kind][i];
   if(Object.values(S.finance.txns||{}).some(t=>t.cat===cat)){
     toast('"'+cat+'" has entries — hide it instead',1); return; }
-  if(!confirm('Delete category "'+cat+'"? (It was never used.)')) return;
-  await DB.set(['finance','cats',kind],S.finance.cats[kind].filter((x,j)=>j!==i));
+  pinConfirm('Delete the '+(kind==='income'?'income':'expense')+' category "'+cat
+    +'"? It was never used, so no figures move — but it disappears from the entry form and the report rows.',
+    ()=>catDeleteGo(kind,cat));
+}
+async function catDeleteGo(kind,cat){
+  await DB.set(['finance','cats',kind],(S.finance.cats[kind]||[]).filter(x=>x!==cat));
   await DB.set(['finance','catsHidden',kind],(((S.finance.catsHidden||{})[kind])||[]).filter(x=>x!==cat));
   manageCatsModal();
 }
@@ -2048,6 +2253,22 @@ let attYear=new Date().getFullYear(), attShowPast=false, _attInit=false;
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function attRoster(){ return (S.attendance&&S.attendance.roster)||ATT_SEED.roster; }
 function attVisible(){ return attRoster().filter(r=>!r.hidden); }
+// Who is actually expected at a meeting. The point-of-sale person is on the
+// roster so they can be paid and tracked, but they don't take attendance.
+function attMembers(){ return attVisible().filter(r=>!isStaffRow(r)); }
+function attStaff(){ return attVisible().filter(r=>isStaffRow(r)); }
+/* The patch requirement was dropped, so NP is no longer something you can pick.
+   It stays readable wherever it was already recorded — the old years are the
+   club's history and nothing is rewritten.                                   */
+const MARK_CODES=['P','L','AN','A'];
+function attHasNP(){
+  return Object.values(((S.attendance||{}).years)||{}).some(yy=>
+    Object.values(yy.marks||{}).some(mm=>Object.values(mm).some(v=>v==='NP')));
+}
+function attLegendHTML(){
+  return 'P = present · L = late · AN = absent with notice · A = absent'
+    + (attHasNP()? ' · NP = no patch — retired, kept on the older years only':'');
+}
 function attendHTML(){
   if(!S.attendance){
     if(!_attInit){ _attInit=true; DB.set(['attendance'],ATT_SEED).then(()=>rerender()); }
@@ -2065,6 +2286,9 @@ function attendHTML(){
   if(attYear!=='ALL' && !years.includes(attYear)) attYear=nowY;
   const cls=c=>c==='P'?'attP':c==='L'?'attL':c==='A'?'attA':c==='AN'?'attAN':c==='NP'?'attNP':'dim';
   const vis=attVisible(), hid=attRoster().filter(r=>r.hidden);
+  const mem=attMembers(), stf=attStaff();
+  // The patch requirement is gone — only carry an NP column if the old years used it.
+  const npCol=attHasNP();
   // lifetime totals computed from EVERY imported year + baseline fees/cash
   const life={};
   attRoster().forEach(r=>life[r.id]={P:0,L:0,AN:0,A:0,NP:0});
@@ -2084,7 +2308,7 @@ function attendHTML(){
   if(attYear==='ALL'){
     // the FULL register, newest year first — read-only, includes past members
     gridSection=`<p class="muted">The whole register, every year — past members included, so nobody is missed.
-      Read-only here: pick a single year above to enter or change a month. ${esc(A.legend||'')}</p>`+
+      Read-only here: pick a single year above to enter or change a month. ${attLegendHTML()}</p>`+
       years.slice().reverse().map(yr=>{
         const Yy=(A.years||{})[String(yr)]||{}; const mk=Yy.marks||{}, nt=Yy.notes||{};
         const rows=attRoster().filter(r=>mk[r.id]&&Object.values(mk[r.id]).some(v=>v));
@@ -2101,12 +2325,15 @@ function attendHTML(){
   } else {
     const Y=(A.years||{})[String(attYear)]||{marks:{},notes:{},locked:{}};
     const marks=Y.marks||{}, notes=Y.notes||{}, locked=Y.locked||{};
+    // minutes = what was covered at the meeting (goes out to whoever missed it)
+    // mnotes  = why one particular member was away that month
+    const minutes=Y.minutes||{}, mnotes=Y.mnotes||{};
     gridSection=`<p class="muted">Tap a month to enter or view it. 🔒 = saved &amp; locked — changing it asks for your PIN.
-    ${esc(A.legend||'')}</p>
+    ${attLegendHTML()}</p>
     <div class="gridwrap"><table class="stockgrid">
       <tr><th class="itc">Member</th>${MONTHS.map((m,i)=>
         `<th class="sz" onclick="attMonthOpen(${i+1})">${m}${notes['m'+(i+1)]?' ✱':''}${locked['m'+(i+1)]?' 🔒':''}<br><span style="font-weight:400;font-size:9px;opacity:.75">${meetDate(attYear,i+1).getDate()}</span></th>`).join('')}<th class="r">P</th></tr>
-      ${vis.map(r=>{
+      ${mem.map(r=>{
         const row=marks[r.id]||{};
         const pCount=Object.values(row).filter(v=>v==='P').length;
         return `<tr><td class="itc">${esc(r.name)}</td>${MONTHS.map((m,i)=>{
@@ -2115,9 +2342,19 @@ function attendHTML(){
         }).join('')}<td class="r"><b>${pCount}</b></td></tr>`;
       }).join('')}
     </table></div>
-    ${Object.keys(notes).length?`<h2>Meeting notes — ${attYear}</h2>
-      <div class="card">${MONTHS.map((m,i)=>notes['m'+(i+1)]?
-        `<div style="padding:4px 0"><b>${m}</b> — ${esc(notes['m'+(i+1)])}</div>`:'').join('')}</div>`:''}
+    ${MONTHS.some((m,i)=>minutes['m'+(i+1)]||notes['m'+(i+1)]||Object.keys(mnotes['m'+(i+1)]||{}).length)?
+      `<h2>📝 What was covered — ${attYear}</h2>
+      <p class="muted noprint" style="margin:-6px 0 8px">Anyone marked absent for a month sees that month's minutes on their own Club tab, so they know what they missed.</p>
+      ${MONTHS.map((m,i)=>{ const k='m'+(i+1), mn=minutes[k]||'', nt=notes[k]||'', per=mnotes[k]||{};
+        const perList=Object.entries(per).filter(([id,v])=>v&&mem.concat(stf,hid).some(r=>r.id===id));
+        if(!mn&&!nt&&!perList.length) return '';
+        const nameOf=id=>(attRoster().find(r=>r.id===id)||{}).name||'—';
+        return `<div class="card"><b>${m} ${attYear}</b> <span class="muted">${meetDate(attYear,i+1).toLocaleDateString('en-CA',{month:'short',day:'numeric'})}</span>
+          ${mn?`<p style="margin:6px 0 0;white-space:pre-wrap">${esc(mn)}</p>`:'<p class="muted" style="margin:6px 0 0">No minutes were written for this meeting.</p>'}
+          ${nt?`<p class="muted" style="margin:6px 0 0">Register note: ${esc(nt)}</p>`:''}
+          ${perList.length?`<div class="muted" style="margin-top:6px;font-size:12px">${perList.map(([id,v])=>
+            `<div><b>${esc(nameOf(id))}</b> — ${esc(v)}</div>`).join('')}</div>`:''}
+        </div>`; }).join('')}`:''}
     <h2>📅 Meeting dates — ${attYear}</h2>
     <div class="card"><table>
       <tr><th>Month</th><th>Meeting</th><th class="r noprint"></th></tr>
@@ -2134,26 +2371,37 @@ function attendHTML(){
     ${hid.length?`<button class="btn small gray noprint" style="margin-bottom:8px" id="attPastBtn"
       onclick="attShowPast=!attShowPast;rerender()">${attShowPast?'▾ Hide past members':'▸ Show past members ('+hid.length+')'}</button>`:''}
     <div class="gridwrap"><table class="stockgrid">
-      <tr><th class="itc">Member</th><th class="r">P</th><th class="r">L</th><th class="r">AN</th><th class="r">A</th><th class="r">NP</th>
+      <tr><th class="itc">Member</th><th class="r">P</th><th class="r">L</th><th class="r">AN</th><th class="r">A</th>${npCol?'<th class="r">NP</th>':''}
         <th class="r">Fees owed</th><th class="r">Fees paid</th><th class="r">Cash contributed</th></tr>
       ${lifeRows.map(r=>{
         const c=life[r.id]||{P:0,L:0,AN:0,A:0,NP:0}, b=bl[r.id]||{owed:0,paid:0,cash:0};
         return `<tr ${r.hidden?'style="opacity:.55"':''}><td class="itc">${esc(r.name)}${r.hidden?' <span class="muted">(past)</span>':''}</td>
-          <td class="r attP">${c.P}</td><td class="r">${c.L}</td><td class="r">${c.AN}</td><td class="r">${c.A}</td><td class="r">${c.NP}</td>
+          <td class="r attP">${c.P}</td><td class="r">${c.L}</td><td class="r">${c.AN}</td><td class="r">${c.A}</td>${npCol?`<td class="r">${c.NP}</td>`:''}
           <td class="r">${fmt(b.owed)}</td><td class="r">${fmt(b.paid)}</td><td class="r"><b>${fmt(b.cash)}</b></td></tr>`;
       }).join('')}
       <tr class="totrow"><td class="itc">TOTAL${hid.length&&!attShowPast?' (incl. past)':''}</td><td class="c">${tot.P}</td><td class="c">${tot.L}</td><td class="c">${tot.AN}</td>
-        <td class="c">${tot.A}</td><td class="c">${tot.NP}</td><td class="r">${fmt(tot.owed)}</td><td class="r">${fmt(tot.paid)}</td><td class="r">${fmt(tot.cash)}</td></tr>
+        <td class="c">${tot.A}</td>${npCol?`<td class="c">${tot.NP}</td>`:''}<td class="r">${fmt(tot.owed)}</td><td class="r">${fmt(tot.paid)}</td><td class="r">${fmt(tot.cash)}</td></tr>
     </table></div>
     <p class="muted">Attendance counts are computed live from the whole record (the Excel totals block stopped at Dec 31 2024).
     Fees owed / paid / cash come from the sheet — monthly fees ($50, later $80) ran from 2013 until they were stopped in May 2024.
     The TOTAL row always includes past members.</p>
     <h2>Manage the register</h2>
     <div class="card">
-      <p class="muted" style="margin-top:0">Active members</p>
-      ${vis.map(r=>`<span class="sizebtn" style="cursor:default;margin:3px">${esc(r.name)}
+      <p class="muted" style="margin-top:0">Active members — they take attendance and each secures a sponsor</p>
+      ${mem.map(r=>`<span class="sizebtn" style="cursor:default;margin:3px">${esc(r.name)}
+        <a href="#" class="noprint" style="color:var(--gold);text-decoration:none;margin-left:6px"
+          onclick="attSetStaff('${r.id}',true);return false">→ staff</a>
         <a href="#" class="noprint" style="color:var(--muted);text-decoration:none;margin-left:6px"
-          onclick="attSetHidden('${r.id}',true);return false">hide</a></span>`).join('')}
+          onclick="attSetHidden('${r.id}',true);return false">hide</a></span>`).join('')
+        ||'<span class="muted">Nobody on the register yet.</span>'}
+      <p class="muted">Point-of-sale / staff — they run the till. No attendance is taken for them and no sponsor is expected.
+        Anyone whose login role is <b>Point of sale</b> lands here on their own; use the links to override it either way.</p>
+      ${stf.length? stf.map(r=>`<span class="sizebtn" style="cursor:default;margin:3px">🛒 ${esc(r.name)}
+        <a href="#" class="noprint" style="color:var(--gold);text-decoration:none;margin-left:6px"
+          onclick="attSetStaff('${r.id}',false);return false">→ member</a>
+        <a href="#" class="noprint" style="color:var(--muted);text-decoration:none;margin-left:6px"
+          onclick="attSetHidden('${r.id}',true);return false">hide</a></span>`).join('')
+        :'<span class="muted">Nobody is marked as staff.</span>'}
       ${hid.length?`<p class="muted">Past members — hidden from the grid and sponsor board, history kept. Tap show to bring one back.</p>
       ${hid.map(r=>`<span class="sizebtn out" style="cursor:default;margin:3px">${esc(r.name)}
         <a href="#" class="noprint" style="color:var(--gold);text-decoration:none;margin-left:6px"
@@ -2188,16 +2436,25 @@ function attMonthOpen(month){
 function attMonthEditor(month){
   const Y=((S.attendance.years||{})[String(attYear)])||{marks:{},notes:{}};
   const marks=Y.marks||{}, note=(Y.notes||{})['m'+month]||'';
+  const minute=(Y.minutes||{})['m'+month]||'', per=(Y.mnotes||{})['m'+month]||{};
   openModal(`<h3><button class="x" onclick="closeModal()">✕</button>${MONTHS[month-1]} ${attYear} — meeting</h3>
-    ${attVisible().map(r=>{
+    <label>📝 What was covered at this meeting</label>
+    <textarea id="attMin" rows="5" placeholder="e.g. Picnic wrap-up — $4,000 in sponsors secured. Voted to buy new bocce mats. Next year's dinner set for the second Saturday of November.">${esc(minute)}</textarea>
+    <p class="muted" style="margin:4px 0 0">Anyone marked <b>A</b> or <b>AN</b> below sees this on their own Club tab, so they know what they missed. Everyone else's reason for being away stays private to you.</p>
+    <div style="height:14px"></div>
+    <label>Who was there — and why anyone was away</label>
+    ${attMembers().map(r=>{
       const v=(marks[r.id]||{})['m'+month]||'';
-      return `<div class="cartline"><div class="d"><div class="nm">${esc(r.name)}</div></div>
+      return `<div class="cartline" style="flex-wrap:wrap"><div class="d" style="min-width:110px"><div class="nm">${esc(r.name)}</div></div>
         <select class="attSel" data-id="${r.id}" style="width:110px;flex:0 0 auto">
           <option value="" ${v===''?'selected':''}>—</option>
-          ${['P','L','AN','A','NP'].map(c=>`<option ${v===c?'selected':''}>${c}</option>`).join('')}
-        </select></div>`;
+          ${MARK_CODES.concat(v==='NP'?['NP']:[]).map(c=>`<option ${v===c?'selected':''}>${c}</option>`).join('')}
+        </select>
+        <input class="attWhy" data-id="${r.id}" style="flex:1 1 100%;margin-top:6px"
+          value="${esc(per[r.id]||'')}" placeholder="Why ${esc(r.name)} was away (only they see this)"></div>`;
     }).join('')}
-    <label>Meeting note (optional)</label>
+    ${attStaff().length?`<p class="muted">Not shown: ${attStaff().map(r=>esc(r.name)).join(', ')} — point-of-sale staff, no attendance taken.</p>`:''}
+    <label>Register note — admin only, never shown to members</label>
     <input id="attMNote" value="${esc(note)}" placeholder="e.g. Meeting moved to the 4th / virtual on Telegram">
     <div style="height:12px"></div>
     <button class="btn" onclick="attMonthSave(${month})">✓ Save ${MONTHS[month-1]} — locks it (PIN to change later)</button>`);
@@ -2207,6 +2464,11 @@ async function attMonthSave(month){
   for(const sel of document.querySelectorAll('#modalBox .attSel')){
     await DB.set(['attendance','years',y,'marks',sel.dataset.id,'m'+month], sel.value||null);
   }
+  // Each member's own reason for being away — written once, seen only by them.
+  for(const inp of document.querySelectorAll('#modalBox .attWhy')){
+    await DB.set(['attendance','years',y,'mnotes','m'+month,inp.dataset.id], inp.value.trim()||null);
+  }
+  await DB.set(['attendance','years',y,'minutes','m'+month], $('attMin').value.trim()||null);
   await DB.set(['attendance','years',y,'notes','m'+month], $('attMNote').value.trim()||null);
   await DB.set(['attendance','years',y,'locked','m'+month], true);
   closeModal(); toast(MONTHS[month-1]+' saved & locked'); rerender();
@@ -2216,6 +2478,13 @@ async function attAdd(){
   if(!n){ toast('Type the member name',1); return; }
   await DB.set(['attendance','roster'],attRoster().concat({id:newId(),name:n,hidden:false}));
   toast('Added to the register'); rerender();
+}
+// Marking somebody staff takes them off the attendance grid and the sponsor
+// board. It is stored on the roster row, so it overrides the role auto-detect.
+async function attSetStaff(id,staff){
+  await DB.set(['attendance','roster'],attRoster().map(r=>r.id===id?{...r,staff}:r));
+  toast(staff?'Moved to point-of-sale staff — no attendance, no sponsor':'Moved back to members');
+  rerender();
 }
 async function attSetHidden(id,hidden){
   await DB.set(['attendance','roster'],attRoster().map(r=>r.id===id?{...r,hidden}:r));
@@ -2249,8 +2518,16 @@ async function attMeetSave(mi,reset){
 function renderMyClub(){
   const u=meU(), yr=new Date().getFullYear();
   const A=S.attendance, F=S.finance;
+  // The point-of-sale person runs the till on the day. They are not a club
+  // member: no meeting attendance is taken for them and no sponsor is expected.
+  const staff=isStaffName(u.name);
   let html=`<h2>🎟 ${esc(u.name)} — my club year ${yr}</h2>`;
-  if(A&&A.baseline){
+  if(staff){
+    html+=`<div class="card"><b>🛒 You are set up as point-of-sale</b>
+      <p class="muted">You run the till at the picnic and the events. Meeting attendance and the
+        ${fmt((F&&F.sponsorTarget)||500)} sponsor quota are club-member business, so neither one applies
+        to you — nothing is missing from this page. Everything you need is on the Sell tab.</p></div>`;
+  } else if(A&&A.baseline){
     const today=new Date(); today.setHours(0,0,0,0);
     let nxt=null,nxtOv=false;
     for(let mi=1;mi<=12;mi++){ const d=meetDate(yr,mi);
@@ -2260,49 +2537,62 @@ function renderMyClub(){
     const r=(A.roster||[]).find(x=>(x.name||'').trim().toLowerCase()===(u.name||'').trim().toLowerCase());
     const Y=(A.years||{})[String(yr)]||{};
     const myMarks=r? ((Y.marks||{})[r.id]||{}) : {};
-    const notes=(Y.notes||{});
+    // The shared register note can name several members, so it never appears here —
+    // only the minutes (club business) and this member's own reason for being away.
+    const minutes=(Y.minutes||{}), mnotes=(Y.mnotes||{});
+    const myWhy=mi=>r? ((mnotes['m'+mi]||{})[r.id]||'') : '';
     const MARKNAME={P:'Present',L:'Late',A:'Absent',AN:'Absent — with notice',NP:'No patch'};
     const missed=MONTHS.map((m,i)=>({m,mi:i+1,v:myMarks['m'+(i+1)]||''}))
       .filter(x=>x.v==='A'||x.v==='AN');
     html+=`<h2>📅 Meetings & my attendance — ${yr}</h2>
       <div class="card"><table>
-        <tr><th>Month</th><th>Meeting</th><th class="r">Me</th><th>Note for that meeting</th></tr>
+        <tr><th>Month</th><th>Meeting</th><th class="r">Me</th></tr>
         ${MONTHS.map((m,i)=>{ const d=meetDate(yr,i+1); const ov=!!((Y.mdates||{})['m'+(i+1)]);
-          const v=myMarks['m'+(i+1)]||'', nt=notes['m'+(i+1)]||'';
+          const v=myMarks['m'+(i+1)]||'';
           const out=(v==='A'||v==='AN');
           return `<tr${out?' style="background:rgba(210,31,38,.08)"':''}><td>${m}</td><td>${d.toLocaleDateString('en-CA',{weekday:'short',month:'short',day:'numeric'})}${ov?' <span class="memberflag">changed</span>':''}</td>
-            <td class="r"><b>${v||'·'}</b></td><td style="font-size:12px">${nt?esc(nt):'<span class="muted">—</span>'}</td></tr>`; }).join('')}
+            <td class="r"><b>${v||'·'}</b></td></tr>`; }).join('')}
       </table></div>`;
     if(missed.length){
-      html+=`<h2>🚩 Meetings I missed — ${yr}</h2>
-        <div class="card">${missed.map(x=>{
-          const nt=notes['m'+x.mi]||'';
-          return `<div style="padding:6px 0;border-bottom:1px solid var(--line)">
+      html+=`<h2>🚩 What I missed — ${yr}</h2>
+        ${missed.map(x=>{
+          const mn=minutes['m'+x.mi]||'', why=myWhy(x.mi);
+          return `<div class="card">
             <b>${x.m} ${meetDate(yr,x.mi).getDate()}</b> — ${MARKNAME[x.v]||x.v}
-            <div class="muted" style="font-size:12px">${nt?'Note on the register: '+esc(nt):'No note was written for this meeting.'}</div>
-          </div>`; }).join('')}</div>
-        <p class="muted">The note is what the secretary wrote on the register for that meeting — it may mention more than one member. If something here looks wrong, speak to an admin.</p>`;
+            ${why?`<div class="muted" style="font-size:12px">Reason on the register: ${esc(why)}</div>`:''}
+            ${mn?`<p style="margin:8px 0 0;white-space:pre-wrap">${esc(mn)}</p>`
+                :'<p class="muted" style="margin:8px 0 0">The minutes for this meeting have not been written up yet.</p>'}
+          </div>`; }).join('')}
+        <p class="muted">This is what was covered at the meetings you were away for. If something here looks wrong, speak to an admin.</p>`;
     }
     if(r){
       const cnt={P:0,L:0,AN:0,A:0,NP:0};
       Object.values(myMarks).forEach(v=>{ if(cnt[v]!==undefined) cnt[v]++; });
-      html+=`<p class="muted">${esc(A.legend||'')}<br>My year so far: P ${cnt.P} · L ${cnt.L} · AN ${cnt.AN} · A ${cnt.A} · NP ${cnt.NP}</p>`;
+      html+=`<p class="muted">${attLegendHTML()}<br>My year so far: P ${cnt.P} · L ${cnt.L} · AN ${cnt.AN} · A ${cnt.A}${cnt.NP?' · NP '+cnt.NP:''}</p>`;
     } else {
       html+=`<p class="muted">You're not on the attendance register yet — ask the admin to add you (the register name must match your login name).</p>`;
     }
   } else {
     html+=`<p class="muted">The attendance register hasn't been opened yet — it appears once the admin opens the Attendance tab.</p>`;
   }
-  if(F){
+  if(F && !staff){
     const target=F.sponsorTarget||500;
+    // The sponsor season is Aug 1 → Jul 31, and it is worked out from today's
+    // date, so on Aug 1 this page turns over on its own.
+    const sy=currentSponsorYear();
     const mine=Object.values(F.txns||{})
       .filter(t=>t.kind==='income'&&t.cat==='Donations'&&t.member&&(t.member||'').trim().toLowerCase()===(u.name||'').trim().toLowerCase()
-        &&new Date(t.ts).getFullYear()===yr);
-    const got=mine.reduce((a,t)=>a+t.amount,0);
-    html+=`<h2>⭐ My sponsor — ${yr}</h2>
+        &&sponsorYearOf(t.ts)===sy);
+    const last=Object.values(F.txns||{})
+      .filter(t=>t.kind==='income'&&t.cat==='Donations'&&t.member&&(t.member||'').trim().toLowerCase()===(u.name||'').trim().toLowerCase()
+        &&sponsorYearOf(t.ts)===sy-1);
+    const got=mine.reduce((a,t)=>a+t.amount,0), gotLast=last.reduce((a,t)=>a+t.amount,0);
+    html+=`<h2>⭐ My sponsor — ${sponsorYearLabel(sy)}</h2>
       <div class="stat ${got>=target?'green':'red'}"><div class="v">${got>=target?'✔ Done':fmt(target-got)+' to go'}</div>
-        <div class="l">${got>=target?'Sponsor secured — thank you!':'Every member secures a '+fmt(target)+' sponsor for the year (or self-sponsors)'}</div></div>
-      ${mine.length?`<div class="card">${mine.map(t=>`<div style="padding:4px 0"><b>${esc(t.sponsor||'Donation')}</b> — ${fmt(t.amount)}${t.inkind?' <span class="memberflag">IN-KIND</span>':''} <span class="muted">${new Date(t.ts).toLocaleDateString('en-CA')}</span></div>`).join('')}</div>`:''}`;
+        <div class="l">${got>=target?'Sponsor secured for this season — thank you!':'Every member secures a '+fmt(target)+' sponsor each season, or self-sponsors'}</div></div>
+      ${mine.length?`<div class="card">${mine.map(t=>`<div style="padding:4px 0"><b>${esc(t.sponsor||'Donation')}</b> — ${fmt(t.amount)}${t.inkind?' <span class="memberflag">IN-KIND</span>':''} <span class="muted">${new Date(t.ts).toLocaleDateString('en-CA')}</span></div>`).join('')}</div>`:''}
+      ${sponsorNoticeHTML(target,sy)}
+      ${gotLast>0.005?`<p class="muted">Last season (${sponsorYearLabel(sy-1)}) you secured ${fmt(gotLast)}. That one is closed — it does not carry over.</p>`:''}`;
   }
   $('myClubBody').innerHTML=html;
 }
@@ -2815,7 +3105,9 @@ function invValueHTML(){
    you own — but you can untick them. Ad-hoc items (raffle tickets…) carry no inventory value and are never counted.
    The chips reset to "count everything" each time you come back.</p>`;
 }
-function moneyHTML(){
+/* Every figure on the Money screen comes out of here, so the tiles, the tables and
+   the tap-to-see-why breakdowns can never drift apart from one another. */
+function moneyCalc(){
   // All-time settlement view.
   //  - Cash sales: the SELLER is holding the money → seller owes club (minus their profit share).
   //  - Interac/Square: the money is already in the club's account → nobody owes it.
@@ -2836,12 +3128,16 @@ function moneyHTML(){
   const pays=Object.entries(S.payments||{}).sort((a,b)=>b[1].ts-a[1].ts);
   const payoutBy={};   // club -> member profit-share payouts
   const floats={};     // cash float: loaned out for making change, then returned
+  let miscIn=0;        // cash in from something that never went through the till
   const frow=n=>floats[n]=floats[n]||{out:0,back:0};
   pays.forEach(([,p])=>{
     if(p.kind==='tab') trow(p.from).paid+=p.amount;
     else if(p.kind==='payout') payoutBy[p.from]=(payoutBy[p.from]||0)+p.amount;
     else if(p.kind==='floatout') frow(p.from).out+=p.amount;
     else if(p.kind==='floatin') frow(p.from).back+=p.amount;
+    // Cash from something the club did off the app — a card game, a hall rental.
+    // It is real money in, but it settles nobody's balance, so keep it on its own.
+    else if(p.kind==='misc') miscIn+=p.amount;
     else row(p.from).received+=p.amount;
   });
   const floatOutNow=Object.values(floats).reduce((a,f)=>a+(f.out-f.back),0);
@@ -2858,8 +3154,186 @@ function moneyHTML(){
   const recSellers=Object.values(bal).reduce((a,e)=>a+e.received,0);
   const owedTabs=Object.values(tabs).reduce((a,e)=>a+e.charged,0);
   const paidTabs=Object.values(tabs).reduce((a,e)=>a+e.paid,0);
-  const outstanding=(owedSellers-recSellers)+(owedTabs-paidTabs);
+  const sellersStill=owedSellers-recSellers;          // what sellers have NOT handed in yet
+  const tabsStill=owedTabs-paidTabs;
+  const outstanding=sellersStill+tabsStill;
   const mism=shareMismatches();
+  return {sales,cashSales,tabSales,interacSales,interacTotal,bal,tabs,pays,payoutBy,floats,
+    floatOutNow,shareOf,laterShare,owedSellers,recSellers,owedTabs,paidTabs,
+    sellersStill,tabsStill,outstanding,miscIn,mism};
+}
+/* ================= "WHERE DOES THAT NUMBER COME FROM?" =====================
+   Tap any tile on the Money screen and this shows the whole sum in order, in
+   plain words, with every person and every payment that went into it.        */
+const PAY_KIND={tab:'Tab payment (a member paying off what they took)',
+  payout:"Payout (the club paying a seller their share)",
+  misc:'Miscellaneous cash in (something done off the app)',
+  floatout:'Float given out (change money)', floatin:'Float returned'};
+function moneyDrill(which){
+  const M=moneyCalc();
+  const seller=(n,e)=>({n, owes:e.collected-e.keeps, bal:e.collected-e.keeps-e.received, ...e});
+  const rows=Object.entries(M.bal).map(([n,e])=>seller(n,e));
+
+  if(which==='sellers'){
+    const stillList=rows.filter(r=>r.bal>0.005);
+    return openModal(_moneyTitle('Sellers still to hand in', M.sellersStill,
+        M.sellersStill>0.005?'gold':'green')
+      + `<div class="card"><p>When somebody rings up a <b>cash</b> sale, the customer hands
+        <i>them</i> the money — it goes in their pocket, not the club's box. They keep their agreed profit
+        share out of it and the rest belongs to the club. So the club is owed money by its own sellers
+        until they hand it in.</p>
+        <p class="muted">Interac / Square never appears here: that money goes straight into the club's
+        account, so there is nothing for a seller to hand over. Pay-later sales are not here either —
+        nobody collected anything, so it sits on the buyer's tab instead.</p></div>`
+      + `<h2>The sum, in order</h2>`
+      + _drillSum([
+          ['Cash the sellers collected, all time', M.cashSales.reduce((a,s)=>a+s.total,0)],
+          ['Less: the profit share they are entitled to keep', -Object.values(M.bal).reduce((a,e)=>a+e.keeps,0)],
+          ['= Owed to the club, all time', M.owedSellers],
+          ['Less: already handed in and recorded', -M.recSellers],
+        ], 'STILL TO HAND IN', M.sellersStill,
+        M.sellersStill>0.005
+          ? 'That last figure is the one on the tile. It is what is genuinely still out there.'
+          : 'Everything the sellers ever collected has been handed in and recorded. Nobody owes the club anything.')
+      + `<h2>Person by person</h2>`
+      + `<div class="card"><table>
+          <tr><th>Member</th><th class="r">Collected</th><th class="r">Keeps</th><th class="r">Owed club</th><th class="r">Handed in</th><th class="r">Still owes</th></tr>
+          ${rows.map(r=>`<tr><td>${esc(r.n)}</td><td class="r">${fmt(r.collected)}</td>
+            <td class="r goldtxt">${fmt(r.keeps)}</td><td class="r">${fmt(r.owes)}</td>
+            <td class="r pos">${fmt(r.received)}</td>
+            <td class="r ${r.bal>0.005?'neg':'pos'}"><b>${fmt(r.bal)}</b></td></tr>`).join('')
+            ||'<tr><td colspan="6" class="empty">No cash sales yet.</td></tr>'}
+          <tr class="drilltot"><td>Total</td>
+            <td class="r">${fmt(rows.reduce((a,r)=>a+r.collected,0))}</td>
+            <td class="r">${fmt(rows.reduce((a,r)=>a+r.keeps,0))}</td>
+            <td class="r">${fmt(M.owedSellers)}</td>
+            <td class="r">${fmt(M.recSellers)}</td>
+            <td class="r">${fmt(M.sellersStill)}</td></tr></table></div>`
+      + (stillList.length?`<p class="muted">Still to collect from: <b>${stillList.map(r=>esc(r.n)+' '+fmt(r.bal)).join(', ')}</b>.</p>`
+         :'<p class="muted">Nothing to chase — every seller is square with the club.</p>'));
+  }
+
+  if(which==='tabs'){
+    const list=Object.entries(M.tabs).map(([n,e])=>({n,...e,still:e.charged-e.paid}))
+      .sort((a,b)=>b.still-a.still);
+    return openModal(_moneyTitle('Owed on member tabs', M.tabsStill, M.tabsStill>0.005?'gold':'green')
+      + `<div class="card"><p>A tab is a pay-later sale: the member walked off with the goods and nothing
+        was collected at the time. The <b>buyer</b> owes the club, and it stays here until they pay.</p></div>`
+      + `<div class="card"><table>
+          <tr><th>Member</th><th class="r">Charged</th><th class="r">Paid</th><th class="r">Still owes</th></tr>
+          ${list.map(r=>`<tr><td>${esc(r.n)}</td><td class="r">${fmt(r.charged)}</td>
+            <td class="r pos">${fmt(r.paid)}</td>
+            <td class="r ${r.still>0.005?'neg':'pos'}"><b>${fmt(r.still)}</b></td></tr>`).join('')
+            ||'<tr><td colspan="4" class="empty">Nobody has taken anything on a tab.</td></tr>'}
+          <tr class="drilltot"><td>Total</td><td class="r">${fmt(M.owedTabs)}</td>
+            <td class="r">${fmt(M.paidTabs)}</td><td class="r">${fmt(M.tabsStill)}</td></tr></table></div>`);
+  }
+
+  if(which==='received'){
+    const inPays=M.pays.filter(([,p])=>p.kind!=='payout'&&p.kind!=='floatout'&&p.kind!=='floatin');
+    return openModal(_moneyTitle('Received by club', M.recSellers+M.paidTabs+M.miscIn, 'green')
+      + `<div class="card"><p>Every payment recorded with the <b>＋ Record money received by club</b> button —
+        sellers handing in their cash, members paying off their tabs, and any miscellaneous cash from
+        something the club did off the app.</p></div>`
+      + _drillSum([['Handed in by sellers', M.recSellers],['Paid off member tabs', M.paidTabs]]
+          .concat(M.miscIn>0.005?[['Miscellaneous cash in', M.miscIn]]:[]),
+          'RECEIVED BY CLUB', M.recSellers+M.paidTabs+M.miscIn)
+      + `<h2>Every payment</h2>`
+      + `<div class="card"><table>
+          <tr><th>Date</th><th>From / what</th><th class="r">Amount</th></tr>
+          ${inPays.slice().sort((a,b)=>a[1].ts-b[1].ts).map(([,p])=>`<tr>
+            <td style="white-space:nowrap;vertical-align:top">${_dDate(p.ts)}</td>
+            <td><b>${esc(p.from)}</b>
+              <div class="muted">${esc(PAY_KIND[p.kind]||'Cash handed in by a seller')}${p.note?' · '+esc(p.note):''}${p.by?' · recorded by '+esc(p.by):''}</div></td>
+            <td class="r pos" style="vertical-align:top"><b>${fmt(p.amount)}</b></td></tr>`).join('')
+            ||'<tr><td colspan="3" class="empty">No money recorded as received yet.</td></tr>'}
+          <tr class="drilltot"><td colspan="2">Total received</td>
+            <td class="r">${fmt(inPays.reduce((a,p)=>a+p[1].amount,0))}</td></tr></table></div>`
+      + (Object.keys(M.payoutBy).length?`<h2>Paid back out to sellers</h2>
+          <p class="muted">Profit share the club owed on pay-later and Interac sales. This is money going
+          the other way, so it is not part of the total above.</p>
+          ${_drillSum(Object.entries(M.payoutBy).map(([n,v])=>[n,v]),'Total paid out',
+            Object.values(M.payoutBy).reduce((a,v)=>a+v,0))}`:''));
+  }
+
+  if(which==='misc'){
+    const mp=M.pays.filter(([,p])=>p.kind==='misc').sort((a,b)=>a[1].ts-b[1].ts);
+    return openModal(_moneyTitle('Miscellaneous cash in', M.miscIn, 'green')
+      + `<div class="card"><p>Cash handed to the club for something that never went through the till —
+        a card game, a hall rental, a donation at the door. Nobody owes it and nobody is holding it:
+        it is already in. It flows straight into the books as income under
+        <b>Miscellaneous cash in</b>, so the club balance includes it.</p></div>`
+      + `<h2>Every entry</h2>`
+      + `<div class="card"><table>
+          <tr><th>Date</th><th>What it was for</th><th class="r">Amount</th></tr>
+          ${mp.map(([,p])=>`<tr>
+            <td style="white-space:nowrap;vertical-align:top">${_dDate(p.ts)}</td>
+            <td><b>${esc(p.note||'—')}</b>
+              <div class="muted">handed in by ${esc(p.from||'—')}${p.by?' · recorded by '+esc(p.by):''}</div></td>
+            <td class="r pos" style="vertical-align:top"><b>${fmt(p.amount)}</b></td></tr>`).join('')
+            ||'<tr><td colspan="3" class="empty">Nothing recorded yet.</td></tr>'}
+          <tr class="drilltot"><td colspan="2">TOTAL MISCELLANEOUS CASH IN</td>
+            <td class="r">${fmt(M.miscIn)}</td></tr></table></div>`);
+  }
+
+  if(which==='outstanding'){
+    return openModal(_moneyTitle('Still outstanding (total)', M.outstanding,
+        M.outstanding>0.005?'red':'green')
+      + _drillSum([
+          ['Sellers still to hand in (cash sales)', M.sellersStill],
+          ['Members still to pay off their tabs', M.tabsStill],
+        ], 'STILL OUTSTANDING', M.outstanding,
+        M.outstanding>0.005
+          ? 'This is every dollar the club is still waiting on. Tap the other two tiles to see who.'
+          : 'Nothing is outstanding — every seller has handed in their cash and every tab is paid off. Any large figure showing elsewhere on this screen is an all-time running total, not a debt.')
+      + (M.outstanding>0.005?`<div class="card"><table>
+          <tr><th>Who</th><th>Why</th><th class="r">Still owed</th></tr>
+          ${rows.filter(r=>r.bal>0.005).map(r=>`<tr><td>${esc(r.n)}</td>
+            <td class="muted">cash sales not handed in</td><td class="r neg"><b>${fmt(r.bal)}</b></td></tr>`).join('')}
+          ${Object.entries(M.tabs).filter(([,e])=>e.charged-e.paid>0.005).map(([n,e])=>`<tr><td>${esc(n)}</td>
+            <td class="muted">pay-later tab</td><td class="r neg"><b>${fmt(e.charged-e.paid)}</b></td></tr>`).join('')}
+          <tr class="drilltot"><td colspan="2">Total</td><td class="r">${fmt(M.outstanding)}</td></tr>
+        </table></div>`:''));
+  }
+
+  if(which==='interac'){
+    const byS={}; M.interacSales.forEach(s=>{ const n=s.sellerName||'—'; byS[n]=(byS[n]||0)+s.total; });
+    return openModal(_moneyTitle('Interac / Square', M.interacTotal, 'green')
+      + `<div class="card"><p>Tapped or e-transferred straight into the club's own account. Nobody was ever
+        holding this money, so nobody owes it — the only thing still to settle is the seller's profit share,
+        which the club pays back out.</p></div>`
+      + `<h2>By who rang it up</h2>`
+      + _drillSum(Object.entries(byS).sort((a,b)=>b[1]-a[1]).map(r=>[r[0],r[1]]),'Total Interac / Square',M.interacTotal)
+      + `<h2>Share the club owes back on these</h2>`
+      + _drillSum(M.interacSales.reduce((acc,s)=>{
+            const n=s.sellerName||'—', sh=M.shareOf(s);
+            const f=acc.find(r=>r[0]===n); if(f) f[1]+=sh; else acc.push([n,sh]); return acc;},[]),
+          'Total share owed back', M.interacSales.reduce((a,s)=>a+M.shareOf(s),0)));
+  }
+
+  if(which==='float'){
+    const list=Object.entries(M.floats).map(([n,f])=>({n,...f,still:f.out-f.back}));
+    return openModal(_moneyTitle('Cash float currently out', M.floatOutNow, 'gold')
+      + `<div class="card"><p>The float is change money lent out of the box at the start of an event so
+        sellers can make change. It is <b>not</b> revenue and it is <b>not</b> a debt — it is the club's own
+        cash, temporarily in somebody's apron. When the box comes back, record it as returned and this goes to zero.</p></div>`
+      + `<div class="card"><table>
+          <tr><th>Held by</th><th class="r">Given out</th><th class="r">Returned</th><th class="r">Still out</th></tr>
+          ${list.map(r=>`<tr><td>${esc(r.n)}</td><td class="r">${fmt(r.out)}</td>
+            <td class="r pos">${fmt(r.back)}</td>
+            <td class="r ${r.still>0.005?'goldtxt':'pos'}"><b>${fmt(r.still)}</b></td></tr>`).join('')}
+          <tr class="drilltot"><td colspan="3">Still out</td><td class="r">${fmt(M.floatOutNow)}</td></tr></table></div>`);
+  }
+}
+function _moneyTitle(t,total,cls){
+  return `<h3><button class="x" onclick="closeModal()">✕</button>${esc(t)}</h3>
+    <div class="stat ${cls||'gold'}" style="margin:0 0 10px"><div class="v">${fmt(total)}</div>
+      <div class="l">${esc(t)} — all time</div></div>`;
+}
+function moneyHTML(){
+  const {cashSales,tabSales,interacSales,interacTotal,bal,tabs,pays,payoutBy,floats,
+    floatOutNow,shareOf,laterShare,owedSellers,recSellers,owedTabs,paidTabs,
+    sellersStill,tabsStill,outstanding,miscIn,mism}=moneyCalc();
   return printHead('Money In / Reimbursements & Tabs','All-time up to '+new Date().toLocaleDateString('en-CA')) + `
    <p class="muted noprint">Cash sales: whoever rang it up is holding that money and owes the club everything
    they collected minus the profit share they keep. Interac / Square sales are already in the club's account, so nobody
@@ -2867,14 +3341,29 @@ function moneyHTML(){
    handed to the club, record it below — with the date it was actually paid.</p>
    <button class="btn noprint" onclick="recordPayment()">＋ Record money received by club</button>
    <div style="height:12px"></div>
+   <p class="muted noprint" style="margin:0 0 6px">Tap any tile to see exactly how that number was worked out.</p>
    <div class="statgrid">
-     <div class="stat gold"><div class="v">${fmt(owedSellers)}</div><div class="l">Owed by sellers (cash sales)</div></div>
-     <div class="stat gold"><div class="v">${fmt(owedTabs-paidTabs)}</div><div class="l">Owed on member tabs</div></div>
-     <div class="stat green"><div class="v">${fmt(recSellers+paidTabs)}</div><div class="l">Received by club</div></div>
-     ${interacTotal>0.005?`<div class="stat green"><div class="v">${fmt(interacTotal)}</div>
+     <div class="stat ${sellersStill>0.005?'gold':'green'} drilltile" onclick="moneyDrill('sellers')">
+       <div class="v">${fmt(sellersStill)}</div>
+       <div class="l">Sellers still to hand in (cash sales)</div>
+       <div class="sub">${fmt(owedSellers)} owed all-time · ${fmt(recSellers)} already handed in</div></div>
+     <div class="stat ${tabsStill>0.005?'gold':'green'} drilltile" onclick="moneyDrill('tabs')">
+       <div class="v">${fmt(tabsStill)}</div>
+       <div class="l">Owed on member tabs</div>
+       <div class="sub">${fmt(owedTabs)} charged · ${fmt(paidTabs)} paid off</div></div>
+     <div class="stat green drilltile" onclick="moneyDrill('received')"><div class="v">${fmt(recSellers+paidTabs+miscIn)}</div>
+       <div class="l">Received by club</div>
+       <div class="sub">${fmt(recSellers)} from sellers · ${fmt(paidTabs)} off tabs${miscIn>0.005?' · '+fmt(miscIn)+' miscellaneous':''}</div></div>
+     ${miscIn>0.005?`<div class="stat green drilltile" onclick="moneyDrill('misc')"><div class="v">${fmt(miscIn)}</div>
+       <div class="l">🧾 Miscellaneous cash in</div>
+       <div class="sub">off-the-app money — in the books as income</div></div>`:''}
+     ${interacTotal>0.005?`<div class="stat green drilltile" onclick="moneyDrill('interac')"><div class="v">${fmt(interacTotal)}</div>
        <div class="l">💳 Interac / Square — already in the club's account (${interacSales.length} sale${interacSales.length===1?'':'s'})</div></div>`:''}
-     <div class="stat ${outstanding>0.005?'red':'green'}"><div class="v">${fmt(outstanding)}</div><div class="l">Still outstanding (total)</div></div>
-     ${floatOutNow>0.005?`<div class="stat gold"><div class="v">${fmt(floatOutNow)}</div><div class="l">💵 Cash float currently out</div></div>`:''}
+     <div class="stat ${outstanding>0.005?'red':'green'} drilltile" onclick="moneyDrill('outstanding')">
+       <div class="v">${fmt(outstanding)}</div>
+       <div class="l">Still outstanding (total)</div>
+       <div class="sub">${outstanding>0.005?'sellers + tabs still to come in':'everybody is square'}</div></div>
+     ${floatOutNow>0.005?`<div class="stat gold drilltile" onclick="moneyDrill('float')"><div class="v">${fmt(floatOutNow)}</div><div class="l">💵 Cash float currently out</div></div>`:''}
    </div>
    ${Object.keys(floats).length?`<h2>Cash float (change money — not revenue)</h2>
    <div class="card"><table>
@@ -2958,19 +3447,32 @@ function recordPayment(){
     ...salesSorted().map(([,s])=>s.buyer).filter(Boolean)])];
   const today=dstr(Date.now());
   openModal(`<h3><button class="x" onclick="closeModal()">✕</button>Record money received by club</h3>
-    <label>What is this payment?</label><select id="mp_kind">
+    <label>What is this payment?</label><select id="mp_kind" onchange="mpKindChange()">
       <option value="handover">Sales cash being handed in (seller → club)</option>
       <option value="tab">A member paying their tab (pay-later purchase → club)</option>
+      <option value="misc">🧾 Miscellaneous cash in — something we did off the app</option>
       <option value="payout">Club paying a member their profit share (club → member)</option>
       <option value="floatout">💵 Cash float GIVEN OUT for making change (club → cash box)</option>
       <option value="floatin">💵 Cash float RETURNED at end of day (cash box → club)</option></select>
-    <label>Member</label><select id="mp_from">${names.map(n=>`<option>${esc(n)}</option>`).join('')}
+    <label id="mp_fromLab">Member</label><select id="mp_from">${names.map(n=>`<option>${esc(n)}</option>`).join('')}
       <option>Other</option></select>
     <label>Amount received $</label><input id="mp_amt" type="number" min="0" step="0.01" placeholder="0.00">
     <label>Date they paid (can be a past date)</label><input id="mp_date" type="date" value="${today}">
-    <label>Note (optional — e.g. "e-transfer" or "cash at meeting")</label><input id="mp_note">
+    <label id="mp_noteLab">Note (optional — e.g. "e-transfer" or "cash at meeting")</label><input id="mp_note">
+    <p id="mp_miscHelp" class="muted" style="display:none;margin:4px 0 0">Use this for cash that never went
+      through the till — a card game, a hall rental, a donation at the door. It lands in the club balance under
+      <b>Miscellaneous cash in</b> in the books, and shows on this screen as money received. It does not touch
+      anybody's seller balance.</p>
     <div style="height:10px"></div>
     <button class="btn" onclick="savePayment()">✓ Record Payment</button>`);
+}
+// The one form covers six different movements of money, so the labels change to suit.
+function mpKindChange(){
+  const k=$('mp_kind').value, misc=(k==='misc');
+  $('mp_fromLab').textContent = misc?'Who handed it in':'Member';
+  $('mp_noteLab').textContent = misc?'What was it for? (e.g. "card game night", "hall rental")'
+                                   :'Note (optional — e.g. "e-transfer" or "cash at meeting")';
+  $('mp_miscHelp').style.display = misc?'block':'none';
 }
 async function savePayment(){
   const amt=+$('mp_amt').value||0;
@@ -2981,10 +3483,12 @@ async function savePayment(){
     amount:Math.round(amt*100)/100, note:$('mp_note').value.trim(), by:meU().name});
   closeModal(); toast('Payment recorded'); rerender();
 }
-async function delPayment(id){
-  const p=S.payments[id];
-  if(!confirm('Delete this payment ('+fmt(p.amount)+' from '+p.from+')?')) return;
-  await DB.set(['payments',id],null); toast('Payment deleted'); rerender();
+function delPayment(id){
+  const p=(S.payments||{})[id]; if(!p) return;
+  pinConfirm('Delete this record of '+fmt(p.amount)+' from '+(p.from||'—')
+    +(p.note?' ("'+p.note+'")':'')+', logged on '+new Date(p.ts).toLocaleDateString('en-CA')
+    +'. The money screen will go back to showing it as still owing.',
+    async()=>{ await DB.set(['payments',id],null); toast('Payment deleted'); rerender(); });
 }
 function reorderHTML(){
   const low=[];
@@ -3189,7 +3693,19 @@ function editItem(id){
     ${id?`<div style="height:8px"></div><button class="btn ${it.active!==false?'red':'gray'}" onclick="toggleItemActive('${id}');closeModal()">
       ${it.active!==false?'Hide this item (not carrying it right now)':'Show this item again'}</button>
     <div style="height:8px"></div>
-    <button class="btn red" onclick="pinConfirm('Delete this item PERMANENTLY? It disappears from every screen and cannot be brought back (past sales keep their history). If you might carry it again, use Hide instead.',()=>deleteItemForever('${id}'))">🗑 Delete this item permanently</button>`:''}`);
+    <button class="btn red" onclick="deleteItemAsk('${id}')">🗑 Delete this item permanently</button>`:''}`);
+}
+// Deleting a product line is not the same as hiding it — the stock count goes with it,
+// so say out loud how many are still on the shelf before anyone types a PIN.
+function deleteItemAsk(id){
+  const it=(S.items||{})[id]; if(!it) return;
+  const onHand=Object.values(it.sizes||{}).reduce((a,z)=>a+(z.stock||0),0);
+  pinConfirm('Delete "'+(it.name||'this item')+'" PERMANENTLY?'
+    +(onHand>0?' There are still '+onHand+' in stock and that count disappears with it.':'')
+    +' It goes from every screen — the till, the stock list, the reorder sheet — and cannot be brought back. '
+    +'Past sales keep their history, so the books and reports do not change. '
+    +'If you might carry it again, use Hide instead.',
+    ()=>deleteItemForever(id));
 }
 async function deleteItemForever(id){
   await DB.set(['items',id],null);
@@ -3380,13 +3896,13 @@ async function applyPctToSales(userId,pct,fromTs){
   toast(hits.length? hits.length+' sale(s) corrected to '+pct+'%' : 'Nothing needed changing');
   rerender();
 }
-async function deleteUser(id){
-  const u=S.users[id];
+function deleteUser(id){
+  const u=(S.users||{})[id]; if(!u) return;
   if(id===me){ toast("You can't delete yourself while logged in",1); return; }
   if(u.role==='admin' && !otherActiveAdminExists(id)){ toast('You need at least one active admin',1); return; }
-  if(!confirm('Delete '+u.name+' permanently? They can no longer log in. Their past sales stay in the history.')) return;
-  await DB.set(['users',id], null);
-  closeModal(); toast('Member deleted'); rerender();
+  pinConfirm('Delete '+u.name+' permanently? They can no longer log in. Their past sales stay in the history, '
+    +'so the books and the reports do not change. If they are only stepping away for a season, use Deactivate instead.',
+    async()=>{ await DB.set(['users',id], null); closeModal(); toast('Member deleted'); rerender(); });
 }
 function settingsHTML(){
   const st=S.settings||{};
