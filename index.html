@@ -349,7 +349,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.16';
+const APP_VERSION = 'v3.17';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -1973,6 +1973,495 @@ function yoyHTML(years){
     </table></div>
     <p class="muted">* includes the balance carried forward, same as the old sheet. † reconstructed year.</p>`;
 }
+/* ========================= EVENT PROFIT & LOSS ==============================
+   The picnic is the club's big day: sponsors pay for it, the till takes money
+   at it, and a whole season of expenses goes into it. Reconciling that was a
+   paper job every year. This does it from the records the app already keeps —
+   and, just as importantly, it prints WHY each figure is in the total, so a
+   number that looks wrong can be opened up and argued with instead of trusted.
+
+   An event OWNS nothing. It is a set of rules for gathering up records that
+   live elsewhere, plus a list of hand-made exceptions:
+
+     cats    — the expense / income categories that belong to this event
+     donYr   — the sponsor year whose CASH donations paid for it
+     tags    — the event names the till was set to on the day
+     from/to — the day (or days) it ran, which catches anything rung up
+               without a till name on it, and any cash handed in that day
+     inTx/exTx, inSale/exSale, inPay/exPay — the exceptions, kept ON the event
+               so deleting an event never leaves a mark on a sale or a book entry
+
+   In-kind donations are deliberately kept OUT of the total. They count toward
+   a member's sponsor quota, but no money ever arrived, so putting them in the
+   income column would make the day look better funded than it really was.   */
+let evShown=null;
+
+function evAll(){
+  return Object.entries((S.finance&&S.finance.events)||{})
+    .map(([id,e])=>({id,...e})).sort((a,b)=>(b.from||0)-(a.from||0));
+}
+function evCur(){
+  const list=evAll(); if(!list.length) return null;
+  return list.find(e=>e.id===evShown) || list[0];
+}
+// Every event name ever typed into the till, with how many sales carry it, so
+// setting an event up is picking off a list instead of spelling from memory.
+function evSaleTags(){
+  const t={};
+  Object.values(S.sales||{}).forEach(s=>{ const n=(s.eventName||'').trim();
+    if(n&&!s.voided) t[n]=(t[n]||0)+1; });
+  return Object.entries(t).sort((a,b)=>b[1]-a[1]);
+}
+const _evDay=ts=>new Date(ts).toLocaleDateString('en-CA',{month:'short',day:'numeric'});
+
+/* Everything the event page shows, worked out in one place so the tiles, the
+   tables and the drill-downs are physically incapable of disagreeing.       */
+function evCalc(ev){
+  const F=S.finance||{};
+  const inTx=ev.inTx||{}, exTx=ev.exTx||{}, inSale=ev.inSale||{}, exSale=ev.exSale||{},
+        inPay=ev.inPay||{}, exPay=ev.exPay||{};
+  const cats=ev.cats||[], tags=(ev.tags||[]).map(x=>String(x).trim().toLowerCase()).filter(Boolean);
+  const from=ev.from||0, to=ev.to||0;
+
+  /* ---- book entries: is this one the picnic's, and why? ---- */
+  const txWhy=t=>{
+    if(exTx[t.id]) return null;                                  // taken out by hand
+    if(inTx[t.id]) return 'added to this event by hand';
+    if(t.kind==='income' && t.cat==='Donations')
+      return (ev.donYr && sponsorYearOf(t.ts)===ev.donYr)
+        ? 'sponsorship secured for the '+ev.donYr+' sponsor year' : null;
+    return cats.includes(t.cat) ? 'filed under '+t.cat : null;
+  };
+  const claimed=Object.entries(F.txns||{}).map(([id,t])=>({id,...t}))
+    .map(t=>({...t, why:txWhy(t)})).filter(t=>t.why).sort((a,b)=>a.ts-b.ts);
+
+  const spons  = claimed.filter(t=>t.kind==='income'&&t.cat==='Donations'&&!t.inkind);
+  const inkind = claimed.filter(t=>t.kind==='income'&&t.inkind);
+  const otherIn= claimed.filter(t=>t.kind==='income'&&t.cat!=='Donations'&&!t.inkind);
+  const exps   = claimed.filter(t=>t.kind==='expense'&&!t.inkind);
+  const expInk = claimed.filter(t=>t.kind==='expense'&&t.inkind);
+
+  /* ---- what the till took ---- */
+  const saleWhy=(id,s)=>{
+    if(s.voided||exSale[id]) return null;
+    if(inSale[id]) return 'added to this event by hand';
+    const n=(s.eventName||'').trim();
+    if(n && tags.includes(n.toLowerCase())) return 'the till was set to “'+n+'”';
+    if(from && to && s.ts>=from && s.ts<=to) return 'rung up on '+_evDay(s.ts);
+    return null;
+  };
+  const sales=Object.entries(S.sales||{}).map(([id,s])=>({id,s,why:saleWhy(id,s)}))
+    .filter(x=>x.why).sort((a,b)=>a.s.ts-b.s.ts);
+
+  /* ---- cash handed in that never went through the till ---- */
+  const pays=Object.entries(S.payments||{}).map(([id,p])=>({id,...p}))
+    .filter(p=>p.kind==='misc' && !exPay[p.id]
+      && (inPay[p.id] || (from && to && p.ts>=from && p.ts<=to)))
+    .sort((a,b)=>a.ts-b.ts);
+
+  const sum=(l,f)=>Math.round(l.reduce((a,x)=>a+(f?f(x):(x.amount||0)),0)*100)/100;
+  const sponsorIn=sum(spons), otherInc=sum(otherIn), inkindVal=sum(inkind);
+  const salesIn=sum(sales,x=>x.s.total), miscIn=sum(pays);
+  // Rung up but not yet in the box. It still counts as income — the club is owed
+  // it, and the books have always counted a sale on the day it was made — but it
+  // is flagged, because "did the day make money" and "is the money here" are two
+  // different questions and the second one is the one that bites.
+  const onTab=sum(sales.filter(x=>x.s.payment==='Pay Later'),x=>x.s.total);
+  const cogs=Math.round(sales.reduce((a,x)=>a+(x.s.lines||[])
+    .reduce((b,l)=>b+(l.cost||0)*(l.qty||0),0),0)*100)/100;
+  const spent=sum(exps), spentInk=sum(expInk);
+  const totalIn=Math.round((sponsorIn+salesIn+miscIn+otherInc)*100)/100;
+  const net=Math.round((totalIn-spent)*100)/100;
+
+  // Expenses rolled up by category, biggest first — the way you would read
+  // them out to the table at a meeting.
+  const byCat={};
+  exps.forEach(t=>{ (byCat[t.cat]=byCat[t.cat]||{cat:t.cat,n:0,amt:0}); byCat[t.cat].n++; byCat[t.cat].amt+=t.amount; });
+  const catRows=Object.values(byCat).map(r=>({...r,amt:Math.round(r.amt*100)/100}))
+    .sort((a,b)=>b.amt-a.amt);
+
+  return {ev, spons, inkind, otherIn, exps, expInk, sales, pays, catRows,
+    sponsorIn, salesIn, miscIn, otherInc, inkindVal, onTab, cogs,
+    spent, spentInk, totalIn, net,
+    units:sales.reduce((a,x)=>a+(x.s.lines||[]).reduce((b,l)=>b+(l.qty||0),0),0)};
+}
+
+/* A sensible first event, guessed from what is already in the books: the
+   picnic categories, this sponsor year, and the busiest selling day of the
+   year — which in practice IS the picnic.                                   */
+function evSuggest(){
+  const y=new Date().getFullYear(), F=S.finance||{};
+  // A category is picnic money if it SAYS picnic — or if the entries filed under
+  // it say picnic. That second rule is what catches the merchandise order: it is
+  // filed under 3 Aces Merchandise, but the note reads "Picnic order", and the
+  // shirts it paid for are the same shirts sold on the day. Counting the takings
+  // without counting what the stock cost would flatter the day badly.
+  const said=new Set(Object.values(F.txns||{})
+    .filter(t=>t.kind==='expense' && /picnic/i.test(t.note||'')).map(t=>t.cat));
+  const cats=[...new Set((((F.cats||FIN_SEED.cats).expense)||[])
+    .concat(Object.values(F.txns||{}).filter(t=>t.kind==='expense').map(t=>t.cat)))]
+    .filter(c=>/picnic/i.test(c) || said.has(c));
+  const days={};
+  Object.values(S.sales||{}).forEach(s=>{ if(s.voided) return;
+    if(new Date(s.ts).getFullYear()!==y) return;
+    const k=dstr(s.ts); days[k]=(days[k]||0)+s.total; });
+  const best=Object.entries(days).sort((a,b)=>b[1]-a[1])[0];
+  const day=best? best[0] : y+'-07-12';
+  const tags=[...new Set(Object.values(S.sales||{})
+    .filter(s=>!s.voided && dstr(s.ts)===day && (s.eventName||'').trim())
+    .map(s=>s.eventName.trim()))];
+  return {name:'Annual Picnic '+y, day, cats, tags, donYr:currentSponsorYear()};
+}
+async function evStart(){
+  const g=evSuggest();
+  await evPut(null,{name:g.name, from:new Date(g.day+'T00:00:00').getTime(),
+    to:new Date(g.day+'T23:59:59').getTime(), cats:g.cats, tags:g.tags, donYr:g.donYr});
+  toast('Built from the books — check it over and adjust anything');
+}
+async function evPut(id,obj){
+  const key=id||('ev'+Date.now().toString(36));
+  const old=id? ((S.finance.events||{})[id]||{}) : {};
+  await DB.set(['finance','events',key], {...old, ...obj});
+  evShown=key; rerender();
+  return key;
+}
+
+/* ------------------------------ THE PAGE ---------------------------------- */
+function eventsHTML(){
+  if(!S.finance){
+    if(!_finInit){ _finInit=true; DB.set(['finance'],FIN_SEED).then(()=>rerender()); }
+    return '<div class="empty">Opening the club books for the first time…</div>';
+  }
+  const list=evAll();
+  if(!list.length){
+    const g=evSuggest();
+    return printHead('Event Profit & Loss','Nothing set up yet') + `
+      <div class="card" style="border-color:var(--gold)">
+        <b>🎪 Work out the profit and loss on an event</b>
+        <p class="muted">Set an event up once and this page gathers the rest by itself: the cash sponsorships that
+          paid for it, what the till took on the day, any cash handed in, and every expense filed against it —
+          then tells you whether the club came out ahead. Nothing is typed twice; it reads the records you already keep.</p>
+        <p class="muted">In-kind donations get listed but are never added in. They count toward a member's sponsor
+          quota, but no money arrived, so counting them would make the day look better funded than it was.</p>
+        <button class="btn" onclick="evStart()">🎪 Build “${esc(g.name)}” from what is already in the books</button>
+        <div style="height:8px"></div>
+        <button class="btn gray" onclick="evEditModal(null)">＋ Set one up myself</button>
+      </div>`;
+  }
+  const ev=evCur(); evShown=ev.id;
+  const c=evCalc(ev);
+  const when = ev.from
+    ? (dstr(ev.from)===dstr(ev.to)
+        ? new Date(ev.from).toLocaleDateString('en-CA',{weekday:'long',month:'long',day:'numeric',year:'numeric'})
+        : new Date(ev.from).toLocaleDateString('en-CA',{month:'short',day:'numeric'})+' → '
+          +new Date(ev.to).toLocaleDateString('en-CA',{month:'short',day:'numeric',year:'numeric'}))
+    : 'no date set';
+  const pick = list.length>1 ? `<div class="payrow noprint" style="flex-wrap:wrap">
+      ${list.map(e=>`<button class="${e.id===ev.id?'on':''}" style="flex:1 1 30%"
+        onclick="evShown='${e.id}';rerender()">${esc(e.name)}</button>`).join('')}</div>` : '';
+  const n=(x,one,many)=>x+' '+(x===1?one:(many||one+'s'));
+  const inHand=Math.round((c.net-c.onTab)*100)/100;
+
+  const story=`Sponsors and donations brought in <b>${fmt(c.sponsorIn)}</b>${c.spons.length?` from ${n(c.spons.length,'sponsor')}`:''}.
+    The till took <b>${fmt(c.salesIn)}</b> across ${n(c.sales.length,'sale')}${c.miscIn>0.005?`, and <b>${fmt(c.miscIn)}</b> was handed in as cash`:''}${c.otherInc>0.005?`, plus <b>${fmt(c.otherInc)}</b> of other income`:''}.
+    Putting it on cost <b>${fmt(c.spent)}</b>.
+    That leaves the club <b class="${c.net>=0?'pos':'neg'}">${fmt(Math.abs(c.net))} ${c.net>=0?'ahead':'down'}</b> on ${esc(ev.name)}.`;
+
+  const row=(icon,label,val,kind,key,sub)=>`<tr class="drillrow" onclick="evDrill('${kind}','${jsq(key||'')}')">
+    <td>${icon} ${label} <span class="muted">›</span>${sub?`<div class="muted" style="font-size:12px">${sub}</div>`:''}</td>
+    <td class="r ${val>0.005?'pos':'dim'}">${fmt(val)}</td></tr>`;
+
+  return printHead('Event Profit & Loss', ev.name+' — '+when) + pick + `
+    <div class="card" style="padding:10px 14px">
+      <b style="font-size:17px">🎪 ${esc(ev.name)}</b>
+      <div class="muted">${esc(when)}</div>
+    </div>
+    <div class="statgrid">
+      <div class="stat green"><div class="v">${fmt(c.totalIn)}</div><div class="l">Money in</div></div>
+      <div class="stat red"><div class="v">${fmt(c.spent)}</div><div class="l">Money out</div></div>
+      <div class="stat ${c.net>=0?'gold':'red'}"><div class="v">${c.net>=0?'':'−'}${fmt(Math.abs(c.net))}</div>
+        <div class="l">${c.net>=0?'Profit on the day':'Loss on the day'}</div></div>
+      <div class="stat"><div class="v">${c.totalIn>0?Math.round(c.spent/c.totalIn*100):0}%</div>
+        <div class="l">Of what came in was spent</div></div>
+    </div>
+    <div class="card"><p style="margin:0">${story}</p></div>
+
+    <h2>Money in</h2>
+    <div class="card"><table>
+      ${row('💰','Cash sponsorships &amp; donations',c.sponsorIn,'spons','',
+          ev.donYr?`every cash sponsorship secured in the ${ev.donYr} sponsor year (Aug 1 ${ev.donYr-1} → Jul 31 ${ev.donYr})`
+                  :'only the ones added to this event by hand')}
+      ${row('🛒','Sold at the event',c.salesIn,'sales','',
+          `${n(c.units,'item')} across ${n(c.sales.length,'sale')} at the till`)}
+      ${c.miscIn>0.005||c.pays.length?row('💵','Cash handed in on the day',c.miscIn,'pays','',
+          'money that never went through the till'):''}
+      ${c.otherInc>0.005||c.otherIn.length?row('➕','Other income filed to this event',c.otherInc,'otherin',''):''}
+      <tr class="drilltot"><td><b>TOTAL IN</b></td><td class="r"><b>${fmt(c.totalIn)}</b></td></tr>
+    </table></div>
+    ${c.inkindVal>0.005?`<p class="muted">🎁 <b>${fmt(c.inkindVal)}</b> of in-kind donations came in on top of that
+      — ${n(c.inkind.length,'item')} given instead of money. It counts toward the donor's sponsor quota but it is
+      <b>not</b> in the ${fmt(c.totalIn)} above, because no cash arrived.
+      <button class="btn small gray noprint" onclick="evDrill('inkind','')">see them</button></p>`:''}
+    ${c.onTab>0.005?`<p class="muted">⏳ <b>${fmt(c.onTab)}</b> of that was rung up as <b>Pay Later</b> and may still be
+      sitting on somebody's tab. The day still earned it, but the cash in hand is nearer
+      <b>${fmt(inHand)}</b> until the tabs are settled — check Money → Tabs for who owes what.</p>`:''}
+
+    <h2>Money out</h2>
+    <div class="card"><table>
+      ${c.catRows.map(r=>`<tr class="drillrow" onclick="evDrill('cat','${jsq(r.cat)}')">
+        <td>${esc(r.cat)} <span class="muted">›</span>
+          <div class="muted" style="font-size:12px">${n(r.n,'entry','entries')}</div></td>
+        <td class="r neg">${fmt(r.amt)}</td></tr>`).join('')
+        ||'<tr><td class="muted">Nothing has been filed against this event yet.</td><td class="r dim">$0.00</td></tr>'}
+      <tr class="drilltot"><td><b>TOTAL OUT</b></td><td class="r"><b>${fmt(c.spent)}</b></td></tr>
+    </table></div>
+
+    <h2>The bottom line</h2>
+    <div class="card"><table>
+      <tr><td>Everything that came in</td><td class="r pos">${fmt(c.totalIn)}</td></tr>
+      <tr><td>Everything it cost</td><td class="r neg">−${fmt(c.spent)}</td></tr>
+      <tr class="drilltot"><td><b>${c.net>=0?'PROFIT':'LOSS'} ON ${esc(ev.name.toUpperCase())}</b></td>
+        <td class="r"><b class="${c.net>=0?'pos':'neg'}">${c.net>=0?'':'−'}${fmt(Math.abs(c.net))}</b></td></tr>
+    </table>
+    ${c.cogs>0.005?`<p class="muted" style="margin:8px 0 0">For what it is worth: the goods sold at the event had cost
+      the club <b>${fmt(c.cogs)}</b> to buy, so the margin on the merchandise alone was
+      <b>${fmt(Math.round((c.salesIn-c.cogs)*100)/100)}</b>. That is already inside the figures above — the stock
+      purchase shows up as an expense whenever you paid for it, which is the way you keep the books.</p>`:''}
+    </div>
+
+    <h2 class="noprint">How these figures were gathered</h2>
+    <div class="card noprint"><p class="muted" style="margin:0">Tap any row above to see the actual records behind it —
+      and to take something out that does not belong. An entry lands on this event if:</p>
+      <ul class="muted" style="margin:6px 0 0;padding-left:18px">
+        <li>it is a <b>cash sponsorship</b> from the ${ev.donYr||'—'} sponsor year${ev.donYr?'':' (no sponsor year is set)'};</li>
+        <li>it is a <b>sale</b> rung up with the till set to ${(ev.tags||[]).length?(ev.tags||[]).map(t=>'“'+esc(t)+'”').join(' or '):'<i>no event name yet</i>'}, or rung up on ${esc(when)};</li>
+        <li>it is an <b>expense</b> filed under ${(ev.cats||[]).length?(ev.cats||[]).map(x=>'<b>'+esc(x)+'</b>').join(', '):'<i>no categories yet</i>'};</li>
+        <li>or you added it by hand.</li>
+      </ul>
+      <p class="muted" style="margin:8px 0 0">Anything you leave out stays listed in ⚙ Set up this event, so you can put it back.</p>
+    </div>
+    <div class="rowbtns noprint">
+      <button class="btn gray" onclick="evEditModal('${ev.id}')">⚙ Set up this event</button>
+      <button class="btn gray" onclick="evEditModal(null)">＋ New event</button>
+    </div>
+    <div class="rowbtns noprint">
+      <button class="btn gray" onclick="window.print()">🖶 Print / Save as PDF</button>
+      <button class="btn gray" onclick="exportEventCSV()">⬇ Event CSV</button>
+    </div>`;
+}
+
+/* --------------------------- SHOW YOUR WORKING ----------------------------- */
+function evDrill(kind,key){
+  const ev=evCur(); if(!ev) return;
+  const c=evCalc(ev);
+  const cut=(what,id,label)=>`<button class="btn small gray noprint"
+    onclick="evToggle('${what}','${id}',false,'${kind}','${jsq(key||'')}')">✕ ${label||'leave out'}</button>`;
+
+  const txRows=(list,who)=>list.map(t=>`<tr>
+    <td style="white-space:nowrap;vertical-align:top">${_dDate(t.ts)}</td>
+    <td>${t.sponsor?`<b>${esc(t.sponsor)}</b>`:`<b>${esc(t.cat||'—')}</b>`}
+      ${t.inkind?' <span class="memberflag">IN-KIND</span>':''}
+      ${(t.member||t.note)?`<div class="muted">${t.member?(t.kind==='income'?'secured by ':'paid / reimbursed to ')+esc(t.member):''}${t.member&&t.note?' · ':''}${t.note?esc(t.note):''}</div>`:''}
+      <div class="muted" style="font-size:11px">counted because it is ${esc(t.why)}</div>
+      <div class="noprint" style="margin-top:3px">
+        <button class="btn small gray" onclick="closeModal();finEntryModal('${t.id}')">✎ edit</button>
+        ${cut('tx',t.id)}</div></td>
+    <td class="r ${t.inkind?'goldtxt':(t.kind==='income'?'pos':'neg')}" style="vertical-align:top;white-space:nowrap">
+      <b>${fmt(t.amount)}</b></td></tr>`).join('');
+  const txTable=(list,label)=>list.length? `<div class="card"><table>
+      <tr><th>Date</th><th>${esc(label||'Who / what')}</th><th class="r">Amount</th></tr>
+      ${txRows(list)}
+      <tr class="drilltot"><td colspan="2">Subtotal — ${list.length} entr${list.length===1?'y':'ies'}</td>
+        <td class="r">${fmt(Math.round(list.reduce((a,t)=>a+t.amount,0)*100)/100)}</td></tr></table></div>`
+    : '<div class="empty">Nothing under this yet.</div>';
+  const head=(title,sub,total,cls)=>`<h3><button class="x" onclick="closeModal()">✕</button>${esc(title)}</h3>
+    <div class="stat ${cls||'gold'}" style="margin:0 0 4px"><div class="v">${fmt(total)}</div>
+      <div class="l">${esc(title)} — ${esc(ev.name)}</div></div>
+    ${sub?`<p class="muted" style="margin:6px 0 10px">${sub}</p>`:'<div style="height:8px"></div>'}`;
+
+  if(kind==='spons') return openModal(
+    head('Cash sponsorships & donations',
+      ev.donYr?`Every cash sponsorship secured in the <b>${ev.donYr}</b> sponsor year — Aug 1 ${ev.donYr-1} to Jul 31 ${ev.donYr}.
+        The sponsor year ends right after the picnic, which is why the whole season's money is what paid for it.
+        If one of these was meant for something else, leave it out and the total below fixes itself.`
+        :'No sponsor year is set for this event, so only donations added by hand are counted.',
+      c.sponsorIn,'green')
+    + txTable(c.spons,'Sponsor')
+    + (c.inkind.length?`<h2>Also received — but NOT in that total</h2>
+        <p class="muted">In-kind means somebody gave an item rather than money. It counts toward their sponsor quota,
+          but no cash arrived, so it is never added to what the event took in.</p>${txTable(c.inkind,'Sponsor')}`:''));
+
+  if(kind==='otherin') return openModal(
+    head('Other income filed to this event','Income entries other than sponsorships.',c.otherInc,'green')
+    + txTable(c.otherIn,'Source'));
+
+  if(kind==='inkind') return openModal(
+    head('In-kind donations','Given as goods, not money — counted toward the donor’s sponsor quota, never counted as income.',
+      c.inkindVal,'gold') + txTable(c.inkind,'Sponsor'));
+
+  if(kind==='cat'){
+    const list=c.exps.filter(t=>t.cat===key);
+    return openModal(head(key,'Every expense filed against this event under this category.',
+      Math.round(list.reduce((a,t)=>a+t.amount,0)*100)/100,'red') + txTable(list,'What it was for'));
+  }
+
+  if(kind==='pays') return openModal(
+    head('Cash handed in on the day','Money that never went through the till — logged on the Money screen.',c.miscIn,'green')
+    + (c.pays.length?`<div class="card"><table><tr><th>Date</th><th>Who / what for</th><th class="r">Amount</th></tr>
+        ${c.pays.map(p=>`<tr><td style="white-space:nowrap">${_dDate(p.ts)}</td>
+          <td><b>${esc(p.from||'—')}</b>${p.note?`<div class="muted">${esc(p.note)}</div>`:''}
+            <div class="noprint" style="margin-top:3px">${cut('pay',p.id)}</div></td>
+          <td class="r pos"><b>${fmt(p.amount)}</b></td></tr>`).join('')}
+        <tr class="drilltot"><td colspan="2">Subtotal</td><td class="r">${fmt(c.miscIn)}</td></tr></table></div>`
+      : '<div class="empty">No cash was logged in on those dates.</div>'));
+
+  if(kind==='sales') return openModal(
+    head('Sold at the event',`${c.sales.length} sale${c.sales.length===1?'':'s'}, ${c.units} item${c.units===1?'':'s'}.
+      Each one says underneath why it landed on this event.`,c.salesIn,'green')
+    + (c.onTab>0.005?`<div class="card"><p class="muted" style="margin:0">⏳ <b>${fmt(c.onTab)}</b> of this was rung up as
+        <b>Pay Later</b>. It is still counted — the club is owed it — but it is not cash in the box yet.</p></div>`:'')
+    + (c.sales.length? c.sales.map(({id,s,why})=>`<div class="card" style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+          <b>${new Date(s.ts).toLocaleDateString('en-CA',{month:'short',day:'numeric'})}
+            ${new Date(s.ts).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</b>
+          <span class="muted">${esc(s.sellerName)} · ${s.payment==='Pay Later'
+            ?`<b class="goldtxt">Pay Later</b>${s.buyer?' — on '+esc(s.buyer)+'’s tab':''}`:esc(s.payment)}</span></div>
+        <div class="muted" style="font-size:12px;margin-top:2px">${(s.lines||[]).map(l=>esc(l.item)+' '+esc(l.size)+' ×'+l.qty).join(' · ')}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:4px">
+          <span class="muted" style="font-size:11px">counted because ${esc(why)}</span>
+          <b class="pos">${fmt(s.total)}</b></div>
+        <div class="noprint" style="margin-top:4px">${cut('sale',id)}</div>
+      </div>`).join('') : '<div class="empty">No sales landed on this event.</div>'));
+}
+
+/* Leaving something out, or putting it back. The exception is written on the
+   EVENT, never on the sale or the book entry, so nothing is damaged by it and
+   deleting the event forgets the whole argument.                            */
+async function evToggle(what,id,keep,kind,key){
+  const ev=evCur(); if(!ev) return;
+  const m = what==='tx' ? ['inTx','exTx'] : what==='sale' ? ['inSale','exSale'] : ['inPay','exPay'];
+  await DB.set(['finance','events',ev.id,m[0],id], keep?true:null);
+  await DB.set(['finance','events',ev.id,m[1],id], keep?null:true);
+  rerender();
+  toast(keep?'Counted in this event again':'Left out of this event');
+  if(kind) evDrill(kind,key); else if(document.getElementById('evEditBox')) evEditModal(ev.id);
+}
+
+/* ------------------------- SETTING AN EVENT UP ----------------------------- */
+function evEditModal(id){
+  const F=S.finance||{};
+  const ev = id ? ((F.events||{})[id]?{id,...F.events[id]}:null) : null;
+  const g = ev || (()=>{ const s=evSuggest(); return {name:'', from:new Date(s.day+'T00:00:00').getTime(),
+    to:new Date(s.day+'T23:59:59').getTime(), cats:s.cats, tags:[], donYr:s.donYr}; })();
+  window._ev={id: ev?ev.id:null};
+  const yr=new Date(g.from||Date.now()).getFullYear();
+  const catAmt=(cat,kind)=>Math.round(Object.values(F.txns||{})
+    .filter(t=>t.kind===kind&&t.cat===cat&&!t.inkind&&new Date(t.ts).getFullYear()===yr)
+    .reduce((a,t)=>a+t.amount,0)*100)/100;
+  const expCats=[...new Set((((F.cats||FIN_SEED.cats).expense)||[])
+    .concat(Object.values(F.txns||{}).filter(t=>t.kind==='expense').map(t=>t.cat)))];
+  const incCats=[...new Set((((F.cats||FIN_SEED.cats).income)||[])
+    .concat(Object.values(F.txns||{}).filter(t=>t.kind==='income').map(t=>t.cat)))].filter(x=>x!=='Donations');
+  const on=(g.cats||[]);
+  const tagOpts=evSaleTags();
+  const spYears=[...new Set(sponsorYears().concat(g.donYr?[g.donYr]:[]))].sort((a,b)=>b-a);
+  const tick=(cls,val,checked,label,hint)=>`<label style="display:flex;gap:8px;align-items:flex-start;margin:5px 0;font-weight:400">
+    <input type="checkbox" class="${cls}" value="${esc(val)}" ${checked?'checked':''} style="width:auto;margin-top:3px">
+    <span>${esc(label)}${hint?`<div class="muted" style="font-size:12px">${hint}</div>`:''}</span></label>`;
+
+  // Anything that has been pushed out of this event, so it can be pulled back in.
+  const outs=[];
+  Object.keys((g.exTx)||{}).forEach(k=>{ const t=(F.txns||{})[k]; if(t) outs.push(
+    {what:'tx',id:k,label:(t.kind==='income'?'+':'−')+fmt(t.amount)+' · '+(t.sponsor||t.cat||'')+(t.note?' — '+t.note:'')}); });
+  Object.keys((g.exSale)||{}).forEach(k=>{ const s=(S.sales||{})[k]; if(s) outs.push(
+    {what:'sale',id:k,label:fmt(s.total)+' · sale by '+s.sellerName+' on '+_dDate(s.ts)}); });
+  Object.keys((g.exPay)||{}).forEach(k=>{ const p=(S.payments||{})[k]; if(p) outs.push(
+    {what:'pay',id:k,label:fmt(p.amount)+' · cash from '+(p.from||'—')+' on '+_dDate(p.ts)}); });
+
+  openModal(`<div id="evEditBox"><h3><button class="x" onclick="closeModal()">✕</button>${ev?'Set up':'New'} event</h3>
+    <label>What is it called?</label>
+    <input id="ev_name" value="${esc(g.name||'')}" placeholder="Annual Picnic ${yr}">
+    <label>First day</label>
+    <input id="ev_from" type="date" value="${dstr(g.from||Date.now())}">
+    <label>Last day <span class="muted">(the same date if it is a one-day event)</span></label>
+    <input id="ev_to" type="date" value="${dstr(g.to||g.from||Date.now())}">
+    <p class="muted" style="margin:4px 0 0">Anything rung up on these days counts toward the event even if nobody
+      set an event name on the till — and so does cash handed in on those days.</p>
+
+    <label>Which cash sponsorships paid for it?</label>
+    <select id="ev_don">
+      <option value="">— none, I will add donations by hand —</option>
+      ${spYears.map(y=>`<option value="${y}" ${String(g.donYr)===String(y)?'selected':''}>The ${y} sponsor year — Aug 1 ${y-1} to Jul 31 ${y}</option>`).join('')}
+    </select>
+    <p class="muted" style="margin:4px 0 0">The sponsor year turns over on Aug 1, right after the picnic, so a whole
+      season of sponsorship is what pays for that one day. In-kind donations are listed but never counted as income.</p>
+
+    <label>Event names used on the till</label>
+    ${tagOpts.length? tagOpts.map(([nm,ct])=>tick('evtag',nm,(g.tags||[]).includes(nm),nm,
+        ct+' sale'+(ct===1?'':'s')+' rung up under this name')).join('')
+      : '<p class="muted">No sale has ever carried an event name. Set one in Admin → Settings before the next event and the till will stamp it on automatically.</p>'}
+    <label>…or type another one</label>
+    <input id="ev_tag" placeholder="exact name, if it is not in the list above"
+      value="${esc((g.tags||[]).filter(t=>!tagOpts.some(([nm])=>nm===t)).join(', '))}">
+
+    <label>Expenses that belong to this event</label>
+    ${expCats.map(x=>tick('evcat',x,on.includes(x),x,
+      catAmt(x,'expense')>0? fmt(catAmt(x,'expense'))+' filed under this in '+yr : 'nothing filed under this in '+yr)).join('')}
+    <label>Other income that belongs to it</label>
+    ${incCats.map(x=>tick('evcat',x,on.includes(x),x,
+      catAmt(x,'income')>0? fmt(catAmt(x,'income'))+' filed under this in '+yr : 'nothing filed under this in '+yr)).join('')}
+    <p class="muted" style="margin:4px 0 0">Sponsorships are handled above — do not tick Donations here as well.</p>
+
+    ${outs.length?`<label>Left out of this event by hand</label>
+      ${outs.map(o=>`<div class="card" style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+        <span class="muted">${esc(o.label)}</span>
+        <button class="btn small gray" onclick="evToggle('${o.what}','${o.id}',true,'','')">↺ put it back</button></div>`).join('')}`:''}
+
+    <div style="height:12px"></div>
+    <button class="btn" onclick="evSaveModal()">✓ Save event</button>
+    ${ev?`<div style="height:8px"></div><button class="btn red" onclick="evDelete('${ev.id}')">Delete this event</button>
+      <p class="muted" style="margin:6px 0 0">Deleting an event removes nothing else — every sale, sponsorship and
+        expense stays exactly where it is in the books.</p>`:''}
+  </div>`);
+}
+async function evSaveModal(){
+  const name=$('ev_name').value.trim();
+  if(!name){ toast('Give the event a name',1); return; }
+  const f=$('ev_from').value, t=$('ev_to').value||f;
+  const cats=[...document.querySelectorAll('.evcat:checked')].map(x=>x.value);
+  const tags=[...document.querySelectorAll('.evtag:checked')].map(x=>x.value)
+    .concat($('ev_tag').value.split(',').map(x=>x.trim()).filter(Boolean));
+  const donYr=$('ev_don').value? +$('ev_don').value : null;
+  await evPut(window._ev&&window._ev.id, {name,
+    from: f? new Date(f+'T00:00:00').getTime() : null,
+    to:   t? new Date(t+'T23:59:59').getTime() : null,
+    cats, tags:[...new Set(tags)], donYr});
+  closeModal(); toast('Event saved');
+}
+function evDelete(id){
+  const e=(S.finance.events||{})[id]||{};
+  pinConfirm('Delete the event "'+(e.name||'')+'". This only removes the summary page — every sale, '
+    +'sponsorship and expense stays exactly where it is in the books.',
+    async()=>{ await DB.set(['finance','events',id],null); evShown=null; closeModal(); toast('Event deleted'); rerender(); });
+}
+function exportEventCSV(){
+  const ev=evCur(); if(!ev) return;
+  const c=evCalc(ev);
+  const rows=[['Event',ev.name],['From',ev.from?dstr(ev.from):''],['To',ev.to?dstr(ev.to):''],[],
+    ['Section','Date','Who / what','Detail','Why it is counted','Amount']];
+  c.spons.forEach(t=>rows.push(['Sponsorship',dstr(t.ts),t.sponsor||'',(t.member?'secured by '+t.member:'')+(t.note?' — '+t.note:''),t.why,t.amount]));
+  c.otherIn.forEach(t=>rows.push(['Other income',dstr(t.ts),t.cat||'',t.note||'',t.why,t.amount]));
+  c.sales.forEach(x=>rows.push(['Sale',dstr(x.s.ts),x.s.sellerName||'',
+    (x.s.lines||[]).map(l=>l.item+' '+l.size+' x'+l.qty).join(' | '),x.why,x.s.total]));
+  c.pays.forEach(p=>rows.push(['Cash in',dstr(p.ts),p.from||'',p.note||'','handed in on the day',p.amount]));
+  c.exps.forEach(t=>rows.push(['Expense',dstr(t.ts),t.cat||'',(t.member?'paid to '+t.member:'')+(t.note?' — '+t.note:''),t.why,-t.amount]));
+  c.inkind.forEach(t=>rows.push(['In-kind (NOT counted)',dstr(t.ts),t.sponsor||'',t.note||'',t.why,0]));
+  rows.push([],['TOTAL IN','','','','',c.totalIn],['TOTAL OUT','','','','',-c.spent],
+    [c.net>=0?'PROFIT':'LOSS','','','','',c.net]);
+  dl('three-aces-'+ev.name.toLowerCase().replace(/[^a-z0-9]+/g,'-')+'.csv',
+    rows.map(r=>r.map(csvCell).join(',')).join('\n'));
+}
+
 function finEntryModal(id){
   const F=S.finance;
   const t=id? {...F.txns[id]} : {kind:'expense', cat:'', amount:'', ts:Date.now(), member:'', sponsor:'', inkind:false, note:''};
@@ -2825,10 +3314,10 @@ function renderMyMoney(){
 /* ------------------------------- ADMIN ------------------------------------ */
 function renderAdmin(){
   if(!isAdmin()){ view='sell'; rerender(); return; }
-  let tabs=[['report','Report'],['money','Money'],['books','Books'],['attend','Attendance'],['reorder','Reorder'],['restock','Restock'],['items','Items'],['users','Users'],['settings','Settings'],['data','Data']];
+  let tabs=[['report','Report'],['money','Money'],['books','Books'],['events','Event P&L'],['attend','Attendance'],['reorder','Reorder'],['restock','Restock'],['items','Items'],['users','Users'],['settings','Settings'],['data','Data']];
   if(!clubRecOn()){
-    tabs=tabs.filter(([t])=>t!=='books'&&t!=='attend');
-    if(adminTab==='books'||adminTab==='attend') adminTab='report';
+    tabs=tabs.filter(([t])=>t!=='books'&&t!=='attend'&&t!=='events');
+    if(adminTab==='books'||adminTab==='attend'||adminTab==='events') adminTab='report';
   }
   $('adminTabs').innerHTML=tabs.map(([t,l])=>
     `<button class="${adminTab===t?'on':''}" onclick="adminTab='${t}';rerender()">${l}</button>`).join('');
@@ -2836,6 +3325,7 @@ function renderAdmin(){
   if(adminTab==='report') b.innerHTML=reportHTML();
   if(adminTab==='money') b.innerHTML=moneyHTML();
   if(adminTab==='books') b.innerHTML=booksHTML();
+  if(adminTab==='events') b.innerHTML=eventsHTML();
   if(adminTab==='attend') b.innerHTML=attendHTML();
   if(adminTab==='reorder') b.innerHTML=reorderHTML();
   if(adminTab==='restock') b.innerHTML=restockHTML();
