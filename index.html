@@ -104,6 +104,11 @@
   body.dark .saleflag{background:#4a1010;color:#ff9c9c;}
   .memberflag{display:inline-block;background:var(--memberbg);color:var(--membertx);border-radius:6px;
     font-size:11px;padding:2px 6px;margin-left:6px;}
+  /* v3.18 — member pricing must be impossible to miss on the Sell tab */
+  .memberflag.big{font-size:15px;font-weight:900;letter-spacing:.6px;padding:4px 10px;border-radius:8px;
+    text-transform:uppercase;border:2px solid var(--membertx);}
+  .memberlink{font-size:14px;font-weight:800;color:var(--gold);text-decoration:none;}
+  .memberlink.on{text-transform:uppercase;letter-spacing:.4px;}
   .qtyctl{display:flex;align-items:center;gap:8px;}
   .qtyctl button{width:32px;height:32px;border-radius:8px;border:1px solid var(--line);
     background:var(--panel2);color:var(--text);font-size:18px;cursor:pointer;}
@@ -349,15 +354,15 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.17';
+const APP_VERSION = 'v3.18';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
   databaseURL: "https://three-aces-default-rtdb.firebaseio.com",
   projectId: "three-aces",
   storageBucket: "three-aces.firebasestorage.app",
-  messagingSenderId: "402216379186",
-  appId: "1:402216379186:web:2f01aa0f5f0e0b8ec9b1a6"
+  messagingSenderId: "1078244282125",
+  appId: "1:1078244282125:web:14fa73c7622a41640c6a44"
 };
 
 /* =========================== STARTING DATA ================================
@@ -940,7 +945,7 @@ function pinKey(k){
     }
   }
 }
-function logout(){ me=null; cart=[]; sessionStorage.removeItem('ta_me'); rerender(); }
+function logout(){ me=null; cart=[]; cartBuyer=''; cartDisc=null; memberUnlocked=false; sessionStorage.removeItem('ta_me'); rerender(); }
 
 // PC keyboard support on the login page: type digits (main row or number pad),
 // Backspace to erase, Esc/C to clear. Typing in the Name box is unaffected.
@@ -1052,9 +1057,9 @@ function openCart(){
   const {subtotal, discAmt, total}=discountedLines();
   openModal(`<h3><button class="x" onclick="closeModal()">✕</button>Current Sale</h3>
     ${cart.map((l,i)=>`<div class="cartline">
-      <div class="d"><div class="nm">${esc(l.item)} — ${esc(l.size)}${l.member?'<span class="memberflag">MEMBER @ COST</span>':''}${l.salePct&&!l.member?`<span class="saleflag">${l.salePct}% OFF</span>`:''}</div>
-        <div class="sub">${fmt(l.member?l.cost:l.price)} each
-          ${memberOK?`· <a href="#" style="color:var(--gold)" onclick="toggleMember(${i});return false">${l.member?'regular price':'member price'}</a>`:''}
+      <div class="d"><div class="nm">${esc(l.item)} — ${esc(l.size)}${l.member?'<span class="memberflag big">MEMBER @ COST</span>':''}${l.salePct&&!l.member?`<span class="saleflag">${l.salePct}% OFF</span>`:''}</div>
+        <div class="sub">${l.member?`<b class="goldtxt" style="font-size:14px">${fmt(l.cost)} each — MEMBER PRICE</b>`:fmt(l.price)+' each'}
+          ${memberOK?`· <a href="#" class="memberlink${l.member?'':' on'}" onclick="toggleMember(${i});return false">${l.member?'back to regular price':'MEMBER PRICE'}</a>`:''}
         </div></div>
       <div class="qtyctl">
         <button onclick="qty(${i},-1)">−</button><b>${l.qty}</b><button onclick="qty(${i},1)">+</button>
@@ -1072,16 +1077,26 @@ function openCart(){
     </div>
     ${payMethod==='Interac'?`<p class="muted" style="margin:6px 0 0">Tapped or e-transferred straight to the club — you are not
       holding this money, so it never shows up as cash for you to hand in. Your profit share on it is paid back to you.</p>`:''}
-    ${payMethod==='Pay Later'?`
-      <label>Who owes this? (tracked on their tab until they pay)</label>
+    ${(()=>{
+      // v3.18 — attribution on every payment type. Pay Later is a debt ("who owes this"),
+      // Cash / Interac is simply a record of who took it ("which member is purchasing this"),
+      // because otherwise a cash member-price sale leaves no trace of who it went to.
+      const memLine = cart.some(l=>l.member);
+      const lab = payMethod==='Pay Later'
+        ? 'Who owes this? (tracked on their tab until they pay)'
+        : (memLine
+            ? 'Which member is purchasing this? (required — this is a member price)'
+            : 'Which member is purchasing this? (optional — leave blank for a public sale)');
+      return `<label>${lab}</label>
       <select id="buyerSel" onchange="cartBuyer=this.value">
-        <option value="">— pick the member —</option>
+        <option value="">${payMethod==='Pay Later'?'— pick the member —':'— nobody / public sale —'}</option>
         ${Object.values(S.users||{}).filter(u=>u.active!==false).map(u=>
           `<option ${cartBuyer===u.name?'selected':''}>${esc(u.name)}</option>`).join('')}
-      </select><div style="height:10px"></div>`:''}
+      </select><div style="height:10px"></div>`;
+    })()}
     <button class="btn" onclick="checkout()">✓ Complete Sale — ${fmt(total)}</button>
     <div class="rowbtns"><button class="btn gray" onclick="closeModal()">Keep Selling</button>
-    <button class="btn red" onclick="cart=[];cartDisc=null;closeModal();renderCartBar()">Cancel Sale</button></div>`);
+    <button class="btn red" onclick="cart=[];cartDisc=null;cartBuyer='';memberUnlocked=false;closeModal();renderCartBar()">Cancel Sale</button></div>`);
 }
 let _dmType='pct';
 function discountModal(){
@@ -1090,12 +1105,13 @@ function discountModal(){
     <p class="muted">Applies to the whole sale, spread across every item so profit tracking stays accurate. Enter YOUR PIN to authorize it — the discount is recorded under your name.</p>
     <label>Discount type</label>
     <div class="payrow">
-      <button type="button" id="dmPct" class="${_dmType==='pct'?'on':''}" onclick="_dmType='pct';this.classList.add('on');$('dmAmt').classList.remove('on');$('dmValLab').textContent='Percent off (e.g. 10 = 10%)'">Percent %</button>
-      <button type="button" id="dmAmt" class="${_dmType==='amt'?'on':''}" onclick="_dmType='amt';this.classList.add('on');$('dmPct').classList.remove('on');$('dmValLab').textContent='Dollars off the total (e.g. 5 or 5.50)'">Dollars $</button>
+      <button type="button" id="dmPct" class="${_dmType==='pct'?'on':''}" onclick="_dmType='pct';this.classList.add('on');$('dmAmt').classList.remove('on');$('dmValLab').textContent='Percent off (e.g. 10 = 10%)';dmPrev()">Percent %</button>
+      <button type="button" id="dmAmt" class="${_dmType==='amt'?'on':''}" onclick="_dmType='amt';this.classList.add('on');$('dmPct').classList.remove('on');$('dmValLab').textContent='Dollars off the total (e.g. 5 or 5.50)';dmPrev()">Dollars $</button>
     </div>
     <label id="dmValLab">${_dmType==='pct'?'Percent off (e.g. 10 = 10%)':'Dollars off the total (e.g. 5 or 5.50)'}</label>
     <input id="dm_val" type="text" inputmode="decimal" autocomplete="off"
-      value="${cartDisc?cartDisc.value:''}" placeholder="0">
+      value="${cartDisc?cartDisc.value:''}" placeholder="0" oninput="dmPrev()">
+    <div id="dm_prev" class="card" style="margin:0 0 12px"></div>
     <label>Your PIN (authorizes the discount — recorded under your name)</label>
     <input id="dm_pin" type="password" inputmode="numeric" maxlength="4" autocomplete="off"
       style="font-size:22px;text-align:center;letter-spacing:8px">
@@ -1103,7 +1119,41 @@ function discountModal(){
     <button class="btn" onclick="applyDiscount()">✓ Apply Discount</button>
     <div style="height:8px"></div>
     <button class="btn gray" onclick="openCart()">Back to sale</button>`);
-  setTimeout(()=>{ const el=$('dm_val'); if(el) el.focus(); },100);
+  setTimeout(()=>{ const el=$('dm_val'); if(el) el.focus(); dmPrev(); },100);
+}
+/* v3.18 — say the numbers out loud before the PIN goes in.
+   "You're discounting it to this much — are you sure?" in figures, live as you type. */
+function dmFull(){
+  return Math.round(cart.reduce((a,l)=>a+(l.member?(l.cost||0):(l.price||0))*l.qty,0)*100)/100;
+}
+function dmCalc(v){
+  const full=dmFull();
+  if(!(v>0)||full<=0) return {full, off:0, now:full, pct:0};
+  let off = _dmType==='pct' ? full*Math.min(100,v)/100 : Math.min(v, full);
+  off=Math.round(off*100)/100;
+  const now=Math.round((full-off)*100)/100;
+  return {full, off, now, pct: full? Math.round(off/full*1000)/10 : 0};
+}
+function dmPrev(){
+  const box=$('dm_prev'); if(!box) return;
+  const raw=$('dm_val'); const v=parseFloat(String(raw?raw.value:'').replace(/[^0-9.]/g,''))||0;
+  const c=dmCalc(v);
+  if(!(v>0)){
+    box.innerHTML=`<div class="muted">Total right now <b>${fmt(c.full)}</b> — type a discount to see what it becomes.</div>`;
+    box.style.display='block'; return;
+  }
+  const bad = _dmType==='pct' && v>100;
+  box.innerHTML = bad
+    ? `<div class="neg"><b>Percent can't be over 100.</b></div>`
+    : `<div style="display:flex;justify-content:space-between;font-size:16px">
+         <span class="muted">Total was</span><b style="text-decoration:line-through">${fmt(c.full)}</b></div>
+       <div style="display:flex;justify-content:space-between;font-size:16px">
+         <span class="neg">Discount</span><b class="neg">−${fmt(c.off)}</b></div>
+       <div style="display:flex;justify-content:space-between;font-size:22px;font-weight:800;
+            border-top:1px solid var(--line);margin-top:6px;padding-top:6px">
+         <span>You will collect</span><span class="goldtxt">${fmt(c.now)}</span></div>
+       <div class="muted" style="margin-top:6px">That's <b>${c.pct}% off</b> — enter your PIN below to confirm you meant it.</div>`;
+  box.style.display='block';
 }
 function applyDiscount(){
   const pin=$('dm_pin').value;
@@ -1112,12 +1162,57 @@ function applyDiscount(){
   const v=parseFloat(String($('dm_val').value).replace(/[^0-9.]/g,''))||0;
   if(v<=0){ toast('Enter the discount amount',1); return; }
   if(_dmType==='pct' && v>100){ toast('Percent can\'t be over 100',1); return; }
+  const c=dmCalc(v);
   cartDisc={type:_dmType, value:Math.round(v*100)/100, by:meU().name};
-  toast('Discount applied');
+  toast('Discount applied — '+fmt(c.full)+' → '+fmt(c.now));
   openCart(); renderCartBar();
 }
+/* v3.18 — member pricing is PIN-gated.
+   Unlocking a member price on a sale now costs whoever is ringing it in their own PIN,
+   so it can't be tapped by accident and the club knows who authorised it. The PIN is
+   asked once per sale — after that you can flip lines freely — and going BACK to the
+   regular price never asks, because that direction can't cost the club anything. */
+let memberUnlocked=false;
 function toggleMember(i){
-  cart[i].member=!cart[i].member; openCart(); renderCartBar();
+  if(cart[i].member){ cart[i].member=false; openCart(); renderCartBar(); return; }   // reverting — no PIN
+  if(memberUnlocked){ cart[i].member=true; openCart(); renderCartBar(); return; }
+  memberPinModal(i);
+}
+let _mpIdx=null;
+function memberPinModal(i){
+  _mpIdx=i;
+  const l=cart[i];
+  const save=Math.round(((l.price||0)-(l.cost||0))*l.qty*100)/100;
+  openModal(`<h3><button class="x" onclick="openCart()">✕</button>🔒 Unlock Member Pricing</h3>
+    <p class="muted">Member price is the club's <b>cost</b> — the club makes nothing on it. Enter YOUR PIN to
+      authorise it. You only have to do this once per sale.</p>
+    <div class="card" style="margin:0 0 12px">
+      <div style="font-weight:800">${esc(l.item)} — ${esc(l.size)} ×${l.qty}</div>
+      <div style="display:flex;justify-content:space-between;margin-top:6px">
+        <span>Regular</span><b>${fmt((l.price||0)*l.qty)}</b></div>
+      <div style="display:flex;justify-content:space-between">
+        <span class="goldtxt"><b>Member @ cost</b></span><b class="goldtxt">${fmt((l.cost||0)*l.qty)}</b></div>
+      <div style="display:flex;justify-content:space-between;margin-top:6px;border-top:1px solid var(--line);padding-top:6px">
+        <span class="muted">Club gives up</span><b class="neg">${fmt(save)}</b></div>
+    </div>
+    <label>Your 4-digit PIN</label>
+    <input id="mp_pin" type="password" inputmode="numeric" maxlength="4" autocomplete="off"
+      style="font-size:26px;text-align:center;letter-spacing:10px"
+      onkeydown="if(event.key==='Enter')memberPinGo()">
+    <div style="height:12px"></div>
+    <button class="btn" onclick="memberPinGo()">🔓 Unlock member price</button>
+    <div style="height:8px"></div>
+    <button class="btn gray" onclick="openCart()">Cancel — keep regular price</button>`);
+  setTimeout(()=>{ const el=$('mp_pin'); if(el) el.focus(); },100);
+}
+function memberPinGo(){
+  const el=$('mp_pin'); if(!el) return;
+  if(el.value!==meU().pin){ toast('That\'s not your PIN — member price not applied',1); el.value=''; return; }
+  memberUnlocked=true;
+  if(_mpIdx!=null && cart[_mpIdx]) cart[_mpIdx].member=true;
+  _mpIdx=null;
+  toast('Member price unlocked for this sale');
+  openCart(); renderCartBar();
 }
 function qty(i,d){
   const l=cart[i];
@@ -1134,6 +1229,9 @@ let _busy=false;
 async function checkout(){
   if(_busy||!cart.length) return;
   if(payMethod==='Pay Later' && !cartBuyer){ toast('Pick which member owes this',1); return; }
+  // v3.18 — a member price has to be attributed to a member, whatever the payment type
+  if(payMethod!=='Pay Later' && cart.some(l=>l.member) && !cartBuyer){
+    toast('This is a member price — pick which member is purchasing it',1); return; }
   _busy=true;
   const done=[];
   try{
@@ -1147,7 +1245,7 @@ async function checkout(){
     const u=meU();
     const {base, discAmt, total}=discountedLines();
     const sale={ts:Date.now(), sellerId:me, sellerName:u.name, sellerPct:u.profitPct||0,
-      payment:payMethod, buyer:payMethod==='Pay Later'?cartBuyer:null,
+      payment:payMethod, buyer:cartBuyer||null,
       voided:false, eventName:(S.settings&&S.settings.eventName)||'',
       discount: cartDisc? {type:cartDisc.type, value:cartDisc.value, amount:discAmt, by:cartDisc.by||u.name} : null,
       lines:base.map(x=>({itemId:x.l.itemId,item:x.l.item,size:x.l.size,qty:x.l.qty,
@@ -1158,8 +1256,8 @@ async function checkout(){
     await DB.push(['sales'], sale);
     const msg = sale.payment==='Pay Later'
       ? 'Sale recorded — '+fmt(sale.total)+' on '+sale.buyer+"'s tab"
-      : 'Sale recorded — '+fmt(sale.total)+' '+sale.payment;
-    cart=[]; cartBuyer=''; cartDisc=null; payMethod='Cash'; closeModal(); renderCartBar();
+      : 'Sale recorded — '+fmt(sale.total)+' '+sale.payment+(sale.buyer?' — '+sale.buyer:'');
+    cart=[]; cartBuyer=''; cartDisc=null; payMethod='Cash'; memberUnlocked=false; closeModal(); renderCartBar();
     toast(msg);
   }finally{ _busy=false; }
 }
@@ -1416,7 +1514,7 @@ function renderSales(){
         · ${esc(s.sellerName)} ${s.voided?'<span class="voidtag">VOIDED</span>':''}${s.edited?' <span class="voidtag" style="color:var(--gold)">EDITED</span>':''}</span>
         <span>${fmt(sub)}${slGroup&&Math.abs(sub-s.total)>0.005?` <span class="muted">of ${fmt(s.total)}</span>`:''}</span></div>
       <div class="lines">${lines.map(l=>`${l.qty}× ${esc(l.item)} ${esc(l.size)}${l.member?' (member)':''}`).join(' · ')}
-        · ${esc(s.payment)}${s.payment==='Pay Later'&&s.buyer?` — <b>${esc(s.buyer)} owes</b>`:''}${s.discount?` · <b class="neg">−${fmt(s.discount.amount)} discount</b> <span class="muted">(by ${esc(s.discount.by||s.sellerName)})</span>`:''}</div>
+        · ${esc(s.payment)}${s.buyer?(s.payment==='Pay Later'?` — <b>${esc(s.buyer)} owes</b>`:` — <b>${esc(s.buyer)}</b>`):''}${s.discount?` · <b class="neg">−${fmt(s.discount.amount)} discount</b> <span class="muted">(by ${esc(s.discount.by||s.sellerName)})</span>`:''}</div>
       <div class="lines muted">${[...new Set(lines.map(lineGroup))].map(g=>GRP_LABEL[g]).join(' · ')}</div>
       ${s.edited&&s.edited.movedFrom?`<div class="lines muted">📅 Back-dated from ${new Date(s.edited.movedFrom).toLocaleString('en-CA')} by ${esc(s.edited.by||'')}</div>`:''}
       ${s.note?`<div class="lines" style="color:var(--gold)">📝 ${esc(s.note)}</div>`:''}
@@ -2325,7 +2423,8 @@ function evDrill(kind,key){
           <b>${new Date(s.ts).toLocaleDateString('en-CA',{month:'short',day:'numeric'})}
             ${new Date(s.ts).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</b>
           <span class="muted">${esc(s.sellerName)} · ${s.payment==='Pay Later'
-            ?`<b class="goldtxt">Pay Later</b>${s.buyer?' — on '+esc(s.buyer)+'’s tab':''}`:esc(s.payment)}</span></div>
+            ?`<b class="goldtxt">Pay Later</b>${s.buyer?' — on '+esc(s.buyer)+'’s tab':''}`
+            :esc(s.payment)+(s.buyer?' — '+esc(s.buyer):'')}</span></div>
         <div class="muted" style="font-size:12px;margin-top:2px">${(s.lines||[]).map(l=>esc(l.item)+' '+esc(l.size)+' ×'+l.qty).join(' · ')}</div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:4px">
           <span class="muted" style="font-size:11px">counted because ${esc(why)}</span>
@@ -2616,6 +2715,8 @@ function manageCatsModal(){
             <button class="btn small gray" ${i===cats.length-1?'disabled style="opacity:.3"':''} onclick="catMove('${kind}',${i},1)">▼</button>
             <button class="btn small gray" onclick="catRename('${kind}',${i})">✎</button>
             <button class="btn small gray" onclick="catHide('${kind}',${i},${h?'false':'true'})">${h?'show':'hide'}</button>
+            ${kind==='expense'?`<button class="btn small ${finMemberCats().includes(cat)?'':'gray'}" onclick="catMemberTog(${i})"
+              title="Can members pick this when they file an expense claim?">${finMemberCats().includes(cat)?'✔ members':'members'}</button>`:''}
             <button class="btn small red" onclick="catDelete('${kind}',${i})">🗑</button>
           </span></div>`;
       }).join('')+
@@ -2625,8 +2726,23 @@ function manageCatsModal(){
   openModal(`<h3><button class="x" onclick="closeModal();rerender()">✕</button>⚙ Manage income &amp; expense categories</h3>
     <p class="muted">▲▼ set the order they appear in the report and the entry form. Hide what no longer applies — it disappears from the report rows and the entry form, but any old entries keep showing with their amounts. Rename updates every past entry too. Delete only works if a category was never used.</p>
     ${sec('income','Income')}${sec('expense','Expense')}
+    <p class="muted" style="margin-top:10px">The <b>members</b> button on an expense category decides whether members can
+      pick it when they file their own expense claim from the Club tab. Tick the ones they should see — park fees,
+      entertainment, prizes and so on — and leave the club's private ones untouched.</p>
     <div style="height:10px"></div>
     <button class="btn" onclick="closeModal();rerender()">Done</button>`);
+}
+/* v3.18 — which expense categories members may pick when filing their own claim.
+   Stored as an explicit list in S.finance.catsMember. Until the first tick is made
+   there is no list at all, and finMemberCats() falls back to "every visible expense
+   category", so the feature works out of the box with nothing to configure. */
+async function catMemberTog(i){
+  const cat=S.finance.cats.expense[i];
+  let list=[...finMemberCats()];
+  if(list.includes(cat)) list=list.filter(c=>c!==cat); else list.push(cat);
+  await DB.set(['finance','catsMember'],list);
+  toast(list.includes(cat)?'Members can now pick "'+cat+'"':'Hidden from members: "'+cat+'"');
+  manageCatsModal();
 }
 async function catAdd(kind){
   const v=$('mcNew_'+kind).value.trim();
@@ -3117,6 +3233,7 @@ function renderMyClub(){
       ${sponsorNoticeHTML(target,sy)}
       ${gotLast>0.005?`<p class="muted">Last season (${sponsorYearLabel(sy-1)}) you secured ${fmt(gotLast)}. That one is closed — it does not carry over.</p>`:''}`;
   }
+  html+=claimsMemberHTML();
   $('myClubBody').innerHTML=html;
 }
 
@@ -3145,9 +3262,9 @@ function editSale(id){
       ${PAY_METHODS.map(p=>`<button class="esPay ${_es.payment===p?'on':''}" data-pay="${p}"
         onclick="esSetPay('${p}')">${p}</button>`).join('')}
     </div>
-    <div id="esBuyerWrap" style="display:${_es.payment==='Pay Later'?'block':'none'}">
-      <label>Who owes this?</label>
-      <select id="es_buyer"><option value="">— pick the member —</option>
+    <div id="esBuyerWrap">
+      <label id="esBuyerLab">${_es.payment==='Pay Later'?'Who owes this?':'Which member is purchasing this?'}</label>
+      <select id="es_buyer"><option value="">${_es.payment==='Pay Later'?'— pick the member —':'— nobody / public sale —'}</option>
         ${users.map(n=>`<option ${_es.buyer===n?'selected':''}>${esc(n)}</option>`).join('')}</select>
       <div style="height:8px"></div>
     </div>
@@ -3175,14 +3292,18 @@ function esResetWhen(ts){ const el=$('es_when'); if(el) el.value=tsLocalInput(ts
 function esSetPay(p){
   _es.payment=p;
   document.querySelectorAll('#modalBox .esPay').forEach(b=>b.classList.toggle('on',b.dataset.pay===p));
-  $('esBuyerWrap').style.display = p==='Pay Later'?'block':'none';
+  // v3.18 — the picker stays on every payment type; only the wording changes
+  const lab=$('esBuyerLab'), sel=$('es_buyer');
+  if(lab) lab.textContent = p==='Pay Later' ? 'Who owes this?' : 'Which member is purchasing this?';
+  if(sel && sel.options.length) sel.options[0].textContent =
+    p==='Pay Later' ? '— pick the member —' : '— nobody / public sale —';
 }
 async function saveSaleEdit(){
   const s=S.sales[_es.id];
-  if(_es.payment==='Pay Later'){
-    _es.buyer=$('es_buyer').value;
-    if(!_es.buyer){ toast('Pick which member owes this',1); return; }
-  }
+  _es.buyer=($('es_buyer')||{}).value||'';
+  if(_es.payment==='Pay Later' && !_es.buyer){ toast('Pick which member owes this',1); return; }
+  if(_es.payment!=='Pay Later' && !_es.buyer && (s.lines||[]).some(l=>l.member)){
+    toast('This sale has a member price — pick which member it was for',1); return; }
   const rows=[...document.querySelectorAll('#modalBox .sizeedit')];
   const newLines=[], applied=[];
   for(const r of rows){
@@ -3209,7 +3330,7 @@ async function saveSaleEdit(){
   }
   const note=(($('es_note')||{}).value||'').trim().slice(0,500);
   await DB.set(['sales',_es.id],{...s, ts, lines:newLines, total,
-    payment:_es.payment, buyer:_es.payment==='Pay Later'?_es.buyer:null,
+    payment:_es.payment, buyer:_es.buyer||null,
     note: note||null,
     voided:newLines.length===0? true : (s.voided||false),
     edited:{ts:Date.now(), by:meU().name, movedFrom: moved? s.ts : (s.edited&&s.edited.movedFrom)||null}});
@@ -3304,7 +3425,7 @@ function renderMyMoney(){
       <div class="hd"><span>${new Date(s.ts).toLocaleDateString('en-CA')}
         ${new Date(s.ts).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</span><span>${fmt(s.total)}</span></div>
       <div class="lines">${s.lines.map(l=>`${l.qty}× ${esc(l.item)} ${esc(l.size)}`).join(' · ')}
-        · ${esc(s.payment)}${s.payment==='Pay Later'&&s.buyer?' — '+esc(s.buyer):''}</div>
+        · ${esc(s.payment)}${s.buyer?' — '+esc(s.buyer):''}</div>
       <div class="lines" style="margin-top:4px">You keep <b class="goldtxt">${fmt(shareOf(s))}</b> ·
         club gets <b class="pos">${fmt(s.total-shareOf(s))}</b>${(isTabSale(s)||isDirectSale(s))?' <span class="memberflag">CLUB COLLECTS — YOUR SHARE OWED TO YOU</span>':''}</div>
     </div>`).join('') || '<div class="empty">No sales in this period.</div>'}
@@ -3314,10 +3435,10 @@ function renderMyMoney(){
 /* ------------------------------- ADMIN ------------------------------------ */
 function renderAdmin(){
   if(!isAdmin()){ view='sell'; rerender(); return; }
-  let tabs=[['report','Report'],['money','Money'],['books','Books'],['events','Event P&L'],['attend','Attendance'],['reorder','Reorder'],['restock','Restock'],['items','Items'],['users','Users'],['settings','Settings'],['data','Data']];
+  let tabs=[['report','Report'],['money','Money'],['books','Books'],['claims','Claims'+claimsBadge()],['events','Event P&L'],['attend','Attendance'],['reorder','Reorder'],['restock','Restock'],['items','Items'],['users','Users'],['settings','Settings'],['data','Data']];
   if(!clubRecOn()){
-    tabs=tabs.filter(([t])=>t!=='books'&&t!=='attend'&&t!=='events');
-    if(adminTab==='books'||adminTab==='attend'||adminTab==='events') adminTab='report';
+    tabs=tabs.filter(([t])=>t!=='books'&&t!=='attend'&&t!=='events'&&t!=='claims');
+    if(adminTab==='books'||adminTab==='attend'||adminTab==='events'||adminTab==='claims') adminTab='report';
   }
   $('adminTabs').innerHTML=tabs.map(([t,l])=>
     `<button class="${adminTab===t?'on':''}" onclick="adminTab='${t}';rerender()">${l}</button>`).join('');
@@ -3325,6 +3446,7 @@ function renderAdmin(){
   if(adminTab==='report') b.innerHTML=reportHTML();
   if(adminTab==='money') b.innerHTML=moneyHTML();
   if(adminTab==='books') b.innerHTML=booksHTML();
+  if(adminTab==='claims') b.innerHTML=claimsHTML();
   if(adminTab==='events') b.innerHTML=eventsHTML();
   if(adminTab==='attend') b.innerHTML=attendHTML();
   if(adminTab==='reorder') b.innerHTML=reorderHTML();
@@ -3471,7 +3593,7 @@ function repDrill(kind,key){
   const rows=hits.map(({id,s,lines})=>{
     const paid = s.payment==='Pay Later'
       ? `<b class="goldtxt">Pay Later</b>${s.buyer?` — on ${esc(s.buyer)}'s tab`:''}`
-      : esc(s.payment);
+      : esc(s.payment)+(s.buyer?` — ${esc(s.buyer)}`:'');
     return `<div class="card" style="margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
         <b>${new Date(s.ts).toLocaleDateString('en-CA',{month:'short',day:'numeric'})}
@@ -4003,6 +4125,11 @@ function moneyHTML(){
        <div class="sub">off-the-app money — in the books as income</div></div>`:''}
      ${interacTotal>0.005?`<div class="stat green drilltile" onclick="moneyDrill('interac')"><div class="v">${fmt(interacTotal)}</div>
        <div class="l">💳 Interac / Square — already in the club's account (${interacSales.length} sale${interacSales.length===1?'':'s'})</div></div>`:''}
+     ${(()=>{const co=claimOwed(),cp=claimCashPaid();return (co>0.005||cp>0.005)?
+       `<div class="stat ${co>0.005?'red':'green'} drilltile" onclick="adminTab='claims';rerender()">
+          <div class="v">${fmt(co)}</div>
+          <div class="l">🧾 Owed to members for expenses they paid</div>
+          <div class="sub">${cp>0.005?fmt(cp)+' already paid back in cash — that came out of the cash box':'approved claims not yet paid out'}</div></div>`:''})()}
      <div class="stat ${outstanding>0.005?'red':'green'} drilltile" onclick="moneyDrill('outstanding')">
        <div class="v">${fmt(outstanding)}</div>
        <div class="l">Still outstanding (total)</div>
@@ -4842,11 +4969,572 @@ $('verTag').textContent='Three Aces Sales App · '+APP_VERSION;
 function openModal(html){ $('modalBox').innerHTML=html; $('modalBg').classList.add('open'); }
 function closeModal(){ $('modalBg').classList.remove('open'); }
 
+
+/* ======================= MEMBER EXPENSE CLAIMS (v3.18) =====================
+   Members file their own expenses from the Club tab — category, the date the
+   money was actually spent, the amount, an optional receipt photo and a note.
+   Nothing is handed over on paper any more.
+
+   An admin then does three things, and only three:
+     APPROVE     — the club accepts the cost. THIS is the moment the expense
+                   lands in the Books, so the picnic P&L is right the same
+                   night, whether or not anybody has been paid yet.
+     SEND BACK   — something is wrong. The member fixes it and resubmits.
+     DECLINE     — the club is not paying it. It drops out of every total
+                   immediately, and can be cleared off the member's list.
+
+   Paying is a SEPARATE, later step, because approving and paying are two
+   different facts. Until a claim is paid it shows as cash the club still
+   owes that member — a figure Luca does not have today.
+
+   ONE RULE HOLDS THE WHOLE THING TOGETHER: only an APPROVED claim is ever
+   counted as owed. Waiting, sent-back and declined claims never touch a
+   money tile on either side, so a decline can never look like a debt.
+
+   The receipt is stored in the out-of-band file store (/threeacesFiles),
+   exactly like a book-entry invoice, so the 3-second live sync never has to
+   download a single photo.                                                  */
+
+const CLAIM_ST={
+  waiting :{lab:'Waiting for approval', cls:'gold',  ic:'🕓'},
+  back    :{lab:'Sent back to you',     cls:'red',   ic:'↩'},
+  approved:{lab:'Approved — not paid',  cls:'green', ic:'✔'},
+  paid    :{lab:'Paid',                 cls:'green', ic:'💵'},
+  declined:{lab:'Declined',             cls:'red',   ic:'✕'}
+};
+function claimsAll(){
+  return Object.entries(S.claims||{}).sort((a,b)=>(b[1].ts||0)-(a[1].ts||0));
+}
+function claimsOf(name){
+  const k=(name||'').trim().toLowerCase();
+  return claimsAll().filter(([,c])=>(c.member||'').trim().toLowerCase()===k);
+}
+// Only approved-and-unpaid money is owed. Nothing else counts, ever.
+function claimOwed(list){
+  return Math.round((list||claimsAll()).filter(([,c])=>c.status==='approved')
+    .reduce((a,[,c])=>a+(c.amount||0),0)*100)/100;
+}
+function claimOwedByMember(){
+  const out={};
+  claimsAll().filter(([,c])=>c.status==='approved')
+    .forEach(([,c])=>{ out[c.member]=(out[c.member]||0)+(c.amount||0); });
+  return out;
+}
+// Cash (not e-transfer) that has physically left the club's cash box on claims.
+function claimCashPaid(){
+  return Math.round(claimsAll().filter(([,c])=>c.status==='paid'&&c.pay&&c.pay.method==='cash')
+    .reduce((a,[,c])=>a+(c.amount||0),0)*100)/100;
+}
+function claimsWaiting(){ return claimsAll().filter(([,c])=>c.status==='waiting'); }
+
+/* Which expense categories members may pick from. Until the admin ticks even
+   one, everything visible on the books is offered — nobody has to configure
+   anything to start using this. */
+function finMemberCats(){
+  const F=S.finance||{};
+  const all=((F.cats||FIN_SEED.cats).expense||[]);
+  const hid=((F.catsHidden||{}).expense)||[];
+  const vis=all.filter(c=>!hid.includes(c));
+  const pick=F.catsMember;
+  if(!Array.isArray(pick)) return vis;              // never configured → everything
+  return vis.filter(c=>pick.includes(c));
+}
+function claimStamp(c,what){
+  const t=Array.isArray(c.trail)?c.trail.slice():[];
+  t.push({ts:Date.now(), by:(meU()&&meU().name)||'', what});
+  return t;
+}
+
+/* ------------------------- MEMBER: FILE A CLAIM --------------------------- */
+let _cl=null;
+function claimModal(id){
+  const c=id? {...(S.claims||{})[id]} : {cat:'', amount:'', date:Date.now(), note:'', receipt:null};
+  const cats=finMemberCats();
+  const mine=(meU()&&meU().name)||'';
+  _cl={id, receipt:c.receipt||null};
+  window._feInvNew=null;
+  const hasFile=!!(c.receipt&&String(c.receipt).startsWith('file:'));
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>${id?'Edit my expense':'💸 File an expense'}</h3>
+    ${c.status==='back'&&c.backNote?`<div class="card" style="border-color:var(--red)">
+      <b class="neg">↩ Sent back to you</b>
+      <p style="margin:6px 0 0;white-space:pre-wrap">${esc(c.backNote)}</p>
+      <p class="muted" style="margin:6px 0 0">Fix it below and send it again.</p></div>`:''}
+    <label>Who is claiming</label>
+    <input value="${esc(mine)}" disabled style="opacity:.75">
+    <p class="muted" style="margin:2px 0 8px">Taken from your login — an expense can only ever be filed in your own name.</p>
+    <label>What was it for</label>
+    <select id="cl_cat">
+      ${c.cat?'':'<option value="" selected disabled>Pick a category…</option>'}
+      ${cats.map(x=>`<option ${x===c.cat?'selected':''}>${esc(x)}</option>`).join('')}
+      ${c.cat&&!cats.includes(c.cat)?`<option selected>${esc(c.cat)}</option>`:''}
+    </select>
+    <label>Date of the expense</label>
+    <input id="cl_date" type="date" value="${dstr(c.date||Date.now())}">
+    <p class="muted" style="margin:2px 0 8px">The day you actually spent the money — not today's date, if they differ.</p>
+    <label>How much did you pay $</label>
+    <input id="cl_amt" type="text" inputmode="decimal" value="${c.amount||''}" placeholder="0.00">
+    <label>Receipt (optional)</label>
+    <img id="feInvPrev" src="" style="max-height:130px;border-radius:8px;display:none;margin:4px 0">
+    <div id="feInvName" class="muted" style="display:${hasFile?'block':'none'};margin:4px 0">📎 Receipt already attached to this claim</div>
+    <div class="rowbtns">
+      <button class="btn gray" type="button" onclick="$('feInvCam').click()">📷 Take a photo</button>
+      <button class="btn gray" type="button" onclick="$('feInvFile').click()">📎 Attach a file</button>
+    </div>
+    <div class="rowbtns">
+      <button class="btn gray" type="button" onclick="_cl.receipt=null;window._feInvNew=null;$('feInvPrev').style.display='none';$('feInvName').style.display='none';toast('Receipt removed')">Remove</button>
+    </div>
+    <p class="muted" style="margin:4px 0 0">A receipt is <b>not compulsory</b> — file it either way. Claims without one are
+      simply marked so, and an admin can ask you about it.</p>
+    <input type="file" id="feInvCam" accept="image/*" capture="environment" style="display:none" onchange="feInvoicePick(this)">
+    <input type="file" id="feInvFile" accept="image/*,.pdf,.doc,.docx,application/pdf" style="display:none" onchange="feInvoicePick(this)">
+    <label>Note (what it was, where you bought it)</label>
+    <input id="cl_note" value="${esc(c.note||'')}" placeholder="e.g. 200 paper plates x 2 — Amazon">
+    <div style="height:12px"></div>
+    <button class="btn" onclick="claimSave()">✓ ${id?'Send it again':'Submit for approval'}</button>
+    <div style="height:8px"></div>
+    <button class="btn gray" onclick="closeModal()">Cancel</button>`);
+}
+async function claimSave(){
+  const cat=($('cl_cat').value||'').trim();
+  if(!cat){ toast('Pick what the expense was for',1); return; }
+  const amt=parseFloat(String($('cl_amt').value).replace(/[^0-9.]/g,''))||0;
+  if(amt<=0){ toast('Enter how much you paid',1); return; }
+  const d=$('cl_date').value;
+  const date=d? new Date(d+'T12:00').getTime() : Date.now();
+  if(date>Date.now()+86400000){ toast('That date is in the future — check it',1); return; }
+  const note=($('cl_note').value||'').trim().slice(0,400);
+  const id=_cl.id, invNew=window._feInvNew;
+  const old=id? ((S.claims||{})[id]||{}) : null;
+  let receipt=_cl.receipt;
+  if(invNew){
+    const fid=newId();
+    try{ await fileSave(fid, invNew); receipt='file:'+fid; }
+    catch(e){ toast('Could not save the receipt — check the connection',1); return; }
+  }
+  const mine=meU().name;
+  if(id){
+    const ch=[];
+    if(Math.abs((old.amount||0)-amt)>0.005) ch.push(fmt(old.amount||0)+' → '+fmt(amt));
+    if((old.cat||'')!==cat) ch.push('category '+(old.cat||'—')+' → '+cat);
+    if(dstr(old.date||0)!==dstr(date)) ch.push('date '+dstr(old.date||0)+' → '+dstr(date));
+    if((old.receipt||'')!==(receipt||'')) ch.push(receipt?'receipt attached':'receipt removed');
+    await DB.set(['claims',id],{...old, cat, date, amount:Math.round(amt*100)/100, note:note||null,
+      receipt:receipt||null, status:'waiting', backNote:null,
+      trail:claimStamp(old, (old.status==='back'?'Fixed and resent':'Edited')+(ch.length?' — '+ch.join(', '):''))});
+    closeModal(); toast('Sent back in for approval'); rerender(); return;
+  }
+  const c={ts:Date.now(), member:mine, cat, date, amount:Math.round(amt*100)/100,
+    note:note||null, receipt:receipt||null, status:'waiting',
+    trail:[{ts:Date.now(), by:mine, what:'Filed — '+fmt(amt)+' · '+cat+(receipt?' · receipt attached':' · no receipt')}]};
+  await DB.set(['claims',newId()], c);
+  closeModal(); toast('Expense submitted — an admin will review it'); rerender();
+}
+function claimWithdraw(id){
+  const c=(S.claims||{})[id]||{};
+  pinConfirm('Withdraw your '+fmt(c.amount||0)+' expense for '+(c.cat||'')+'? It disappears completely — '
+    +'nobody is asked to approve it and nothing is recorded.',
+    async()=>{ await DB.set(['claims',id],null); toast('Expense withdrawn'); });
+}
+async function claimClearDeclined(id){
+  const c=(S.claims||{})[id]||{};
+  await DB.set(['claims',id,'declineHidden'],true);
+  await DB.set(['claims',id,'trail'],claimStamp(c,'Cleared off the member\'s list'));
+  toast('Cleared off your list'); rerender();
+}
+
+/* ---------------------- MEMBER: THE CARD ON THE CLUB TAB ------------------ */
+function claimsMemberHTML(){
+  const u=meU(); if(!u) return '';
+  const mine=claimsOf(u.name);
+  const shown=mine.filter(([,c])=>!(c.status==='declined'&&c.declineHidden));
+  const owed=claimOwed(mine);
+  const waiting=mine.filter(([,c])=>c.status==='waiting').reduce((a,[,c])=>a+c.amount,0);
+  const paid=mine.filter(([,c])=>c.status==='paid').reduce((a,[,c])=>a+c.amount,0);
+  let h=`<h2>💸 My expenses</h2>
+    <p class="muted">File what you paid for out of your own pocket and it goes straight to an admin — no paper,
+      no waiting until the end of the night to hand anything over.</p>
+    <div class="statgrid">
+      <div class="stat ${owed>0.005?'gold':'green'}"><div class="v">${fmt(owed)}</div>
+        <div class="l">The club owes me</div>
+        <div class="sub">approved, not paid out yet</div></div>
+      <div class="stat"><div class="v">${fmt(waiting)}</div>
+        <div class="l">Waiting for approval</div>
+        <div class="sub">not counted as owed until it's approved</div></div>
+      <div class="stat green"><div class="v">${fmt(paid)}</div>
+        <div class="l">Paid back to me</div></div>
+    </div>
+    <button class="btn" onclick="claimModal()">＋ File an expense</button>
+    <div style="height:12px"></div>`;
+  if(!shown.length) return h+`<div class="empty">You haven't filed any expenses yet.</div>`;
+  h+=shown.map(([id,c])=>{
+    const m=CLAIM_ST[c.status]||CLAIM_ST.waiting;
+    const editable=(c.status==='waiting'||c.status==='back');
+    return `<div class="card"${c.status==='declined'?' style="opacity:.55"':''}>
+      <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+        <b>${esc(c.cat||'')}</b><b class="goldtxt">${fmt(c.amount||0)}</b></div>
+      <div class="muted">Spent ${new Date(c.date||c.ts).toLocaleDateString('en-CA',{month:'short',day:'numeric',year:'numeric'})}${c.note?' · '+esc(c.note):''}</div>
+      <div style="margin-top:6px"><span class="voidtag" style="color:var(--${m.cls==='green'?'pos':m.cls==='gold'?'gold':'neg'})">${m.ic} ${m.lab}</span>
+        ${!c.receipt?' <span class="memberflag">⚠ NO RECEIPT ATTACHED</span>':''}</div>
+      ${c.status==='back'&&c.backNote?`<div style="margin-top:6px;color:var(--gold)">↩ ${esc(c.backNote)}</div>`:''}
+      ${c.status==='declined'&&c.declineNote?`<div style="margin-top:6px" class="neg">✕ ${esc(c.declineNote)}</div>`:''}
+      ${c.status==='paid'&&c.pay?`<div style="margin-top:6px" class="pos">💵 Paid ${c.pay.method==='cash'?'in cash':'by e-transfer'}
+        on ${new Date(c.pay.ts).toLocaleDateString('en-CA')} by ${esc(c.pay.by||'')}${c.pay.ref?' · ref '+esc(c.pay.ref):''}</div>`:''}
+      <div class="rowbtns" style="margin-top:8px">
+        ${c.receipt?`<button class="btn small gray" onclick="viewClaimReceipt('${id}')">📎 Receipt</button>`:''}
+        <button class="btn small gray" onclick="claimTrail('${id}')">🕘 History</button>
+        ${editable?`<button class="btn small gray" onclick="claimModal('${id}')">✎ Edit</button>`:''}
+        ${editable?`<button class="btn small red" onclick="claimWithdraw('${id}')">Withdraw</button>`:''}
+        ${c.status==='declined'?`<button class="btn small gray" onclick="claimClearDeclined('${id}')">Clear off my list</button>`:''}
+      </div></div>`;
+  }).join('');
+  return h;
+}
+
+/* ------------------------- ADMIN: THE CLAIMS SCREEN ----------------------- */
+function claimsBadge(){ const n=claimsWaiting().length; return n? ' ('+n+')' : ''; }
+function claimsHTML(){
+  const all=claimsAll();
+  const waiting=all.filter(([,c])=>c.status==='waiting');
+  const approved=all.filter(([,c])=>c.status==='approved');
+  const done=all.filter(([,c])=>c.status==='paid'||c.status==='declined');
+  const owedBy=claimOwedByMember();
+  const waitTot=waiting.reduce((a,[,c])=>a+c.amount,0);
+  const owedTot=claimOwed(all);
+  const card=([id,c],mode)=>{
+    const noRec=!c.receipt;
+    return `<div class="card">
+      <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+        <b>${esc(c.member||'')}</b><b class="goldtxt">${fmt(c.amount||0)}</b></div>
+      <div>${esc(c.cat||'')}</div>
+      <div class="muted">Spent ${new Date(c.date||c.ts).toLocaleDateString('en-CA',{month:'short',day:'numeric',year:'numeric'})}
+        · filed ${new Date(c.ts).toLocaleDateString('en-CA')}${c.note?' · '+esc(c.note):''}</div>
+      ${noRec?`<div style="margin-top:6px"><span class="memberflag">⚠ NO RECEIPT ATTACHED</span></div>`:''}
+      ${c.status==='paid'&&c.pay?`<div class="pos" style="margin-top:6px">💵 Paid ${c.pay.method==='cash'?'in cash':'by e-transfer'}
+        ${new Date(c.pay.ts).toLocaleDateString('en-CA')} by ${esc(c.pay.by||'')}${c.pay.ref?' · ref '+esc(c.pay.ref):''}</div>`:''}
+      ${c.status==='declined'?`<div class="neg" style="margin-top:6px">✕ Declined${c.declineNote?' — '+esc(c.declineNote):''}</div>`:''}
+      <div class="rowbtns noprint" style="margin-top:8px">
+        ${c.receipt?`<button class="btn small gray" onclick="viewClaimReceipt('${id}')">📎 Receipt</button>`
+                   :`<button class="btn small gray" disabled style="opacity:.4">No receipt</button>`}
+        <button class="btn small gray" onclick="claimTrail('${id}')">🕘 History</button>
+        ${mode==='waiting'?`<button class="btn small" onclick="claimApprove('${id}')">✔ Approve</button>
+          <button class="btn small gray" onclick="claimBackSheet('${id}')">↩ Send back</button>
+          <button class="btn small red" onclick="claimDeclineSheet('${id}')">✕ Decline</button>`:''}
+        ${mode==='approved'?`<button class="btn small" onclick="claimPaySheet('${jsq(c.member)}')">💵 Pay out</button>
+          <button class="btn small red" onclick="claimUnapprove('${id}')">↩ Undo approval</button>`:''}
+        ${c.status==='paid'?`<button class="btn small gray" onclick="claimReverse('${id}')">↩ Reverse the payout</button>`:''}
+        ${isAdmin()?`<button class="btn small red" onclick="claimDelete('${id}')">🗑</button>`:''}
+      </div></div>`;
+  };
+  return printHead('Member expense claims','As at '+new Date().toLocaleDateString('en-CA')) + `
+    <p class="muted noprint">Members file their own expenses on their Club tab. <b>Approving</b> is what puts the cost into the
+      Books — so the event's profit and loss is right the same night, whether or not anybody has been paid yet.
+      <b>Paying</b> is recorded separately, below, when the money actually changes hands. A claim only ever counts as
+      money owed once it is approved: waiting, sent-back and declined claims never appear in a total anywhere.</p>
+    <div class="statgrid">
+      <div class="stat ${waiting.length?'gold':'green'}"><div class="v">${waiting.length}</div>
+        <div class="l">Waiting for me</div><div class="sub">${fmt(waitTot)} — not owed until approved</div></div>
+      <div class="stat ${owedTot>0.005?'red':'green'}"><div class="v">${fmt(owedTot)}</div>
+        <div class="l">Cash the club owes members</div>
+        <div class="sub">approved and not yet paid out</div></div>
+      <div class="stat"><div class="v">${fmt(claimCashPaid())}</div>
+        <div class="l">Paid out in cash</div>
+        <div class="sub">out of the cash box — e-transfers are not counted here</div></div>
+    </div>
+    <h2>🕓 Waiting for approval</h2>
+    ${waiting.map(x=>card(x,'waiting')).join('')||'<div class="empty">Nothing waiting — you are all caught up.</div>'}
+    <h2>✔ Approved — still to pay</h2>
+    ${Object.keys(owedBy).length?`<div class="card"><table>
+      <tr><th>Member</th><th class="r">Owed</th><th class="noprint"></th></tr>
+      ${Object.entries(owedBy).sort((a,b)=>b[1]-a[1]).map(([n,v])=>
+        `<tr><td>${esc(n)}</td><td class="r neg"><b>${fmt(v)}</b></td>
+         <td class="r noprint"><button class="btn small" onclick="claimPaySheet('${jsq(n)}')">💵 Pay ${esc(n)}</button></td></tr>`).join('')}
+      <tr class="totrow"><td><b>Total</b></td><td class="r neg"><b>${fmt(owedTot)}</b></td><td></td></tr>
+    </table></div>`:''}
+    ${approved.map(x=>card(x,'approved')).join('')||'<div class="empty">Nothing approved and unpaid.</div>'}
+    <h2>📦 Settled &amp; declined</h2>
+    ${done.slice(0,40).map(x=>card(x,'done')).join('')||'<div class="empty">Nothing here yet.</div>'}
+    ${done.length>40?`<p class="muted">Showing the 40 most recent. Everything is kept.</p>`:''}
+    <button class="btn gray noprint" style="margin-top:8px" onclick="exportClaimsCSV()">⬇ Claims CSV</button>
+    <button class="btn gray noprint" onclick="window.print()">🖨 Print / Save as PDF</button>`;
+}
+
+/* --------------------------- ADMIN: THE ACTIONS --------------------------- */
+function claimApprove(id){
+  const c=(S.claims||{})[id]||{};
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>✔ Approve this expense</h3>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between"><span>${esc(c.member||'')}</span><b class="goldtxt">${fmt(c.amount||0)}</b></div>
+      <div class="muted">${esc(c.cat||'')} · spent ${new Date(c.date||c.ts).toLocaleDateString('en-CA')}${c.note?' · '+esc(c.note):''}</div>
+      ${!c.receipt?'<div style="margin-top:6px"><span class="memberflag">⚠ NO RECEIPT ATTACHED</span></div>':''}
+    </div>
+    <label>Amount you are approving $</label>
+    <input id="ca_amt" type="text" inputmode="decimal" value="${c.amount||''}">
+    <p class="muted" style="margin:2px 0 8px">Change it if you agreed a different figure — the change is written into
+      the claim's history with your name on it, and the member sees it.</p>
+    <div class="card" style="border-color:var(--gold)">
+      <b>What this does</b>
+      <p class="muted" style="margin:6px 0 0">Writes a <b>${esc(c.cat||'')}</b> expense into the Books dated
+        ${new Date(c.date||c.ts).toLocaleDateString('en-CA')}, so the event's P&amp;L is right straight away, and adds
+        ${fmt(c.amount||0)} to what the club owes ${esc(c.member||'')}. It does <b>not</b> pay anybody — you record that
+        separately when the money actually changes hands.</p>
+    </div>
+    <button class="btn" onclick="claimApproveGo('${id}')">✔ Approve and put it in the books</button>
+    <div style="height:8px"></div>
+    <button class="btn gray" onclick="closeModal()">Cancel</button>`);
+}
+async function claimApproveGo(id){
+  const c=(S.claims||{})[id]; if(!c) return;
+  const amt=parseFloat(String(($('ca_amt')||{}).value||c.amount).replace(/[^0-9.]/g,''))||0;
+  if(amt<=0){ toast('Enter the amount you are approving',1); return; }
+  const changed=Math.abs(amt-(c.amount||0))>0.005;
+  // The book entry — same shape as any expense typed in on the Books tab, so it
+  // flows into the year totals, the category rows and the Event P&L untouched.
+  const txnId=c.txnId||newId();
+  await DB.set(['finance','txns',txnId],{
+    ts:c.date||c.ts, kind:'expense', cat:c.cat, amount:Math.round(amt*100)/100,
+    member:c.member||null, sponsor:null, inkind:false,
+    note:(c.note?c.note+' — ':'')+'member expense claim', by:meU().name,
+    invoice:c.receipt||null, claim:id});
+  await DB.set(['claims',id],{...c, amount:Math.round(amt*100)/100, status:'approved',
+    txnId, approvedBy:meU().name, approvedTs:Date.now(), backNote:null,
+    trail:claimStamp(c,'Approved'+(changed?' — '+fmt(c.amount||0)+' → '+fmt(amt):'')+' · written into the books')});
+  closeModal(); toast('Approved — '+fmt(amt)+' is now in the books'); rerender();
+}
+function claimUnapprove(id){
+  const c=(S.claims||{})[id]||{};
+  pinConfirm('Undo the approval of '+esc(c.member||'')+"'s "+fmt(c.amount||0)+' expense? '
+    +'The book entry comes straight back out of the club balance and the claim goes back to waiting.',
+    async()=>{
+      if(c.txnId) await DB.set(['finance','txns',c.txnId],null);
+      await DB.set(['claims',id],{...c, status:'waiting', txnId:null, approvedBy:null, approvedTs:null,
+        trail:claimStamp(c,'Approval undone — book entry removed')});
+      toast('Approval undone');
+    });
+}
+function claimBackSheet(id){
+  const c=(S.claims||{})[id]||{};
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>↩ Send it back to ${esc(c.member||'')}</h3>
+    <p class="muted">Use this when something needs fixing — the wrong date, the wrong category, a missing receipt.
+      They see your note, fix it and send it back in. Nothing is recorded in the books and nothing is counted as owed
+      in the meantime.</p>
+    <label>What needs fixing?</label>
+    <textarea id="cb_note" rows="3" placeholder="e.g. Can you attach the Amazon receipt for this one?"></textarea>
+    <div style="height:10px"></div>
+    <button class="btn" onclick="claimBackGo('${id}')">↩ Send it back</button>
+    <div style="height:8px"></div>
+    <button class="btn gray" onclick="closeModal()">Cancel</button>`);
+}
+async function claimBackGo(id){
+  const c=(S.claims||{})[id]; if(!c) return;
+  const n=(($('cb_note')||{}).value||'').trim().slice(0,400);
+  if(!n){ toast('Say what needs fixing so they know',1); return; }
+  await DB.set(['claims',id],{...c, status:'back', backNote:n,
+    trail:claimStamp(c,'Sent back — '+n)});
+  closeModal(); toast('Sent back to '+c.member); rerender();
+}
+let _clDec='clear';
+function claimDeclineSheet(id){
+  const c=(S.claims||{})[id]||{};
+  _clDec='clear';
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>✕ Decline this expense</h3>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between"><span>${esc(c.member||'')}</span><b>${fmt(c.amount||0)}</b></div>
+      <div class="muted">${esc(c.cat||'')} · ${new Date(c.date||c.ts).toLocaleDateString('en-CA')}</div>
+    </div>
+    <p class="muted">Declining drops it out of every total <b>straight away</b> — on your side and on theirs. It never
+      sits there looking like the club still owes them. Nothing goes into the books.</p>
+    <label>Why are you declining it? (they will see this)</label>
+    <textarea id="cd_note" rows="3" placeholder="e.g. Spoke to you — the club already paid this one directly"></textarea>
+    <label>And on their list…</label>
+    <div class="payrow">
+      <button type="button" id="cdClear" class="on" onclick="claimDecPick('clear')">Clear it off completely</button>
+      <button type="button" id="cdKeep" onclick="claimDecPick('keep')">Leave it showing, greyed out</button>
+    </div>
+    <p class="muted" id="cdHelp" style="margin:0 0 10px">It disappears from their list altogether. The full record —
+      including this decline and your reason — is kept in the claim's history either way.</p>
+    <button class="btn red" onclick="claimDeclineGo('${id}')">✕ Decline it</button>
+    <div style="height:8px"></div>
+    <button class="btn gray" onclick="closeModal()">Cancel</button>`);
+}
+function claimDecPick(m){
+  _clDec=m;
+  $('cdClear').classList.toggle('on',m==='clear');
+  $('cdKeep').classList.toggle('on',m==='keep');
+  $('cdHelp').textContent = m==='clear'
+    ? 'It disappears from their list altogether. The full record — including this decline and your reason — is kept in the claim\'s history either way.'
+    : 'It stays on their list greyed out with your reason on it, so they can see what happened. It is not counted as owed either way.';
+}
+async function claimDeclineGo(id){
+  const c=(S.claims||{})[id]; if(!c) return;
+  const n=(($('cd_note')||{}).value||'').trim().slice(0,400);
+  if(!n){ toast('Give a reason — they will see it',1); return; }
+  if(c.txnId) await DB.set(['finance','txns',c.txnId],null);   // never leave a book entry behind
+  await DB.set(['claims',id],{...c, status:'declined', declineNote:n, txnId:null,
+    declineHidden:_clDec==='clear',
+    trail:claimStamp(c,'Declined — '+n+(_clDec==='clear'?' · cleared off their list':' · left showing, greyed out'))});
+  closeModal(); toast('Declined — it is off every total'); rerender();
+}
+
+/* ------------------------------ PAYING IT OUT ----------------------------- */
+let _clPay={member:'', method:'cash'};
+function claimPaySheet(member){
+  const list=claimsAll().filter(([,c])=>c.status==='approved'&&c.member===member);
+  if(!list.length){ toast('Nothing approved and unpaid for '+member,1); return; }
+  const tot=list.reduce((a,[,c])=>a+c.amount,0);
+  _clPay={member, method:'cash'};
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>💵 Pay ${esc(member)}</h3>
+    <div class="card">
+      ${list.map(([,c])=>`<div style="display:flex;justify-content:space-between;padding:3px 0">
+        <span>${esc(c.cat)} <span class="muted">${new Date(c.date||c.ts).toLocaleDateString('en-CA')}</span></span>
+        <b>${fmt(c.amount)}</b></div>`).join('')}
+      <div style="display:flex;justify-content:space-between;border-top:1px solid var(--line);margin-top:6px;padding-top:6px;font-size:18px">
+        <b>Total to pay</b><b class="goldtxt">${fmt(tot)}</b></div>
+    </div>
+    <label>How are you paying it?</label>
+    <div class="payrow">
+      <button type="button" id="cpCash" class="on" onclick="claimPayPick('cash')">💵 Cash</button>
+      <button type="button" id="cpEt" onclick="claimPayPick('etransfer')">📱 e-Transfer</button>
+    </div>
+    <p class="muted" id="cpHelp" style="margin:0 0 10px">Cash comes out of the club's cash box, so it shows on the
+      Money screen as cash that has gone out.</p>
+    <label>Date it was paid</label>
+    <input id="cp_date" type="date" value="${dstr(Date.now())}">
+    <label>Reference (optional)</label>
+    <input id="cp_ref" placeholder="e-transfer confirmation number, cheque number…">
+    <label>Who is paying it out</label>
+    <input value="${esc(meU().name)}" disabled style="opacity:.75">
+    <p class="muted" style="margin:2px 0 10px">Taken from your login, so the record always shows whether it was you or
+      Vito who handed the money over.</p>
+    <button class="btn" onclick="claimPayGo()">✓ Record the payout — ${fmt(tot)}</button>
+    <div style="height:8px"></div>
+    <button class="btn gray" onclick="closeModal()">Cancel</button>`);
+}
+function claimPayPick(m){
+  _clPay.method=m;
+  $('cpCash').classList.toggle('on',m==='cash');
+  $('cpEt').classList.toggle('on',m==='etransfer');
+  $('cpHelp').textContent = m==='cash'
+    ? "Cash comes out of the club's cash box, so it shows on the Money screen as cash that has gone out."
+    : 'An e-transfer leaves the bank account, not the cash box, so it is deliberately kept off the cash figures on the Money screen.';
+}
+async function claimPayGo(){
+  const {member,method}=_clPay;
+  const list=claimsAll().filter(([,c])=>c.status==='approved'&&c.member===member);
+  if(!list.length){ toast('Nothing left to pay',1); return; }
+  const d=($('cp_date')||{}).value;
+  const ts=d? new Date(d+'T12:00').getTime() : Date.now();
+  const ref=(($('cp_ref')||{}).value||'').trim().slice(0,80);
+  const by=meU().name;
+  const pay={method, ts, ref:ref||null, by};
+  let tot=0;
+  for(const [id,c] of list){
+    tot+=c.amount;
+    await DB.set(['claims',id],{...c, status:'paid', pay,
+      trail:claimStamp(c,'Paid '+fmt(c.amount)+' by '+(method==='cash'?'cash':'e-transfer')
+        +' on '+dstr(ts)+(ref?' · ref '+ref:''))});
+  }
+  closeModal();
+  toast('Recorded — '+fmt(tot)+' paid to '+member+' by '+(method==='cash'?'cash':'e-transfer'));
+  rerender();
+}
+function claimReverse(id){
+  const c=(S.claims||{})[id]||{};
+  pinConfirm('Reverse the payout on '+esc(c.member||'')+"'s "+fmt(c.amount||0)+' expense? '
+    +'It goes back to being approved and unpaid, and shows again as cash the club owes them. '
+    +'The book entry is not touched — the club still incurred the cost.',
+    async()=>{
+      await DB.set(['claims',id],{...c, status:'approved', pay:null,
+        trail:claimStamp(c,'Payout reversed — back to approved and unpaid')});
+      toast('Payout reversed');
+    });
+}
+function claimDelete(id){
+  const c=(S.claims||{})[id]||{};
+  pinConfirm('Delete '+esc(c.member||'')+"'s "+fmt(c.amount||0)+' expense claim for good?'
+    +(c.txnId?' The book entry it created comes out of the club balance too.':'')
+    +' The claim and its whole history disappear — declining it instead keeps the record.',
+    async()=>{
+      if(c.txnId) await DB.set(['finance','txns',c.txnId],null);
+      await DB.set(['claims',id],null);
+      closeModal(); toast('Claim deleted');
+    });
+}
+
+/* ------------------------------ AUDIT TRAIL ------------------------------- */
+function claimTrail(id){
+  const c=(S.claims||{})[id]||{};
+  const t=(Array.isArray(c.trail)?c.trail:[]).slice().sort((a,b)=>a.ts-b.ts);
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>🕘 History — ${esc(c.member||'')} · ${fmt(c.amount||0)}</h3>
+    <p class="muted">${esc(c.cat||'')} · spent ${new Date(c.date||c.ts).toLocaleDateString('en-CA')}</p>
+    <div class="card">
+      ${t.length? t.map(x=>`<div style="padding:6px 0;border-bottom:1px solid var(--line)">
+        <b>${esc(x.what||'')}</b>
+        <div class="muted">${new Date(x.ts).toLocaleString('en-CA')} · ${esc(x.by||'')}</div></div>`).join('')
+        : '<div class="empty">No history recorded.</div>'}
+    </div>
+    <p class="muted">Every step is written here automatically — filed, edited, sent back, approved, declined, paid,
+      reversed — with who did it and when. Nobody can edit or clear this list, admin included.</p>
+    <button class="btn gray" onclick="closeModal()">Close</button>`);
+}
+async function viewClaimReceipt(id){
+  const c=(S.claims||{})[id];
+  if(!c||!c.receipt) return;
+  const head=`<h3><button class="x" onclick="closeModal()">✕</button>📎 ${esc(c.member||'')} — ${esc(c.cat||'')} · ${fmt(c.amount||0)}</h3>`;
+  const note=c.note?'<p class="muted">'+esc(c.note)+'</p>':'';
+  if(String(c.receipt).startsWith('data:')){
+    openModal(head+`<img src="${c.receipt}" style="width:100%;border-radius:10px">`+note); return;
+  }
+  openModal(head+'<div class="empty">Loading the receipt…</div>');
+  const f=await fileLoad(String(c.receipt).slice(5));
+  if(!f||!f.data){ openModal(head+'<div class="empty">Could not load the receipt — check the connection and try again.</div>'+note); return; }
+  const dlb=`<a class="btn gray" style="display:block;text-align:center;text-decoration:none;margin-top:8px" href="${f.data}" download="${esc(f.name||'receipt')}">⬇ Download ${esc(f.name||'file')}</a>`;
+  if((f.type||'').startsWith('image/')) openModal(head+`<img src="${f.data}" style="width:100%;border-radius:10px">`+note+dlb);
+  else if(f.type==='application/pdf') openModal(head+`<embed src="${f.data}" type="application/pdf" style="width:100%;height:60vh;border-radius:10px">`+note+dlb);
+  else openModal(head+`<div class="card">📄 <b>${esc(f.name||'document')}</b></div>`+note+dlb);
+}
+function exportClaimsCSV(){
+  const rows=[['Filed','Member','Category','Date of expense','Amount','Status','Receipt','Note',
+    'Approved by','Paid method','Paid date','Paid by','Reference','Decline reason']];
+  claimsAll().slice().reverse().forEach(([,c])=>rows.push([
+    new Date(c.ts).toLocaleDateString('en-CA'), c.member||'', c.cat||'',
+    new Date(c.date||c.ts).toLocaleDateString('en-CA'), c.amount||0,
+    (CLAIM_ST[c.status]||{}).lab||c.status||'', c.receipt?'Y':'NO RECEIPT', c.note||'',
+    c.approvedBy||'', c.pay?(c.pay.method==='cash'?'Cash':'e-Transfer'):'',
+    c.pay?new Date(c.pay.ts).toLocaleDateString('en-CA'):'', c.pay?c.pay.by||'':'',
+    c.pay?c.pay.ref||'':'', c.declineNote||'']));
+  dl('three-aces-expense-claims.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'));
+}
+
+/* ------------- ONE-TIME TIDY-UP: the picnic expense category --------------
+   "Picnic - Expenses" sat apart from the three "Annual Picnic - …" rows even
+   though it is the same event, so the picnic never added up in one place on
+   the report. Renaming it moves the three imported entries with it.        */
+let _finMigrDone=false;
+async function finMigrate(){
+  if(_finMigrDone || !S.finance || !isAdmin()) return;
+  const F=S.finance;
+  if(F.migr318) { _finMigrDone=true; return; }
+  _finMigrDone=true;
+  const OLD='Picnic - Expenses', NEW='Annual Picnic - General Expenses';
+  const cats=[...((F.cats&&F.cats.expense)||[])];
+  const i=cats.indexOf(OLD);
+  if(i>=0){
+    cats[i]=NEW;
+    await DB.set(['finance','cats','expense'],cats);
+    const hid=((F.catsHidden||{}).expense)||[];
+    if(hid.includes(OLD)) await DB.set(['finance','catsHidden','expense'],hid.map(x=>x===OLD?NEW:x));
+    for(const [id,tx] of Object.entries(F.txns||{}))
+      if(tx.cat===OLD) await DB.set(['finance','txns',id,'cat'],NEW);
+  }
+  await DB.set(['finance','migr318'],true);
+}
+
 /* ------------------------------- BOOT -------------------------------------- */
 DB.init(()=>{
   const saved=sessionStorage.getItem('ta_me');
   if(saved && S.users[saved] && !me) me=saved;
   rerender();
+  finMigrate();
 });
 </script>
 </body>
