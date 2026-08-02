@@ -250,6 +250,98 @@
   .toast{position:fixed;top:60px;left:50%;transform:translateX(-50%);background:var(--green);color:#fff;
     padding:12px 22px;border-radius:24px;font-weight:700;z-index:200;display:none;box-shadow:0 4px 18px rgba(0,0,0,.5);}
   .toast.err{background:var(--red);}
+
+  /* ------------------------------ THE PICNIC ------------------------------
+     Two visual jobs here. One: make "not counted" look unmistakably unlike
+     "counted zero", because the whole module hangs on that difference — grey
+     and hollow versus red and solid. Two: make a job row tappable with a
+     thumb while standing in a shed, so the tick box is 30px and the whole
+     row is not a link.                                                     */
+  .picbar{height:8px;border-radius:5px;background:var(--line2);overflow:hidden;margin-top:6px;}
+  .picbar i{display:block;height:100%;background:var(--pos);transition:width .25s;}
+  .picbar.part i{background:var(--gold);}
+  .picbin{font-size:11px;font-weight:900;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);
+    padding:12px 0 4px;border-bottom:1px solid var(--line2);margin-bottom:2px;}
+  .picit{padding:9px 0;border-bottom:1px solid var(--line2);}
+  .picit:last-child{border-bottom:0;}
+  .picit.sub{padding-left:18px;border-left:2px solid var(--line2);}
+  .picr1{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+  .picr2{display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap;}
+  .picnm{font-weight:700;font-size:14px;flex:1;min-width:0;}
+  .picneed{font-size:12px;color:var(--muted);margin-top:2px;}
+  .pictag{font-size:10px;font-weight:900;letter-spacing:.5px;padding:3px 7px;border-radius:6px;white-space:nowrap;}
+  .pictag.ok{background:var(--memberbg);color:var(--membertx);}
+  .pictag.short{background:var(--red);color:#fff;}
+  .pictag.un{background:var(--panel2);color:var(--muted);border:1px dashed var(--line);}
+  .pictag.over{background:#fdf0d0;color:var(--gold);}
+  /* The counter. One segmented control so the two buttons and the number read
+     as a single thing you operate with a thumb, standing at the bin.        */
+  .picstep{display:flex;align-items:stretch;border:1px solid var(--line);border-radius:10px;
+    overflow:hidden;background:var(--panel2);flex:none;}
+  .picstep button{width:38px;border:0;background:none;color:var(--text);font-size:20px;font-weight:800;
+    line-height:1;cursor:pointer;padding:0;font-family:inherit;}
+  .picstep button:active{background:var(--line2);}
+  .picstep input{width:52px;text-align:center;font-size:16px;font-weight:800;padding:8px 0;
+    border:0;border-left:1px solid var(--line);border-right:1px solid var(--line);
+    background:var(--panel);color:var(--text);font-family:inherit;}
+  .picstep input.un{color:var(--muted);font-weight:400;background:var(--panel2);}
+  /* The shopping-list quantity — the number you actually have to buy.       */
+  .picq{min-width:38px;padding:6px 9px;border-radius:9px;background:var(--red);color:#fff;
+    font-size:16px;font-weight:900;text-align:center;flex:none;}
+  .picjob{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--line2);}
+  .picjob:last-child{border-bottom:0;}
+  .pictick{width:30px;height:30px;flex:none;border-radius:8px;border:2px solid var(--line);background:var(--panel);
+    display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:900;line-height:1;
+    cursor:pointer;user-select:none;}
+  .pictick.on{background:var(--pos);border-color:var(--pos);color:#fff;}
+  .pictick.locked{cursor:default;opacity:.55;}
+  .picjob.done .pictx{color:var(--muted);text-decoration:line-through;}
+  .pictx{flex:1;min-width:0;font-size:14px;line-height:1.35;word-break:break-word;}
+  .picby{display:block;font-size:11px;color:var(--muted);margin-top:2px;text-decoration:none!important;}
+  .picx{background:none;border:0;color:var(--muted);font-size:17px;cursor:pointer;padding:0 2px;flex:none;}
+  .picperson{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line2);cursor:pointer;}
+  .picperson:last-child{border-bottom:0;}
+  .picav{width:32px;height:32px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    font-size:12px;font-weight:900;color:#fff;letter-spacing:.3px;}
+  .picav.a1{background:#00813e;} .picav.a2{background:#ce2b37;} .picav.a3{background:#9a7300;}
+  .picav.a4{background:#2b6cb0;} .picav.a5{background:#6b46c1;}
+  .picpn{flex:1;min-width:0;font-weight:700;font-size:14px;}
+  .picpc{display:block;font-weight:400;}
+  .picpc{font-size:12px;color:var(--muted);margin-top:1px;}
+  .picar{color:var(--muted);font-size:20px;font-weight:700;flex:none;}
+  .picwhen{font-size:12px;font-weight:900;color:var(--gold);white-space:nowrap;min-width:118px;}
+  .picreq{display:inline-block;background:var(--panel2);border:1px solid var(--line2);border-radius:6px;
+    padding:2px 7px;font-size:11px;color:var(--muted);margin:3px 4px 0 0;}
+  .picbuy{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 0;
+    border-bottom:1px solid var(--line2);}
+  .picbuy:last-child{border-bottom:0;}
+  .card.picdone{opacity:.6;border-left:4px solid var(--pos);}
+  body.dark .pictag.un{background:#2a2a2a;}
+  body.dark .pictag.over{background:#3a3320;}
+  /* --- v3.20: the bin as a drawer you open, and arrows to sort by hand ---
+     A bin header has to work as a summary on its own, because most of the
+     time every drawer is shut and the header is ALL you see — so it carries
+     the count, the shortfall and the not-counted tally, not just a name.  */
+  .picbinhd{display:flex;align-items:center;gap:9px;padding:13px 0;cursor:pointer;
+    border-bottom:1px solid var(--line2);}
+  .picbinhd:last-child{border-bottom:0;}
+  .picchev{color:var(--muted);font-size:13px;width:12px;flex:none;text-align:center;}
+  .picbinnm{font-weight:800;font-size:14px;flex:none;}
+  .picbinct{font-size:11.5px;color:var(--muted);flex:1;min-width:0;}
+  .picbinct b{color:var(--red);font-weight:800;}
+  .picbinbody{border-bottom:1px solid var(--line2);padding-bottom:4px;}
+  .picbinbody:last-child{border-bottom:0;}
+  /* The reorder arrows. Deliberately small and quiet — they are an admin
+     tidying job, not something you hit while counting a bin.              */
+  .picmv{display:flex;flex-direction:column;gap:1px;flex:none;}
+  .picmv button{width:26px;height:17px;border:1px solid var(--line);background:var(--panel2);
+    color:var(--muted);font-size:9px;line-height:1;cursor:pointer;padding:0;font-family:inherit;
+    border-radius:5px;}
+  .picmv button:disabled{opacity:.3;cursor:default;}
+  .picmv button:active:not(:disabled){background:var(--line2);}
+  .picfound{font-size:11px;font-weight:900;color:var(--gold);white-space:nowrap;}
+  .picadd{background:var(--memberbg);color:var(--membertx);font-size:10px;font-weight:900;
+    padding:2px 6px;border-radius:5px;letter-spacing:.4px;}
 </style>
 </head>
 <body>
@@ -354,7 +446,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.18';
+const APP_VERSION = 'v3.20';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -667,6 +759,11 @@ async function fileLoad(id){
 /* ============================== APP STATE ================================= */
 let me=null;            // current user id
 let view='sell', adminTab='report', cart=[], selCat='All', payMethod='Cash', openItem=null, cartBuyer='';
+let picTab='supplies', picFilt='all', picWho='', picMemTab='mine';
+/* v3.20. `picOpen` is which bin drawers are open — deliberately NOT saved to
+   the database, because it is where one person is looking right now, not a
+   fact about the picnic.                                                   */
+let picQ='', picOpen={}, picStockView='bins';
 /* --------------------------- HOW A SALE WAS PAID ---------------------------
    Cash      — the SELLER walked away holding the money, so the seller owes the
                club everything they collected minus the profit share they keep.
@@ -887,6 +984,7 @@ function saleLines(sales){
 
 /* ============================== RENDERING ================================= */
 function rerender(){
+  const _fsnap=picFocusSnap();   // taken before anything is torn down
   updateBanner();
   if(!_ready) return;
   applyLogo();
@@ -898,7 +996,7 @@ function rerender(){
   $('chipName').textContent=meU().name;
   renderNav();
   if(view==='mymoney' && !((meU().profitPct||0)>0) && !(tabDetail(meU().name).charged>0.005)) view='sell';
-  if(view==='myclub' && !clubRecOn()) view='sell';
+  if(view==='myclub' && !clubRecOn() && !picOn()) view='sell';
   ['sell','stock','saleslog','mymoney','myclub','admin'].forEach(v=>$(v).classList.toggle('active', v===view));
   if(view==='sell') renderSell();
   if(view==='stock') renderStock();
@@ -907,6 +1005,7 @@ function rerender(){
   if(view==='myclub') renderMyClub();
   if(view==='admin') renderAdmin();
   renderCartBar();
+  picRefocus(_fsnap);   // the poll redraws everything; give the search box its caret back
 }
 function showLogin(){
   $('appHeader').style.display='none'; $('nav').style.display='none';
@@ -967,7 +1066,7 @@ function renderNav(){
   if((meU().profitPct||0)>0 || tabDetail(meU().name).charged>0.005) tabs.push(['mymoney','💰','My $']);
   // An admin is a member of the club as well: their own attendance and their own
   // sponsor are theirs to see, the same as everybody else's.
-  if(clubRecOn()) tabs.push(['myclub','🎟','Club']);
+  if(clubRecOn()||picOn()) tabs.push(['myclub','🎟','Club']);
   if(isAdmin()) tabs.push(['admin','⚙️','Admin']);
   $('nav').innerHTML=tabs.map(([v,ic,l])=>
     `<button class="${view===v?'on':''}" onclick="go('${v}')"><span class="ic">${ic}</span>${l}</button>`).join('');
@@ -3157,6 +3256,13 @@ async function attMeetSave(mi,reset){
 function renderMyClub(){
   const u=meU(), yr=new Date().getFullYear();
   const A=S.attendance, F=S.finance;
+  /* The Club tab now has two reasons to exist. Club records may be switched
+     off entirely and yet a picnic is running — in that case this tab IS the
+     picnic, and none of the attendance-and-sponsor machinery below applies. */
+  if(!clubRecOn()){
+    $('myClubBody').innerHTML=`<h2>🎪 ${esc(u.name)} — the picnic</h2>`+picnicMemberHTML();
+    return;
+  }
   // The point-of-sale person runs the till on the day. They are not a club
   // member: no meeting attendance is taken for them and no sponsor is expected.
   const staff=isStaffName(u.name);
@@ -3234,6 +3340,7 @@ function renderMyClub(){
       ${gotLast>0.005?`<p class="muted">Last season (${sponsorYearLabel(sy-1)}) you secured ${fmt(gotLast)}. That one is closed — it does not carry over.</p>`:''}`;
   }
   html+=claimsMemberHTML();
+  html+=picnicMemberHTML();
   $('myClubBody').innerHTML=html;
 }
 
@@ -3436,6 +3543,7 @@ function renderMyMoney(){
 function renderAdmin(){
   if(!isAdmin()){ view='sell'; rerender(); return; }
   let tabs=[['report','Report'],['money','Money'],['books','Books'],['claims','Claims'+claimsBadge()],['events','Event P&L'],['attend','Attendance'],['reorder','Reorder'],['restock','Restock'],['items','Items'],['users','Users'],['settings','Settings'],['data','Data']];
+  tabs.splice(tabs.findIndex(([t])=>t==='reorder'),0,['picnic','Picnic'+picnicBadge()]);
   if(!clubRecOn()){
     tabs=tabs.filter(([t])=>t!=='books'&&t!=='attend'&&t!=='events'&&t!=='claims');
     if(adminTab==='books'||adminTab==='attend'||adminTab==='events'||adminTab==='claims') adminTab='report';
@@ -3449,6 +3557,7 @@ function renderAdmin(){
   if(adminTab==='claims') b.innerHTML=claimsHTML();
   if(adminTab==='events') b.innerHTML=eventsHTML();
   if(adminTab==='attend') b.innerHTML=attendHTML();
+  if(adminTab==='picnic') b.innerHTML=picnicHTML();
   if(adminTab==='reorder') b.innerHTML=reorderHTML();
   if(adminTab==='restock') b.innerHTML=restockHTML();
   if(adminTab==='items') b.innerHTML=itemsHTML();
@@ -5503,6 +5612,1334 @@ function exportClaimsCSV(){
     c.pay?new Date(c.pay.ts).toLocaleDateString('en-CA'):'', c.pay?c.pay.by||'':'',
     c.pay?c.pay.ref||'':'', c.declineNote||'']));
   dl('three-aces-expense-claims.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'));
+}
+
+/* ========================= THE PICNIC MODULE (v3.19) ======================
+   Three things live in here, and they are all the same picnic:
+
+     SUPPLIES  — the seven bins in Luca's mezzanine. Every item carries a
+                 TARGET ("how many we need") that survives from year to year,
+                 and a COUNT ("how many are actually there") that is wiped at
+                 the start of each new picnic year. Subtract one from the
+                 other and you have the shopping list; nobody types it.
+
+     JOBS      — the Master List, as real to-do lists. Every job belongs to
+                 one person (or to "Anyone"). Only an admin may add, remove or
+                 reassign a job. Everybody can SEE every job — that is the
+                 point of a club list — but a member may only tick their own.
+
+     THE DAY   — the running order, 7:45am to 9pm, with who is on each station
+                 and what that station needs. An admin can move the times and
+                 change who is on. It is the one part members cannot edit at
+                 all, because a timetable that anyone can shift is not a
+                 timetable.
+
+   THE ONE RULE THAT MATTERS FOR COUNTING: "not counted yet" and "counted, and
+   there are none" are DIFFERENT FACTS. A missing `have` means nobody has been
+   to that bin — it is grey, and it never appears on the shopping list. A
+   `have` of 0 means somebody looked and the bin was empty — it is red, and it
+   does. A spreadsheet cannot tell those two apart, which is exactly why the
+   count has always been guesswork.
+
+   Firebase drops null values on write, so an absent `have` key IS the "not
+   counted" state — no extra flag needed, and clearing a count is a delete. */
+
+const PIC_UNIT_PLACEHOLDER='';
+
+/* --- the Master List of 26 July 2026, which is the newer of Luca's two files.
+   [bin, name, need, unit, per, note]  — `per` 0 means the item is not packaged.
+   A name beginning '>' is a piece of the Three Aces Toolkit above it.        */
+const PIC_SEED_ITEMS=[
+  [1,'Paper Towels',8,'rolls',0,''],
+  [1,'Baby Wipes',4,'packs',0,''],
+  [1,'Napkins',5,'packs',240,'Master List says 1,200 napkins — that is 5 packs of 240'],
+  [2,'Espresso Cups',6,'sleeves',50,'Master List says 300 cups — that is 6 sleeves of 50'],
+  [2,'Sugar',1000,'packs',0,''],
+  [2,'Splenda (sweetener)',500,'packs',0,'Called "Sweetner" on the old spreadsheet'],
+  [2,'Stir Sticks',1000,'',0,''],
+  [2,'Hand Sanitizer',6,'bottles',0,''],
+  [2,'Power Bars',2,'',0,'Old spreadsheet said 3 — Master List says 2'],
+  [2,'First Aid Kit',1,'',0,''],
+  [3,'Forks',400,'',0,''],
+  [3,'Clean Rags for Clean Up',60,'',0,''],
+  [3,'Nitrile Gloves (Large)',3,'boxes',100,'Calogero separately buys 1 small + 1 medium each year — that is a job, not stock'],
+  [3,'Parchment Paper',2,'rolls',0,''],
+  [3,'Aluminum Foil (extra wide)',2,'rolls',0,''],
+  [3,'Large Aluminum Trays',6,'',0,'Old spreadsheet said 5 — Master List says 6'],
+  [4,'Pasta Bowls',400,'',0,'Old spreadsheet said 300 — Master List says 400'],
+  [4,'Tongs',8,'',0,''],
+  [4,'Pasta Ladle',3,'',0,''],
+  [4,'Soup Ladle',1,'',0,''],
+  [4,'Butcher Knives (watermelon)',2,'',0,''],
+  [4,'Cutting Boards',2,'',0,''],
+  [4,'Luncheon Plates',200,'',0,'Master List says ordered — old spreadsheet said none in the bin. Worth checking they arrived'],
+  [5,'Bocce Sets with Measuring Tapes',3,'sets',0,''],
+  [5,'Kids Medals for Games',40,'',0,''],
+  [5,'Tug of War Rope',1,'',0,''],
+  [5,'Raffle Ticket Prize Bin',1,'',0,''],
+  [5,'Raffle Tickets — new rolls',5,'rolls',0,'Old spreadsheet counted 4: blue 2, orange 1, green 1'],
+  [5,'Raffle Tickets ripped into 10s',0,'stacks',0,'Paperclipped stacks of ten, ready to sell'],
+  [5,'Notebooks',3,'',0,''],
+  [5,'Good Job Raffle Bags',3,'',0,''],
+  [5,'Three Aces Toolkit',1,'',0,'The twelve pieces below live inside it'],
+  [5,'>Hammer',1,'',0,''],
+  [5,'>Nails',1,'packs',0,''],
+  [5,'>Multibit Screwdriver',1,'',0,''],
+  [5,'>Zip Ties Long',1,'packs',100,''],
+  [5,'>Zip Ties Short',1,'packs',40,''],
+  [5,'>Scissors',2,'',0,''],
+  [5,'>Exacto Knife',1,'',0,''],
+  [5,'>Measuring Tape',1,'',0,''],
+  [5,'>Sharpie',1,'',0,''],
+  [5,'>Plyers',1,'',0,''],
+  [5,'>Channel Locks',1,'',0,''],
+  [5,'>Adjustable Wrench',1,'',0,''],
+  [6,'Clear Clip Board Holders',2,'',0,''],
+  [6,'Pens',11,'',0,'Kept with the clear clip board holders'],
+  [6,'Sharpies',3,'',0,'Kept with the clear clip board holders'],
+  [6,'Black Clip Board Holders',2,'',0,''],
+  [6,'Fanny Packs',4,'',0,'Old spreadsheet said 2 — Master List says 4'],
+  [6,'Slushie Label Packs',4,'packs',15,'60 labels in total'],
+  [6,'Clear Packing Tape Rolls',2,'rolls',0,''],
+  [6,'Duct Tape Rolls',2,'rolls',0,''],
+  [6,'Two Sided Tape Roll',1,'rolls',0,''],
+  [7,'Three Aces Frames — stuffed',26,'',0,'Check the status of the inserts'],
+];
+
+/* [who, text, alreadyDone] — straight off the Master List, (Completed) and all. */
+const PIC_SEED_JOBS=[
+  ['Luca','Club tent for the games tent',0],
+  ['Luca','2 extension cords (multi prong)',0],
+  ['Luca','Other flags?',0],
+  ['Luca','Folding tables x 4',0],
+  ['Luca','Bring beach chairs x 2',0],
+  ['Luca','Bring megaphone',0],
+  ['Luca','Get Charlie the list of sponsor names for the plaques',1],
+  ['Luca','Bring pylons for bocce x 10',0],
+  ['Luca','Bring slushie cups from the mezzanine (check stock)',0],
+  ['Luca','Speaker with microphone and power bar — test Vito\'s phone for music',0],
+  ['Luca','Test microphone and speaker',0],
+  ['Luca','Create the PowerPoint sponsor slide show',0],
+  ['Luca','Bring and load the computer for the sponsor PowerPoint',0],
+  ['Luca','Confirm tent and slushie machine from Fun Times with Maurizio',0],
+  ['Luca','Welcome letter for Charlie, including all sponsor names',0],
+  ['Luca','Cash float — $500 in $5s, $10s and $20s',0],
+  ['Luca','Print raffle signs — 10 tickets for $20 or 30 for $40',1],
+  ['Luca','Updated clothing price signs x 2 — 50% off select items',1],
+  ['Luca','Remove all bins and items from the mezzanine 2 weeks before, for the check',0],
+  ['Luca','Check the status of the inserts for the frames',0],
+  ['Luca','Post-picnic accounting',0],
+  ['Calogero','Rent a mini van for the day',1],
+  ['Calogero','Pick up 3 coolers from Charlie\'s house',0],
+  ['Calogero','Pick up ice x 20 bags',0],
+  ['Calogero','Nitrile gloves — 1 box small, 1 box medium',0],
+  ['Calogero','Beach chairs x 2',0],
+  ['Charlie','Sponsor cash $200 — Joe from Montreal',0],
+  ['Charlie','Bring the espresso machine',0],
+  ['Charlie','Three Aces flag',0],
+  ['Charlie','Order and pick up the bocce trophies',1],
+  ['Charlie','Order and pick up the sponsor plaques',1],
+  ['Charlie','Coolers x 3 — hand over to Calogero',0],
+  ['Charlie','Confirm the Elvis show time',0],
+  ['Charlie','Bring the clothing bins and hangers',0],
+  ['Charlie','Popular Supermarket van to the park — confirm delivery time with Steve, and that he is bringing water, watermelons and pop',0],
+  ['Charlie','Pizza lunch — confirm delivery',0],
+  ['Charlie','Pasta — confirm delivery, and cheese, chili and extra sauce',0],
+  ['Charlie','Cigar box for the clothing and apparel cash',0],
+  ['Vito','Order and pick up the picnic shirts from Mussa',1],
+  ['Vito','Rip raffle tickets into paperclipped stacks of 10',1],
+  ['Vito','Update the picnic invite — add and remove sponsors',1],
+  ['Vito','Buy cookies for the day — Fortino\'s, the night before (no nuts?)',0],
+  ['Vito','Buy 24 eggs for the egg toss',0],
+  ['Vito','Bocce tournament signup sheet',1],
+  ['Vito','Bocce rules page',1],
+  ['Vito','Bocce score tracker',1],
+  ['Vito','Download the music playlist onto the phone',1],
+  ['Vito','Bring the park permit — confirm Elvis with the park',0],
+  ['Vito','Provide the insurance certificate to the park for the Fun Times tent',1],
+  ['Vito','Purchase and store the raffle prizes',1],
+  ['Vito','Bring the prizes to the park',0],
+  ['Vito','Small cooler',0],
+  ['Vito','Bring the soccer balls from the office for the kids\' game',1],
+  ['Rob','Remove all bins and items from Luca\'s mezzanine 2 weeks before, for the check',1],
+  ['Rob','Folding tables x 2',0],
+  ['Rob','Coffee beans x 2 bags — Ionia',0],
+  ['Rob','Bring the trailer',0],
+  ['Rob','Bring the generator',0],
+  ['Rob','Fuel for the generator',0],
+  ['Rob','Jerry can for extra fuel',0],
+  ['Rob','Bring the trailer to Luca\'s house',0],
+  ['Rob','Two 50 or 75 foot extension cords',0],
+  ['Rob','Load the trailer on the day',0],
+];
+
+/* [start, end, title, who, requirements, notes] — '' for a time means TBD. */
+const PIC_SEED_SLOTS=[
+  ['07:45','08:15','Pickup at Charlie\'s — load the truck','Charlie, Joe from Montreal','',''],
+  ['07:45','08:15','Pickup at Luca\'s house — load the trailer','Luca, Robbie','',''],
+  ['08:15','08:45','All club members drive to the park','All','','Arrive together, leave together'],
+  ['08:45','09:00','Calogero meets at the park with the minivan','Calogero','Bags of ice picked up',''],
+  ['09:00','10:30','Initial setup, part 1','All team','Bring in the picnic tables from the perimeter · Unload Rob\'s trailer · Unload Charlie\'s truck','See if the park staff will help with the tables'],
+  ['09:00','10:30','Initial setup, part 2','All team','Set up the generator · Folding tables and chairs under the Three Aces tent · Fill the slushie machine, one bottle at a time to allow for cooling · Set up the espresso machine · Fill the coolers with water and ice · Prize table (Vito) · Music and microphone (Luca)',''],
+  ['09:00','10:30','Initial setup, part 3','All team','Clothing station with samples · Flags and sponsor banner · Family tents · Games tent',''],
+  ['11:00','','Clothing station + raffle ticket station','Charlie, Carm','Clipboard and notebook to track sales · Cash box or fanny pack','Runs until close'],
+  ['11:00','12:45','Morning dessert station, refilled from the minivan','Calogero','',''],
+  ['11:00','','Serving slushies and espressos','Calogero, Rob, Liborio','2L bottles of pop · Coffee beans · Espresso cups · Labels and sharpie · Three Aces tumblers · Sugar · Sweetener · Stir sticks · Water','No slushies without a Three Aces tumbler. Runs until close'],
+  ['11:00','','Refilling the water coolers','Calogero, Rob, Luca','Ice','Check the levels every 45 minutes and refill as necessary. Runs until close'],
+  ['11:00','12:00','Bocce tournament signup','Vito','Clipboard · Bocce signup sheet','Watch the teams and the divisional setup so two strong teams reach the final'],
+  ['12:00','16:00','Bocce tournament — games tent','Vito','Club tent · Bocce balls · Clipboards · Score tracker · Pen · Measuring tapes x 3','Rankings used so the two top teams meet in the final'],
+  ['12:45','12:55','Opening speech and prayer','Charlie','',''],
+  ['13:00','14:30','Food station — serving pizza and pasta','Calogero, Rob, Charlie, Luca','Pasta scoops · Tongs · Nitrile gloves · Paper towels · Napkins','Pizza delivery TBC · Pasta delivery TBC, cheese and hot peppers provided? · Cataldi sweets delivery TBC'],
+  ['14:00','17:00','Condensing the food station','Calogero, Rob, Charlie','Nitrile gloves · Tongs · Pasta scoops',''],
+  ['14:00','17:00','Selling raffle tickets','Luca','Pre-ripped tickets · Change · Fanny pack',''],
+  ['','','Kids soccer challenge — games tent','Vito','Cones · Soccer balls · Megaphone','Time to be decided'],
+  ['14:30','15:00','Watermelons — cut and serve','Calogero, Rob','Watermelons · Nitrile gloves · Aluminum trays · Butcher knives · Chopping boards · Tongs',''],
+  ['15:00','16:30','Elvis show and food drive','Charlie','','Charlie to confirm the time'],
+  ['','','Egg toss — games tent','Vito','Eggs · Megaphone','Time to be decided'],
+  ['17:30','18:30','Bocce trophy presentation, prize raffle and sponsor appreciation','Charlie, Vito, Luca','','Bocce winner announced right before the grand prize · Thank the sponsors right before the grand prize'],
+  ['18:30','18:35','Closing speech','Charlie','',''],
+  ['18:35','19:35','Post-picnic clean up and wrap up','All hands on deck','Clean the picnic area · Take down the tents · Empty, clean and dry the coolers · Clean the slushie machine · Disconnect the generator · Pack and load the clothing · Give away or discard the extra food · Take down the flags and sponsor banner · Load the trailers','Cash in — all proceeds to Luca. Cash out — out-of-pocket expenses paid to team members by Luca'],
+  ['19:45','21:00','Drop off Robbie\'s trailer items at Luca\'s house — unload','Luca, Robbie','',''],
+  ['','','Post-picnic accounting','Luca','',''],
+  ['','','Post-picnic stock check and count','Luca, Robbie','','This is the count that becomes next year\'s opening stock'],
+];
+
+/* ------------------------------- READING --------------------------------- */
+function picYearKey(){ return ((S.picnic||{}).cur)||''; }
+function picY(){ const P=S.picnic; if(!P||!P.cur) return null; return ((P.years||{})[P.cur])||null; }
+function picOn(){ return !!picY(); }
+function picYearList(){ return Object.keys(((S.picnic||{}).years)||{}).sort().reverse(); }
+
+function picItems(){ const y=picY(); if(!y) return [];
+  return Object.entries(y.items||{}).sort((a,b)=>(a[1].order||0)-(b[1].order||0)); }
+function picJobs(){ const y=picY(); if(!y) return [];
+  return Object.entries(y.jobs||{}).sort((a,b)=>(a[1].order||0)-(b[1].order||0)); }
+function picSlots(){ const y=picY(); if(!y) return [];
+  return Object.entries(y.slots||{}).sort((a,b)=>
+    (picMins(a[1].start)-picMins(b[1].start)) || ((a[1].order||0)-(b[1].order||0))); }
+
+// A slot with no start time sorts to the very bottom, where "time to be decided" belongs.
+function picMins(hhmm){
+  const m=/^(\d{1,2}):(\d{2})$/.exec(String(hhmm||''));
+  return m? (+m[1])*60+(+m[2]) : 99999;
+}
+function picClock(hhmm){
+  const m=/^(\d{1,2}):(\d{2})$/.exec(String(hhmm||''));
+  if(!m) return '';
+  let h=+m[1]; const ap=h>=12?'pm':'am'; h=h%12||12;
+  return h+':'+m[2]+ap;
+}
+function picWhen(s){
+  const a=picClock(s.start), b=picClock(s.end);
+  if(!a) return 'Time to be decided';
+  return b? a+' – '+b : a+' onwards';
+}
+
+// Counted at all? An absent `have` means nobody has been to that bin yet.
+function picIsCounted(it){ return it && it.have!=null; }
+function picCountedN(){ return picItems().filter(([,i])=>picIsCounted(i)).length; }
+// How many to buy. An uncounted item is NEVER short — we simply do not know yet.
+function picShortOf(it){
+  if(!picIsCounted(it)) return 0;
+  const d=(+it.need||0)-(+it.have||0);
+  return d>0? d : 0;
+}
+function picBuyList(){ return picItems().filter(([,i])=>picShortOf(i)>0); }
+function picTotalOf(it){
+  const per=+it.per||0; if(!per) return 0;
+  return per*(picIsCounted(it)?(+it.have||0):(+it.need||0));
+}
+function picNeedLabel(it){
+  const u=it.unit?' '+it.unit:'';
+  let s='Need '+(+it.need||0)+u;
+  if(+it.per) s+=' · '+it.per+' per '+(it.unit? it.unit.replace(/s$/,'') : 'pack')+' ≈ '+((+it.need||0)*(+it.per)).toLocaleString('en-CA');
+  return s;
+}
+
+function picSameName(a,b){ return (a||'').trim().toLowerCase()===(b||'').trim().toLowerCase(); }
+function picJobsOf(name){ return picJobs().filter(([,j])=>picSameName(j.who,name)); }
+function picDoneN(list){ return (list||picJobs()).filter(([,j])=>!!j.done).length; }
+// Everyone who has a job, plus every user of the app, so an admin can hand a
+// job to somebody who has never had one before.
+function picPeople(){
+  const seen=[], add=n=>{ n=(n||'').trim(); if(n && !seen.some(x=>picSameName(x,n))) seen.push(n); };
+  picJobs().forEach(([,j])=>add(j.who));
+  Object.values(S.users||{}).forEach(u=>add(u.name));
+  return seen.sort((a,b)=>a.localeCompare(b));
+}
+function picMayTick(j){ return isAdmin() || (meU() && picSameName(j.who, meU().name)); }
+/* A job with a name on it that matches nobody's login is a job that only an
+   admin can ever tick. That is a silent trap — the person is on the list, they
+   just never see it — so the Jobs screen says who is missing a login.       */
+function picNoLogin(){
+  const users=Object.values(S.users||{}).filter(u=>u.active!==false).map(u=>u.name||'');
+  return [...new Set(picJobs().map(([,j])=>(j.who||'').trim()).filter(Boolean))]
+    .filter(n=>!users.some(u=>picSameName(u,n))).sort();
+}
+
+/* ------------------------------- v3.20: BINS ------------------------------
+   A bin is not a record you have to create before you can use it — it is just
+   a number stamped on an item. But an EMPTY bin has to be able to exist too,
+   otherwise you cannot make the eighth one until you already have something to
+   put in it, which is backwards. So the list of bins is the union of the bins
+   items actually sit in and the bins somebody has declared.                 */
+function picBinRecs(){ return ((picY()||{}).bins)||{}; }
+function picBins(){
+  const used=picItems().map(([,i])=>+i.bin||0);
+  const named=Object.keys(picBinRecs()).map(Number);
+  return [...new Set(used.concat(named))].filter(n=>n>0).sort((a,b)=>a-b);
+}
+function picBinName(n){ const b=picBinRecs()[String(n)]; return (b&&b.name)||''; }
+function picBinTitle(n){ const nm=picBinName(n); return 'Bin '+n+(nm? ' · '+nm : ''); }
+function picBinItems(n){ return picItems().filter(([,i])=>(+i.bin||0)===+n); }
+function picNextBin(){ const b=picBins(); return (b.length? b[b.length-1] : 0)+1; }
+
+/* Searching. Matches the name, the note and the unit, because "where are the
+   blue tablecloths" and "where is the thing with the broken lid" are both
+   real questions and the second one is answered by the note.               */
+function picHit(it,q){
+  if(!q) return true;
+  return ((it.name||'')+' '+(it.note||'')+' '+(it.unit||'')).toLowerCase().includes(q);
+}
+function picQnorm(){ return picQ.trim().toLowerCase(); }
+
+/* The jobs currently on screen, worked out in one place so that moving a job
+   up moves it past the job you can actually SEE above it — not past some job
+   hidden by the filter you happen to have on.                              */
+function picJobList(){
+  const all=picJobs();
+  if(picWho==='out') return all.filter(([,j])=>!j.done);
+  if(picWho==='done') return all.filter(([,j])=>!!j.done);
+  if(picWho==='any') return all.filter(([,j])=>!(j.who||'').trim());
+  if(picWho) return picJobsOf(picWho);
+  return all;
+}
+/* Jobs a member put on the list themselves, that an admin has not looked at
+   yet. Admin never has to go hunting for what appeared without them.       */
+function picNewFromMembers(){ return picJobs().filter(([,j])=>j.member && !j.seen); }
+/* A member may take back a job they added themselves, as long as nobody has
+   ticked it. Anything else on the list belongs to the admin.               */
+function picMayEditOwn(id){
+  const j=((picY()||{}).jobs||{})[id], u=meU();
+  return !!(j && u && j.member && !j.done && picSameName(j.addedBy,u.name));
+}
+
+/* ------------------------------- WRITING --------------------------------- */
+function picPath(){ return ['picnic','years',picYearKey()]; }
+
+async function picSeed(){
+  if(!isAdmin()) return;
+  if(picOn()){ toast('The picnic list is already loaded',1); return; }
+  const yr=String(new Date().getFullYear());
+  const items={}, jobs={}, slots={};
+  let kitId='';
+  PIC_SEED_ITEMS.forEach((r,i)=>{
+    const sub=r[1].charAt(0)==='>';
+    const id=newId()+'i'+i;
+    const it={bin:r[0], name:sub?r[1].slice(1):r[1], need:r[2], order:i};
+    if(r[3]) it.unit=r[3];
+    if(r[4]) it.per=r[4];
+    if(r[5]) it.note=r[5];
+    if(sub && kitId) it.parent=kitId;
+    if(!sub && /^Three Aces Toolkit$/i.test(it.name)) kitId=id;
+    items[id]=it;
+  });
+  PIC_SEED_JOBS.forEach((r,i)=>{
+    const j={who:r[0], text:r[1], order:i};
+    if(r[2]){ j.done=Date.now(); j.doneBy='Master List'; }
+    jobs[newId()+'j'+i]=j;
+  });
+  PIC_SEED_SLOTS.forEach((r,i)=>{
+    const s={title:r[2], order:i};
+    if(r[0]) s.start=r[0];
+    if(r[1]) s.end=r[1];
+    if(r[3]) s.who=r[3];
+    if(r[4]) s.req=r[4];
+    if(r[5]) s.notes=r[5];
+    slots[newId()+'s'+i]=s;
+  });
+  await DB.set(['picnic'],{cur:yr, years:{[yr]:{label:'Picnic '+yr, date:'', items, jobs, slots, made:Date.now()}}});
+  toast('Picnic list loaded — '+PIC_SEED_ITEMS.length+' items, '+PIC_SEED_JOBS.length+' jobs');
+  picTab='supplies'; rerender();
+}
+
+/* Counting. Admin only — the bins are Luca's, and a member with a fat thumb
+   should not be able to change what the club believes it owns.              */
+async function picSetHave(id, v){
+  if(!isAdmin()) return;
+  const it=((picY()||{}).items||{})[id]; if(!it) return;
+  if(v===null){ await DB.set(picPath().concat(['items',id,'have']),null); }
+  else{
+    const n=Math.max(0, Math.round(+v||0));
+    await DB.set(picPath().concat(['items',id,'have']),n);
+    await DB.set(picPath().concat(['items',id,'countedTs']),Date.now());
+    await DB.set(picPath().concat(['items',id,'countedBy']),meU().name);
+  }
+  rerender();
+}
+function picStep(id, d){
+  const it=((picY()||{}).items||{})[id]; if(!it) return;
+  const cur=picIsCounted(it)? (+it.have||0) : 0;
+  const next=cur+d;
+  if(next<0){ picSetHave(id,null); return; }   // stepping below zero means "I haven't counted this"
+  picSetHave(id,next);
+}
+function picTypeHave(id, el){
+  const raw=String(el.value||'').trim();
+  if(raw==='') { picSetHave(id,null); return; }
+  picSetHave(id, raw);
+}
+
+/* Ticking a job. An admin may tick anybody's; everybody else, only their own. */
+async function picToggleJob(id){
+  const j=((picY()||{}).jobs||{})[id]; if(!j) return;
+  if(!picMayTick(j)){ toast('That one is '+esc(j.who||'someone else')+'\'s to tick off',1); return; }
+  if(j.done){
+    await DB.set(picPath().concat(['jobs',id,'done']),null);
+    await DB.set(picPath().concat(['jobs',id,'doneBy']),null);
+  }else{
+    await DB.set(picPath().concat(['jobs',id,'done']),Date.now());
+    await DB.set(picPath().concat(['jobs',id,'doneBy']),meU().name);
+  }
+  rerender();
+}
+
+/* ------------------------- ADMIN: BINS ------------------------------------ */
+function picBinSheet(n){
+  if(!isAdmin()) return;
+  const existing = n? +n : 0;
+  const num = existing || picNextBin();
+  const held = existing? picBinItems(existing).length : 0;
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>${existing?'✎ Bin '+existing:'＋ New bin'}</h3>
+    ${existing? '' : `<label>Bin number</label>
+      <input id="pb_num" type="text" inputmode="numeric" value="${num}" style="max-width:110px">`}
+    <label>Name it — optional, but it makes it findable</label>
+    <input id="pb_name" value="${esc(picBinName(num))}" placeholder="e.g. Clothing and hangers">
+    <button class="btn" onclick="picBinSave('${existing||''}')">${existing?'Save':'Add the bin'}</button>
+    ${existing? (held? `<p class="muted">${held} item${held===1?'':'s'} in this bin. To remove the bin,
+        move or delete those first — the app will not quietly drop them.</p>`
+      : `<button class="btn red" onclick="picBinDel('${existing}')">🗑 Remove this bin</button>
+         <p class="muted">It is empty, so nothing is lost. Removing asks for your PIN.</p>`)
+      : `<p class="muted">A number on its own is enough. The bin shows up on the Supplies screen straight
+         away, empty, ready for you to put things in it.</p>`}`);
+}
+async function picBinSave(existing){
+  if(!isAdmin()) return;
+  let num;
+  if(existing){ num=+existing; }
+  else{
+    num=Math.round(+$('pb_num').value||0);
+    if(!(num>0)){ toast('Give the bin a number',1); return; }
+    if(picBins().includes(num)){ toast('Bin '+num+' already exists',1); return; }
+  }
+  const rec={name:$('pb_name').value.trim(), added:(picBinRecs()[String(num)]||{}).added||Date.now()};
+  await DB.set(picPath().concat(['bins',String(num)]),rec);
+  picOpen[num]=true;                       // open the drawer you just made
+  closeModal(); toast(existing?'Saved':'Bin '+num+' added'); rerender();
+}
+function picBinDel(n){
+  if(!isAdmin()) return;
+  if(picBinItems(n).length){ toast('Empty the bin first',1); return; }
+  pinConfirm('Remove Bin '+n+'?', async()=>{
+    await DB.set(picPath().concat(['bins',String(n)]),null);
+    delete picOpen[n];
+    closeModal(); toast('Bin removed');
+  });
+}
+
+/* --------------------- v3.20: MOVING THINGS BY HAND ------------------------
+   Reordering re-uses the order numbers the group ALREADY holds rather than
+   renumbering from zero. Order is global across every item, and the bin
+   headings only work because items of one bin sit together in that global
+   order — renumbering a bin from zero would scatter it through the others.
+   Permuting the group's own numbers among themselves cannot do that.       */
+async function picApplyOrder(kind, rows){
+  if(!isAdmin()) return;
+  let slots=rows.map(([,r])=>+r.order||0).sort((a,b)=>a-b);
+  // Ties would make a swap a silent no-op, so spread them just enough to
+  // separate without crossing into the next whole number.
+  if(new Set(slots).size!==slots.length) slots=slots.map((_,k)=>slots[0]+k/1000);
+  for(let k=0;k<rows.length;k++){
+    if((+rows[k][1].order||0)!==slots[k])
+      await DB.set(picPath().concat([kind,rows[k][0],'order']),slots[k]);
+  }
+  rerender();
+}
+function picSwap(list,id,dir){
+  const i=list.findIndex(x=>x[0]===id); if(i<0) return null;
+  const j=i+dir; if(j<0||j>=list.length) return null;
+  const out=list.slice(); out.splice(j,0,out.splice(i,1)[0]);
+  return out;
+}
+/* A sub-item travels with its parent. The toolkit's twelve contents are not
+   twelve independent rows you would ever want to shuffle on their own.     */
+function picBinBlocks(n){
+  const blocks=[];
+  picBinItems(n).forEach(row=>{
+    if(row[1].parent && blocks.length) blocks[blocks.length-1].push(row);
+    else blocks.push([row]);
+  });
+  return blocks;
+}
+async function picMoveItem(id,dir){
+  if(!isAdmin()) return;
+  const it=((picY()||{}).items||{})[id]; if(!it||it.parent) return;
+  const blocks=picBinBlocks(+it.bin||0);
+  const moved=picSwap(blocks.map(b=>[b[0][0],b[0][1]]),id,dir); if(!moved) return;
+  const byHead={}; blocks.forEach(b=>byHead[b[0][0]]=b);
+  await picApplyOrder('items', moved.reduce((a,[hid])=>a.concat(byHead[hid]),[]));
+}
+async function picMoveJob(id,dir){
+  if(!isAdmin()) return;
+  const moved=picSwap(picJobList(),id,dir); if(!moved) return;
+  await picApplyOrder('jobs', moved);
+}
+function picItemMoveable(id,it,dir){
+  if(it.parent) return false;
+  const heads=picBinBlocks(+it.bin||0).map(b=>b[0][0]);
+  const i=heads.indexOf(id);
+  return dir<0? i>0 : (i>=0 && i<heads.length-1);
+}
+function picJobMoveable(id,dir){
+  const l=picJobList(), i=l.findIndex(x=>x[0]===id);
+  return dir<0? i>0 : (i>=0 && i<l.length-1);
+}
+function picMvBtns(kind,id,up,down){
+  return `<div class="picmv">
+    <button ${up?'':'disabled'} onclick="event.stopPropagation();picMove${kind}('${id}',-1)">▲</button>
+    <button ${down?'':'disabled'} onclick="event.stopPropagation();picMove${kind}('${id}',1)">▼</button></div>`;
+}
+
+/* ------------------------- ADMIN: ITEMS ----------------------------------- */
+function picItemSheet(id){
+  if(!isAdmin()) return;
+  const it=id? (((picY()||{}).items||{})[id]||{}) : {bin:(picBins()[0]||1),need:1};
+  const bins=picBins(); if(!bins.length) bins.push(1);
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>${id?'✎ Edit':'＋ New'} supply item</h3>
+    <label>What it is</label>
+    <input id="pi_name" value="${esc(it.name||'')}" placeholder="e.g. Paper Towels">
+    <label>Which bin</label>
+    <select id="pi_bin">${bins.map(b=>`<option value="${b}"${(+it.bin||bins[0])===b?' selected':''}>${esc(picBinTitle(b))}</option>`).join('')}</select>
+    <p class="muted" style="margin:4px 0 0">Need another bin? Close this and tap <b>＋ New bin</b> on the
+      Supplies screen — it appears in this list straight away.</p>
+    <label>How many we need — the target that carries year to year</label>
+    <div class="sizerow">
+      <input id="pi_need" type="text" inputmode="numeric" value="${it.need??''}" style="max-width:90px">
+      <input id="pi_unit" value="${esc(it.unit||'')}" placeholder="rolls / packs / boxes — optional">
+    </div>
+    <label>How many in each one — optional</label>
+    <input id="pi_per" type="text" inputmode="numeric" value="${it.per||''}" placeholder="e.g. 240 napkins per pack">
+    <label>Note — optional</label>
+    <input id="pi_note" value="${esc(it.note||'')}" placeholder="anything worth remembering at the bin">
+    <button class="btn" onclick="picItemSave('${id||''}')">Save</button>
+    ${id?`<button class="btn red" onclick="picItemDel('${id}')">🗑 Remove this item</button>
+      <p class="muted">Removing asks for your PIN. The count and the target go with it.</p>`:''}`);
+}
+async function picItemSave(id){
+  if(!isAdmin()) return;
+  const name=$('pi_name').value.trim();
+  if(!name){ toast('Give it a name',1); return; }
+  const rec={
+    bin:+$('pi_bin').value||picBins()[0]||1,
+    name:name,
+    need:Math.max(0,Math.round(+$('pi_need').value||0)),
+    order:0
+  };
+  const unit=$('pi_unit').value.trim(); if(unit) rec.unit=unit;
+  const per=Math.round(+$('pi_per').value||0); if(per>0) rec.per=per;
+  const note=$('pi_note').value.trim(); if(note) rec.note=note;
+  if(id){
+    const old=((picY()||{}).items||{})[id]||{};
+    rec.order=old.order||0;
+    if(old.parent) rec.parent=old.parent;
+    if(old.have!=null){ rec.have=old.have; rec.countedTs=old.countedTs||0; rec.countedBy=old.countedBy||''; }
+    await DB.set(picPath().concat(['items',id]),rec);
+  }else{
+    /* Land it at the bottom of ITS OWN bin, not the bottom of everything.
+       Nudging by a thousandth keeps it inside that bin's stretch of the
+       global order instead of jumping it past every later bin.            */
+    const sib=picBinItems(rec.bin);
+    rec.order = sib.length
+      ? sib.reduce((m,[,i])=>Math.max(m,+i.order||0),0)+0.001
+      : picItems().reduce((m,[,i])=>Math.max(m,+i.order||0),0)+1;
+    await DB.push(picPath().concat(['items']),rec);
+  }
+  closeModal(); toast('Saved'); rerender();
+}
+function picItemDel(id){
+  if(!isAdmin()) return;
+  const it=((picY()||{}).items||{})[id]||{};
+  pinConfirm('Remove "'+(it.name||'')+'" from the picnic supplies?', async()=>{
+    await DB.set(picPath().concat(['items',id]),null);
+    closeModal(); toast('Removed');
+  });
+}
+
+/* ------------------------- ADMIN: JOBS ------------------------------------ */
+function picJobSheet(id){
+  if(!isAdmin()) return;
+  const j=id? (((picY()||{}).jobs||{})[id]||{}) : {};
+  const people=picPeople();
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>${id?'✎ Edit':'＋ Add'} a job</h3>
+    <label>What needs doing</label>
+    <input id="pj_text" value="${esc(j.text||'')}" placeholder="e.g. Buy 24 eggs for the egg toss">
+    <label>Whose job it is</label>
+    <select id="pj_who">
+      <option value=""${!j.who?' selected':''}>Anyone — nobody in particular</option>
+      ${people.map(n=>`<option value="${esc(n)}"${picSameName(j.who,n)?' selected':''}>${esc(n)}</option>`).join('')}
+    </select>
+    <label>Needed by — optional</label>
+    <input id="pj_due" type="date" value="${esc(j.due||'')}">
+    <label>Note — optional</label>
+    <input id="pj_note" value="${esc(j.note||'')}">
+    <button class="btn" onclick="picJobSave('${id||''}')">${id?'Save':'Add to the list'}</button>
+    ${id?`<button class="btn red" onclick="picJobDel('${id}')">🗑 Remove this job</button>
+      <p class="muted">Only an admin can add or remove a job. Removing asks for your PIN.</p>`:
+      `<p class="muted">It appears on their phone within a few seconds.</p>`}`);
+}
+async function picJobSave(id){
+  if(!isAdmin()) return;
+  const text=$('pj_text').value.trim();
+  if(!text){ toast('Say what needs doing',1); return; }
+  const rec={text:text, who:$('pj_who').value.trim(), order:0};
+  const due=$('pj_due').value; if(due) rec.due=due;
+  const note=$('pj_note').value.trim(); if(note) rec.note=note;
+  if(id){
+    const old=((picY()||{}).jobs||{})[id]||{};
+    rec.order=old.order||0;
+    if(old.done){ rec.done=old.done; rec.doneBy=old.doneBy||''; }
+    // Who put it on the list survives an admin editing it — and touching it
+    // at all counts as having seen it.
+    if(old.member){ rec.member=true; rec.addedBy=old.addedBy||''; rec.addedTs=old.addedTs||0; rec.seen=true; }
+    await DB.set(picPath().concat(['jobs',id]),rec);
+  }else{
+    rec.order=picJobs().reduce((m,[,j])=>Math.max(m,j.order||0),0)+1;
+    await DB.push(picPath().concat(['jobs']),rec);
+  }
+  closeModal(); toast(rec.who? 'Added to '+rec.who+'\'s list' : 'Added to the shared list'); rerender();
+}
+function picJobDel(id){
+  if(!isAdmin()) return;
+  const j=((picY()||{}).jobs||{})[id]||{};
+  pinConfirm('Remove "'+(j.text||'')+'" from the job list?', async()=>{
+    await DB.set(picPath().concat(['jobs',id]),null);
+    closeModal(); toast('Removed');
+  });
+}
+async function picSeenAll(){
+  if(!isAdmin()) return;
+  for(const [id] of picNewFromMembers()) await DB.set(picPath().concat(['jobs',id,'seen']),true);
+  rerender();
+}
+
+/* --------------------- v3.20: A MEMBER'S OWN JOB ---------------------------
+   Members can put a job on their OWN list and nobody else's. It goes straight
+   on — no waiting for approval, because a job you have already decided to do
+   should not sit in a queue — but it is flagged so the admin sees it appear
+   and can re-word it, hand it to somebody else or take it off. The member can
+   take back their own while it is still untouched, so a typo is not forever. */
+function picMyJobSheet(id){
+  const u=meU(); if(!u||!picOn()) return;
+  if(id && !picMayEditOwn(id)){ toast('Only an admin can change that one',1); return; }
+  const j=id? (((picY()||{}).jobs||{})[id]||{}) : {};
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>${id?'✎ My job':'＋ Add a job for myself'}</h3>
+    <label>What you are going to do</label>
+    <input id="pm_text" value="${esc(j.text||'')}" placeholder="e.g. Pick up the trophies from the engraver">
+    <label>Needed by — optional</label>
+    <input id="pm_due" type="date" value="${esc(j.due||'')}">
+    <label>Note — optional</label>
+    <input id="pm_note" value="${esc(j.note||'')}">
+    <button class="btn" onclick="picMyJobSave('${id||''}')">${id?'Save':'Add it to my list'}</button>
+    ${id?`<button class="btn red" onclick="picMyJobDel('${id}')">🗑 Take it off my list</button>
+      <p class="muted">You can take this one off because you added it and nobody has ticked it yet.</p>`
+     :`<p class="muted">It goes on your list straight away and ${esc(picAdminName())} is told it appeared.
+       To put a job on somebody else, ask an admin.</p>`}`);
+}
+function picAdminName(){
+  const a=Object.values(S.users||{}).find(u=>u.role==='admin'&&u.active!==false);
+  return (a&&a.name)||'an admin';
+}
+async function picMyJobSave(id){
+  const u=meU(); if(!u||!picOn()) return;
+  const text=$('pm_text').value.trim();
+  if(!text){ toast('Say what you are going to do',1); return; }
+  const due=$('pm_due').value, note=$('pm_note').value.trim();
+  if(id){
+    if(!picMayEditOwn(id)){ toast('Only an admin can change that one',1); return; }
+    await DB.set(picPath().concat(['jobs',id,'text']),text);
+    await DB.set(picPath().concat(['jobs',id,'due']),due||null);
+    await DB.set(picPath().concat(['jobs',id,'note']),note||null);
+    await DB.set(picPath().concat(['jobs',id,'seen']),null);   // admin should see the new wording
+    closeModal(); toast('Saved'); rerender(); return;
+  }
+  const rec={text:text, who:u.name, member:true, addedBy:u.name, addedTs:Date.now(),
+             order:picJobs().reduce((m,[,j])=>Math.max(m,+j.order||0),0)+1};
+  if(due) rec.due=due;
+  if(note) rec.note=note;
+  await DB.push(picPath().concat(['jobs']),rec);
+  closeModal(); toast('Added to your list'); picMemTab='mine'; rerender();
+}
+function picMyJobDel(id){
+  if(!picMayEditOwn(id)){ toast('Only an admin can take that one off',1); return; }
+  const j=((picY()||{}).jobs||{})[id]||{};
+  pinConfirm('Take "'+(j.text||'')+'" off your list?', async()=>{
+    if(!picMayEditOwn(id)) return;
+    await DB.set(picPath().concat(['jobs',id]),null);
+    closeModal(); toast('Taken off');
+  });
+}
+
+/* ------------------------- ADMIN: THE DAY --------------------------------- */
+function picSlotSheet(id){
+  if(!isAdmin()) return;
+  const s=id? (((picY()||{}).slots||{})[id]||{}) : {};
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>${id?'✎ Edit':'＋ New'} slot on the day</h3>
+    <label>What happens</label>
+    <input id="ps_title" value="${esc(s.title||'')}" placeholder="e.g. Food station — serving pizza and pasta">
+    <label>Time — leave both blank for "to be decided"</label>
+    <div class="sizerow">
+      <input id="ps_start" type="time" value="${esc(s.start||'')}">
+      <input id="ps_end" type="time" value="${esc(s.end||'')}">
+    </div>
+    <label>Who is on it</label>
+    <input id="ps_who" value="${esc(s.who||'')}" placeholder="e.g. Calogero, Rob, Charlie">
+    <label>What the station needs — separate each one with ·</label>
+    <textarea id="ps_req" rows="3" placeholder="Tongs · Nitrile gloves · Napkins">${esc(s.req||'')}</textarea>
+    <label>Notes — optional</label>
+    <textarea id="ps_notes" rows="2">${esc(s.notes||'')}</textarea>
+    <button class="btn" onclick="picSlotSave('${id||''}')">Save</button>
+    ${id?`<button class="btn red" onclick="picSlotDel('${id}')">🗑 Remove this slot</button>`:''}`);
+}
+async function picSlotSave(id){
+  if(!isAdmin()) return;
+  const title=$('ps_title').value.trim();
+  if(!title){ toast('Say what happens',1); return; }
+  const rec={title:title, order:0};
+  const st=$('ps_start').value, en=$('ps_end').value;
+  if(st) rec.start=st;
+  if(en) rec.end=en;
+  const who=$('ps_who').value.trim(); if(who) rec.who=who;
+  const req=$('ps_req').value.trim(); if(req) rec.req=req;
+  const notes=$('ps_notes').value.trim(); if(notes) rec.notes=notes;
+  if(id){
+    const old=((picY()||{}).slots||{})[id]||{};
+    rec.order=old.order||0;
+    if(old.done){ rec.done=old.done; rec.doneBy=old.doneBy||''; }
+    await DB.set(picPath().concat(['slots',id]),rec);
+  }else{
+    rec.order=picSlots().reduce((m,[,s])=>Math.max(m,s.order||0),0)+1;
+    await DB.push(picPath().concat(['slots']),rec);
+  }
+  closeModal(); toast('Saved'); rerender();
+}
+function picSlotDel(id){
+  if(!isAdmin()) return;
+  const s=((picY()||{}).slots||{})[id]||{};
+  pinConfirm('Remove "'+(s.title||'')+'" from the day?', async()=>{
+    await DB.set(picPath().concat(['slots',id]),null);
+    closeModal(); toast('Removed');
+  });
+}
+async function picSlotDone(id){
+  if(!isAdmin()) return;
+  const s=((picY()||{}).slots||{})[id]; if(!s) return;
+  if(s.done){ await DB.set(picPath().concat(['slots',id,'done']),null); }
+  else{ await DB.set(picPath().concat(['slots',id,'done']),Date.now()); }
+  rerender();
+}
+
+/* ---------------- SHOPPING LIST → JOBS, AND SHARING ----------------------- */
+async function picBuyToJobs(){
+  if(!isAdmin()) return;
+  const list=picBuyList();
+  if(!list.length){ toast('Nothing short — nothing to buy',1); return; }
+  let n=picJobs().reduce((m,[,j])=>Math.max(m,j.order||0),0);
+  for(const [,it] of list){
+    const q=picShortOf(it);
+    const txt='Buy '+q+(it.unit?' '+it.unit:'')+' — '+it.name;
+    if(picJobs().some(([,j])=>!j.done && j.text===txt)) continue;   // don't double up
+    await DB.push(picPath().concat(['jobs']),{text:txt, who:'', order:++n, note:'From the stock count · Bin '+(it.bin||'?')});
+  }
+  toast(list.length+' job'+(list.length===1?'':'s')+' added to the shared list'); rerender();
+}
+function picBuyText(){
+  const list=picBuyList();
+  if(!list.length) return 'Nothing short.';
+  return 'Three Aces picnic — still to buy:\n'+list.map(([,it])=>
+    '• '+picShortOf(it)+(it.unit?' '+it.unit:'')+' '+it.name+'  (bin '+(it.bin||'?')+')').join('\n');
+}
+function picShareBuy(){
+  const txt=picBuyText();
+  if(navigator.share){ navigator.share({title:'Picnic shopping list', text:txt}).catch(()=>{}); return; }
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(()=>toast('Copied — paste it into a message')).catch(()=>picShowText(txt));
+    return;
+  }
+  picShowText(txt);
+}
+function picShowText(txt){
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>🛒 The shopping list</h3>
+    <textarea rows="12" onclick="this.select()">${esc(txt)}</textarea>
+    <p class="muted">Tap it, copy it, paste it wherever you like.</p>`);
+}
+function picExportCSV(){
+  const rows=[['Bin','Item','Need','Unit','Per','Count status','In stock','To buy','Counted by','Note']];
+  // A blank "in stock" cell would open in Excel as a zero, which is the exact
+  // confusion this module exists to end — so the status column says it in words.
+  picItems().forEach(([,it])=>rows.push([
+    it.bin||'', it.name||'', it.need||0, it.unit||'', it.per||'',
+    picIsCounted(it)?'counted':'NOT COUNTED', picIsCounted(it)?it.have:'', picShortOf(it)||'',
+    it.countedBy||'', it.note||'']));
+  rows.push([]);
+  rows.push(['Whose job','Job','Done','Done on','Note']);
+  picJobs().forEach(([,j])=>rows.push([
+    j.who||'Anyone', j.text||'', j.done?'yes':'no',
+    j.done?new Date(j.done).toLocaleDateString('en-CA'):'', j.note||'']));
+  dl('picnic-'+picYearKey()+'.csv', rows.map(r=>r.map(csvCell).join(',')).join('\n'));
+}
+
+/* ------------------------------ ROLLOVER ---------------------------------- */
+/* The newest year on file, which is almost always the one you have been
+   editing and therefore the one worth copying — not whichever year happens
+   to be open because you went back to look something up.                   */
+function picNewestYear(){ return picYearList()[0]||picYearKey(); }
+function picYearStats(k){
+  const y=((S.picnic||{}).years||{})[k]||{};
+  const items=Object.values(y.items||{}), jobs=Object.values(y.jobs||{});
+  return {items:items.length, jobs:jobs.length, counted:items.filter(i=>i.have!=null).length};
+}
+function picRolloverSheet(){
+  if(!isAdmin()) return;
+  // Default the source to the NEWEST year, and the new year to one past it.
+  const src=picNewestYear();
+  const nxt=String((+src||new Date().getFullYear())+1);
+  const st=picYearStats(src);
+  const stale = src!==picYearKey();
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>🎪 Start a new picnic year</h3>
+    <label>Copy everything from</label>
+    <select id="pr_src" onchange="picRolloverPreview()">
+      ${picYearList().map(k=>`<option value="${esc(k)}"${k===src?' selected':''}>Picnic ${esc(k)}${k===picNewestYear()?' — newest':''}</option>`).join('')}
+    </select>
+    ${stale?`<p class="muted" style="color:var(--gold)"><b>You are looking at Picnic ${esc(picYearKey())},
+      but Picnic ${esc(src)} is newer.</b> The copy is set to take ${esc(src)}, so the changes you have been
+      making carry forward. Change it above only if you really want the older one.</p>`:''}
+    <div class="card" id="pr_prev">${picRolloverPreviewHTML(src)}</div>
+    <div class="card"><b>What resets</b>
+      <ul style="margin:6px 0 0;padding-left:18px;line-height:1.6">
+        <li>Every job goes back to <b>not done</b></li>
+        <li>Every station goes back to <b>not done</b></li>
+      </ul></div>
+    <label>Which year you are starting</label>
+    <input id="pr_year" value="${esc(nxt)}">
+    <label>Picnic date — optional</label>
+    <input id="pr_date" type="date" value="">
+    <button class="btn" onclick="picRollover()">Start the new year</button>
+    <button class="btn gray" onclick="closeModal()">Not yet</button>
+    <p class="muted">Nothing is deleted. Every year stays exactly as you left it and you can open any of
+      them again from <b>🗂 Years</b>.</p>`);
+}
+function picRolloverPreviewHTML(k){
+  const st=picYearStats(k);
+  return `<b>What carries over from Picnic ${esc(k)}</b>
+    <ul style="margin:6px 0 0;padding-left:18px;line-height:1.6">
+      <li>All ${st.items} items, their bins and their <b>needed</b> targets</li>
+      <li>Its ${st.counted} counted item${st.counted===1?'':'s'} become <b>opening stock</b></li>
+      <li>All ${st.jobs} jobs and whose they are</li>
+      <li>The whole day plan, with its times and stations</li>
+    </ul>`;
+}
+function picRolloverPreview(){
+  const el=$('pr_prev'), s=$('pr_src'); if(!el||!s) return;
+  el.innerHTML=picRolloverPreviewHTML(s.value);
+  const y=$('pr_year'); if(y) y.value=String((+s.value||new Date().getFullYear())+1);
+}
+async function picRollover(){
+  if(!isAdmin()) return;
+  const nk=String($('pr_year').value||'').trim();
+  if(!/^\d{4}$/.test(nk)){ toast('Give it a four-digit year',1); return; }
+  if(((S.picnic||{}).years||{})[nk]){ toast('Picnic '+nk+' already exists',1); return; }
+  /* Copy from the year the admin CHOSE — which defaults to the newest one,
+     not to whichever year happens to be open. Going back to look at an old
+     year must never quietly become the template for the next one.         */
+  const sk=(($('pr_src')||{}).value)||picNewestYear();
+  const sy=((S.picnic||{}).years||{})[sk];
+  if(!sy){ toast('Cannot find Picnic '+sk,1); return; }
+  const srcItems=Object.entries(sy.items||{}).sort((a,b)=>(a[1].order||0)-(b[1].order||0));
+  const srcJobs =Object.entries(sy.jobs ||{}).sort((a,b)=>(a[1].order||0)-(b[1].order||0));
+  const srcSlots=Object.entries(sy.slots||{}).sort((a,b)=>
+    (picMins(a[1].start)-picMins(b[1].start))||((a[1].order||0)-(b[1].order||0)));
+  const items={}, jobs={}, slots={};
+  srcItems.forEach(([id,it])=>{
+    const n={bin:it.bin, name:it.name, need:it.need, order:it.order||0};
+    if(it.unit) n.unit=it.unit;
+    if(it.per) n.per=it.per;
+    if(it.note) n.note=it.note;
+    if(it.parent) n.parent=it.parent;
+    // last year's count is this year's opening stock — that is the whole point
+    if(picIsCounted(it)){ n.have=it.have; n.countedTs=it.countedTs||0; n.countedBy=it.countedBy||''; }
+    items[id]=n;
+  });
+  srcJobs.forEach(([id,j])=>{
+    const n={text:j.text, who:j.who||'', order:j.order||0};
+    if(j.due) n.due=j.due;
+    if(j.note) n.note=j.note;
+    jobs[id]=n;                       // deliberately NOT copying done/doneBy,
+  });                                 // nor the member-added flag — it is old news now
+  srcSlots.forEach(([id,s])=>{
+    const n={title:s.title, order:s.order||0};
+    if(s.start) n.start=s.start;
+    if(s.end) n.end=s.end;
+    if(s.who) n.who=s.who;
+    if(s.req) n.req=s.req;
+    if(s.notes) n.notes=s.notes;
+    slots[id]=n;
+  });
+  const rec={label:'Picnic '+nk, date:$('pr_date').value||'', items, jobs, slots, made:Date.now(),
+             from:sk};
+  if(sy.bins) rec.bins=JSON.parse(JSON.stringify(sy.bins));   // the bins come too
+  await DB.set(['picnic','years',nk],rec);
+  await DB.set(['picnic','cur'],nk);
+  closeModal(); toast('Picnic '+nk+' started from '+sk); picTab='supplies'; rerender();
+}
+async function picSwitchYear(k){
+  if(!isAdmin()) return;
+  await DB.set(['picnic','cur'],k);
+  toast('Showing Picnic '+k); rerender();
+}
+function picDateSheet(){
+  if(!isAdmin()) return;
+  const y=picY()||{};
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>📅 Picnic ${esc(picYearKey())}</h3>
+    <label>What it is called</label>
+    <input id="py_label" value="${esc(y.label||('Picnic '+picYearKey()))}">
+    <label>The date of the picnic</label>
+    <input id="py_date" type="date" value="${esc(y.date||'')}">
+    <button class="btn" onclick="picYearSave()">Save</button>`);
+}
+async function picYearSave(){
+  if(!isAdmin()) return;
+  await DB.set(picPath().concat(['label']),$('py_label').value.trim()||('Picnic '+picYearKey()));
+  await DB.set(picPath().concat(['date']),$('py_date').value||'');
+  closeModal(); toast('Saved'); rerender();
+}
+function picDaysAway(){
+  const y=picY(); if(!y||!y.date) return '';
+  const d=new Date(y.date+'T12:00:00'); if(isNaN(d)) return '';
+  const t=new Date(); t.setHours(12,0,0,0);
+  const n=Math.round((d-t)/86400000);
+  if(n===0) return 'today';
+  if(n>0) return n+' day'+(n===1?'':'s')+' away';
+  return Math.abs(n)+' day'+(n===-1?'':'s')+' ago';
+}
+
+/* ============================ THE ADMIN SCREEN ============================ */
+function picnicBadge(){
+  if(!picOn()) return '';
+  const n=picBuyList().length;
+  // 🆕 means somebody added a job without you, which you want to know about
+  // even when there is nothing to buy.
+  return (n? ' ('+n+')' : '') + (picNewFromMembers().length? ' 🆕' : '');
+}
+function picnicHTML(){
+  if(!picOn()) return picSetupHTML();
+  const y=picY();
+  const tabs=[['supplies','📦 Supplies'],['jobs','✅ Jobs'],['plan','🕐 The day'],['buy','🛒 To buy'+(picBuyList().length?' ('+picBuyList().length+')':'')]];
+  if(!tabs.some(([t])=>t===picTab)) picTab='supplies';
+  const days=picDaysAway();
+  return `<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <div><b style="font-size:17px">${esc(y.label||('Picnic '+picYearKey()))}</b>
+        <div class="muted">${y.date? new Date(y.date+'T12:00:00').toLocaleDateString('en-CA',{weekday:'long',month:'long',day:'numeric',year:'numeric'})+(days?' · '+days:'') : 'No date set yet'}</div></div>
+      <div class="rowbtns noprint">
+        <button class="btn small gray" onclick="picDateSheet()">📅 Date</button>
+        ${picYearList().length>1?`<button class="btn small gray" onclick="picYearSheet()">🗂 ${picYearList().length} years</button>`:''}
+        <button class="btn small gray" onclick="picRolloverSheet()">🎪 Next year</button>
+      </div>
+    </div>
+    <div class="tabbar noprint" style="margin-bottom:10px">${tabs.map(([t,l])=>
+      `<button class="${picTab===t?'on':''}" onclick="picTab='${t}';rerender()">${l}</button>`).join('')}</div>
+    ${picTab==='supplies'? picSuppliesHTML() : picTab==='jobs'? picJobsHTML()
+      : picTab==='plan'? picPlanHTML() : picBuyHTML()}`;
+}
+function picSetupHTML(){
+  return `<h2>🎪 The picnic</h2>
+    <p class="muted">This is where the seven bins in the mezzanine and the Master List of who is doing what
+      both live. Nothing is loaded yet.</p>
+    <div class="card"><b>Load the Master List</b>
+      <p class="muted">This puts in ${PIC_SEED_ITEMS.length} supply items across bins 1 to 7 with the targets
+        from the Master List of 26 July 2026, all ${PIC_SEED_JOBS.length} jobs against the right names with the
+        ones already marked <i>(Completed)</i> ticked off, and the whole ${PIC_SEED_SLOTS.length}-stop running
+        order for the day. You can change any of it afterwards.</p>
+      <button class="btn" onclick="picSeed()">📋 Load the Master List</button>
+      <p class="muted">Nothing is counted to start with. Every item shows as <b>not counted yet</b> until
+        somebody goes to the bin — which is not the same thing as showing zero.</p>
+    </div>`;
+}
+function picYearSheet(){
+  const cur=picYearKey();
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>🗂 Picnic years</h3>
+    ${picYearList().map(k=>{
+      const y=((S.picnic||{}).years||{})[k]||{};
+      const jobs=Object.values(y.jobs||{}), items=Object.values(y.items||{});
+      return `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div><b>${esc(y.label||('Picnic '+k))}</b>${k===cur?' <span class="memberflag">SHOWING</span>':''}
+          <div class="muted">${items.length} items · ${jobs.length} jobs · ${jobs.filter(j=>j.done).length} done</div></div>
+        ${k===cur?'':`<button class="btn small gray" onclick="picSwitchYear('${esc(k)}')">Open</button>`}
+      </div></div>`; }).join('')}
+    <p class="muted">Old years are kept exactly as they were left. Switching does not change anything.</p>`);
+}
+
+/* ----------------------------- SUPPLIES -----------------------------------
+   v3.20. One renderer serves both the admin's Supplies tab and the member's
+   Bins tab, because the two must never drift apart on what the club owns.
+   `live` is the only difference: it adds the counters, the pencils, the
+   reorder arrows and the buttons that change things.                       */
+function picSuppliesHTML(){ return picStockHTML(true); }
+function picStockHTML(live){
+  const all=picItems(), counted=picCountedN(), short=picBuyList().length;
+  const pct=all.length? Math.round(counted/all.length*100) : 0;
+  const sfx=live?'a':'m';
+  const chip=(k,l)=>`<button class="${picFilt===k?'on':''}" onclick="picFilt='${k}';picStockRedraw(${live?1:0})">${l}</button>`;
+  const vtab=(k,l)=>`<button class="${picStockView===k?'on':''}" onclick="picStockView='${k}';picStockRedraw(${live?1:0})">${l}</button>`;
+
+  let h=printHead('Picnic supplies — '+esc(picYearKey()),
+      counted+' of '+all.length+' items counted · '+short+' short')+`
+    <div class="card noprint">
+      <div style="display:flex;justify-content:space-between;font-size:13px"><b>Count progress</b>
+        <b>${counted} / ${all.length}</b></div>
+      <div class="picbar ${pct>=100?'':'part'}"><i style="width:${pct}%"></i></div>
+      <p class="muted" style="margin:6px 0 0">Grey means <b>nobody has been to that bin yet</b>. It is not the
+        same as zero, and it never lands on the shopping list.</p>
+    </div>
+    <input class="searchbox noprint" id="picSearch_${sfx}" value="${esc(picQ)}"
+      placeholder="🔍 Find an item — it tells you which bin"
+      oninput="picQ=this.value;picStockRedraw(${live?1:0})">
+    <div class="tabbar noprint">${vtab('bins','📦 By bin')}${vtab('list','📋 Full list')}
+      ${chip('all','All '+all.length)}${chip('un','Not counted '+(all.length-counted))}${chip('short','Short '+short)}</div>
+    <div id="picStockList_${sfx}">${picStockBody(live)}</div>`;
+
+  if(live) h+=`<div class="rowbtns noprint" style="margin-top:10px">
+      <button class="btn small gray" onclick="picItemSheet('')">＋ New item</button>
+      <button class="btn small gray" onclick="picBinSheet('')">＋ New bin</button>
+      <button class="btn small gray" onclick="picExportCSV()">⬇ CSV</button>
+      <button class="btn small gray" onclick="window.print()">🖨 Print</button>
+    </div>`;
+  return h;
+}
+/* Redrawing only the list, not the whole screen, so typing in the search box
+   does not tear the box out from under the caret. The two possible lists —
+   the admin's and the member's — can both be sitting in the page at once, so
+   they are addressed by their own ids rather than by whichever comes first. */
+function picStockRedraw(live){
+  const sfx=live?'a':'m', el=$('picStockList_'+sfx);
+  if(!el){ rerender(); return; }
+  el.innerHTML=picStockBody(!!live);
+}
+/* The poll redraws everything every few seconds, which throws the search box
+   away and the caret with it. So look at the live page BEFORE the redraw,
+   remember which box had the caret and where it was sitting, and put it back
+   afterwards — otherwise a slow typist loses a word every three seconds.
+   Reading it off the DOM rather than off a focus handler is deliberate:
+   taking an element out of the page fires `blur`, so a flag kept by a blur
+   handler has already been wiped by the time you come to use it.           */
+function picFocusSnap(){
+  const el=document.activeElement;
+  if(!el || !/^picSearch_/.test(el.id||'')) return null;
+  let at=null; try{ at=el.selectionStart; }catch(e){}
+  return {id:el.id, at:(at==null? (el.value||'').length : at)};
+}
+function picRefocus(snap){
+  if(!snap) return;
+  const el=$(snap.id); if(!el || el===document.activeElement) return;
+  el.focus();
+  try{ el.setSelectionRange(snap.at, snap.at); }catch(e){}
+}
+function picStockBody(live){
+  const q=picQnorm();
+  let list=picItems();
+  if(picFilt==='un') list=list.filter(([,i])=>!picIsCounted(i));
+  else if(picFilt==='short') list=list.filter(([,i])=>picShortOf(i)>0);
+  if(q) list=list.filter(([,i])=>picHit(i,q));
+
+  // A search is a "where is it" question, so it always answers as a flat list
+  // with the bin spelled out — never as drawers you would have to open.
+  if(q || picStockView==='list') return picFlatHTML(list,live,q);
+
+  const bins=picBins();
+  if(!bins.length) return '<div class="empty">No bins yet. Tap <b>＋ New bin</b> to make the first one.</div>';
+  return bins.map(n=>{
+    const rows=list.filter(([,i])=>(+i.bin||0)===+n);
+    const own=picBinItems(n);
+    const sh=own.filter(([,i])=>picShortOf(i)>0).length;
+    const un=own.filter(([,i])=>!picIsCounted(i)).length;
+    const open=picOpen[n]===true;
+    const meta=[own.length+' item'+(own.length===1?'':'s'),
+      un? un+' not counted':'', sh? '<b>'+sh+' short</b>':''].filter(Boolean).join(' · ');
+    return `<div class="card" style="padding:0 12px">
+      <div class="picbinhd" onclick="picBinToggle(${n},${live?1:0})">
+        <span class="picchev">${open?'▾':'▸'}</span>
+        <span class="picbinnm">${esc(picBinTitle(n))}</span>
+        <span class="picbinct">${meta}</span>
+        ${live?`<button class="picx" onclick="event.stopPropagation();picBinSheet('${n}')">✎</button>`:''}
+      </div>
+      ${open? `<div class="picbinbody">${rows.length
+          ? rows.map(([id,it])=>picItemRow(id,it,live,live&&picFilt==='all')).join('')
+          : '<div class="muted" style="padding:10px 0;font-size:12.5px">'+
+            (own.length? 'Nothing in this bin matches the filter.' : 'This bin is empty.')+'</div>'}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+function picBinToggle(n,live){ picOpen[n]=!picOpen[n]; picStockRedraw(live); }
+function picBinsOpenAll(v,live){
+  picBins().forEach(n=>{ if(v) picOpen[n]=true; else delete picOpen[n]; });
+  picStockRedraw(live);
+}
+/* The spreadsheet view — every item on one sheet, the way Luca's Excel file
+   read, so you can scan the whole picnic without opening eight drawers.    */
+function picFlatHTML(list,live,q){
+  if(!list.length) return `<div class="empty">${q? 'Nothing matches “'+esc(picQ)+'”.' : 'Nothing here.'}</div>`;
+  const rows=list.slice().sort((a,b)=>((+a[1].bin||0)-(+b[1].bin||0))||((a[1].order||0)-(b[1].order||0)));
+  return `${q?`<p class="muted noprint">${rows.length} match${rows.length===1?'':'es'} for “${esc(picQ)}”.</p>`:''}
+    <div class="card scrollx" style="padding:0 12px"><table class="sheet">
+    <thead><tr><th>Bin</th><th>Item</th><th class="r">Need</th><th>Unit</th><th class="r">In stock</th>
+      <th class="r">Buy</th><th>Note</th></tr></thead><tbody>
+    ${rows.map(([id,it])=>{
+      const c=picIsCounted(it), sh=picShortOf(it);
+      return `<tr${live?` style="cursor:pointer" onclick="picItemSheet('${id}')"`:''}>
+        <td><span class="picfound">${+it.bin||'?'}</span></td>
+        <td>${it.parent?'↳ ':''}${esc(it.name||'')}</td>
+        <td class="r">${+it.need||0}</td>
+        <td>${esc(it.unit||'')}${it.per?' ×'+it.per:''}</td>
+        <td class="r">${c? it.have : '<span class="muted">not counted</span>'}</td>
+        <td class="r">${sh? '<b class="neg">'+sh+'</b>' : c? '<span class="muted">—</span>' : '<span class="muted">?</span>'}</td>
+        <td class="muted">${esc(it.note||'')}</td></tr>`;
+    }).join('')}</tbody></table></div>`;
+}
+// One item. `live` false renders it read-only, for a member looking at the list.
+// `mv` adds the admin's up/down arrows.
+function picItemRow(id,it,live,mv){
+  const counted=picIsCounted(it), short=picShortOf(it);
+  const tag = !counted? '<span class="pictag un">NOT COUNTED</span>'
+    : short? '<span class="pictag short">BUY '+short+'</span>'
+    : (+it.have||0)>(+it.need||0)? '<span class="pictag over">+'+((+it.have)-(+it.need))+'</span>'
+    : '<span class="pictag ok">OK</span>';
+  const tot=counted&&+it.per? ' ≈ '+((+it.have||0)*(+it.per)).toLocaleString('en-CA') : '';
+  return `<div class="picit${it.parent?' sub':''}">
+    <div class="picr1">
+      <div><div class="picnm">${esc(it.name||'')}</div>
+        <div class="picneed">${esc(picNeedLabel(it))}</div></div>
+      ${tag}
+    </div>
+    ${live? `<div class="picr2">
+      <div class="picstep">
+        <button onclick="picStep('${id}',-1)">−</button>
+        <input type="text" inputmode="numeric" class="${counted?'':'un'}"
+          value="${counted? it.have : '—'}" onchange="picTypeHave('${id}',this)">
+        <button onclick="picStep('${id}',1)">＋</button>
+      </div>
+      <span class="muted">${counted? esc(it.unit||'in stock')+tot : 'tap ＋ to start counting'}</span>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:6px">
+        ${mv&&isAdmin()&&!it.parent? picMvBtns('Item',id,picItemMoveable(id,it,-1),picItemMoveable(id,it,1)):''}
+        <button class="btn small gray" onclick="picItemSheet('${id}')">✎</button></div>
+    </div>` : `<div class="picr2"><span class="muted">${counted? 'In stock: '+it.have+' '+esc(it.unit||'')+tot : 'not counted yet'}</span></div>`}
+    ${it.note?`<div class="muted" style="font-size:11.5px;margin-top:3px">${esc(it.note)}</div>`:''}
+  </div>`;
+}
+
+/* -------------------------------- JOBS ------------------------------------ */
+function picJobsHTML(){
+  const all=picJobs(), done=picDoneN(all);
+  const people=[...new Set(all.map(([,j])=>(j.who||'').trim()))].filter(Boolean).sort();
+  const pct=all.length? Math.round(done/all.length*100) : 0;
+  const list=picJobList();
+  const chip=(k,l)=>`<button class="${picWho===k?'on':''}" onclick="picWho='${jsq(k)}';rerender()">${l}</button>`;
+  const anyN=all.filter(([,j])=>!(j.who||'').trim()).length;
+
+  const nologin=picNoLogin(), fresh=picNewFromMembers();
+  let h=printHead('Picnic jobs — '+esc(picYearKey()), done+' of '+all.length+' done')+`
+    <div class="card noprint">
+      <div style="display:flex;justify-content:space-between;font-size:13px"><b>All jobs</b><b>${done} / ${all.length} done</b></div>
+      <div class="picbar ${pct>=100?'':'part'}"><i style="width:${pct}%"></i></div>
+    </div>
+    ${fresh.length?`<div class="card noprint"><b>🆕 ${fresh.length} job${fresh.length===1?'':'s'} added by ${fresh.length===1?'a member':'members'}</b>
+      <p class="muted">${fresh.map(([id,j])=>`<b>${esc(j.addedBy||'someone')}</b> put “${esc(j.text||'')}” on their own list`).join('<br>')}</p>
+      <p class="muted">They are already on the list and count towards the totals. Tap the pencil on any of them
+        to re-word it, hand it to somebody else or take it off.</p>
+      <button class="btn small gray" onclick="picSeenAll()">✓ Got it</button></div>`:''}
+    ${nologin.length?`<div class="card noprint"><b>⚠ ${nologin.map(esc).join(', ')} ${nologin.length===1?'has jobs':'have jobs'} but no login yet</b>
+      <p class="muted">Their work is on the list, but they cannot open the app to see it or tick anything off —
+        only you can. Add them under <b>Users</b> with the same spelling and the jobs find them on their own.</p>
+      <button class="btn small gray" onclick="adminTab='users';rerender()">👤 Go to Users</button></div>`:''}
+    <div class="card" style="padding:2px 12px">
+      ${people.map((n,i)=>{ const mine=picJobsOf(n), d=picDoneN(mine);
+        return `<div class="picperson" onclick="picWho='${jsq(n)}';rerender()">
+          <div class="picav a${(i%5)+1}">${esc(picInitials(n))}</div>
+          <div class="picpn">${esc(n)}<span class="picpc">${mine.length} job${mine.length===1?'':'s'} · ${d} done · ${mine.length-d} to go</span></div>
+          <div class="picar">›</div></div>`; }).join('')}
+      ${anyN?`<div class="picperson" onclick="picWho='any';rerender()">
+        <div class="picav a3">?</div>
+        <div class="picpn">Anyone<span class="picpc">${anyN} job${anyN===1?'':'s'} nobody owns yet</span></div>
+        <div class="picar">›</div></div>`:''}
+    </div>
+    <div class="tabbar noprint">${chip('','Everyone '+all.length)}${chip('out','Outstanding '+(all.length-done))}${chip('done','Done '+done)}${people.map(n=>chip(n,esc(n))).join('')}</div>
+    <h2>${picWho==='out'?'Still to do':picWho==='done'?'Done':picWho==='any'?'Nobody owns these yet':picWho?esc(picWho):'Every job'}</h2>`;
+
+  if(!list.length) return h+'<div class="empty">Nothing here.</div>'+picJobAddBtn();
+  h+='<div class="card" style="padding:2px 12px">'+list.map(([id,j])=>picJobRow(id,j,true)).join('')+'</div>';
+  return h+picJobAddBtn();
+}
+function picJobAddBtn(){
+  return `<div class="rowbtns noprint" style="margin-top:10px">
+    <button class="btn small" onclick="picJobSheet('')">＋ Add a job</button>
+    <button class="btn small gray" onclick="picExportCSV()">⬇ CSV</button>
+    <button class="btn small gray" onclick="window.print()">🖨 Print</button></div>`;
+}
+function picInitials(n){
+  const p=String(n||'').trim().split(/\s+/);
+  return ((p[0]||'?').charAt(0)+(p[1]?p[1].charAt(0):'')).toUpperCase();
+}
+// `admin` true shows the pencil and the reorder arrows. Ticking is decided
+// per job by picMayTick. A member gets a pencil only on a job they added
+// themselves and nobody has ticked.
+function picJobRow(id,j,admin){
+  const can=picMayTick(j), boss=admin&&isAdmin(), own=!boss&&picMayEditOwn(id);
+  return `<div class="picjob${j.done?' done':''}">
+    <div class="pictick${j.done?' on':''}${can?'':' locked'}" onclick="picToggleJob('${id}')">${j.done?'✓':''}</div>
+    <div class="pictx">${esc(j.text||'')}${j.member?' <span class="picadd">ADDED BY '+esc((j.addedBy||'').toUpperCase())+'</span>':''}
+      <span class="picby">${esc(j.who||'Anyone')}${j.done?' · done '+new Date(j.done).toLocaleDateString('en-CA',{month:'short',day:'numeric'})+(j.doneBy?' by '+esc(j.doneBy):''):''}${j.due&&!j.done?' · needed by '+esc(j.due):''}${j.note?' · '+esc(j.note):''}</span></div>
+    ${boss? picMvBtns('Job',id,picJobMoveable(id,-1),picJobMoveable(id,1)) : ''}
+    ${boss?`<button class="picx" onclick="picJobSheet('${id}')">✎</button>`
+      : own?`<button class="picx" onclick="picMyJobSheet('${id}')">✎</button>`:''}
+  </div>`;
+}
+
+/* ------------------------------- THE DAY ---------------------------------- */
+function picPlanHTML(){
+  const slots=picSlots();
+  let h=printHead('The day — '+esc(picYearKey()),
+      slots.length+' stops · times and staffing are yours to change')+`
+    <p class="muted noprint">This is the running order. Only an admin can move a time or change who is on a
+      station — everybody else sees it exactly as you leave it.</p>`;
+  if(!slots.length) return h+'<div class="empty">Nothing on the plan yet.</div>'+picSlotAddBtn();
+  h+=slots.map(([id,s])=>picSlotRow(id,s,true)).join('');
+  return h+picSlotAddBtn();
+}
+function picSlotAddBtn(){
+  return `<div class="rowbtns noprint" style="margin-top:10px">
+    <button class="btn small" onclick="picSlotSheet('')">＋ New slot</button>
+    <button class="btn small gray" onclick="window.print()">🖨 Print the day</button></div>`;
+}
+function picSlotRow(id,s,admin){
+  const reqs=String(s.req||'').split('·').map(x=>x.trim()).filter(Boolean);
+  return `<div class="card${s.done?' picdone':''}">
+    <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline;flex-wrap:wrap">
+      <b class="picwhen">${esc(picWhen(s))}</b>
+      ${admin&&isAdmin()?`<span class="rowbtns noprint">
+        <button class="btn small gray" onclick="picSlotDone('${id}')">${s.done?'↩ Not done':'✔ Done'}</button>
+        <button class="btn small gray" onclick="picSlotSheet('${id}')">✎</button></span>`
+        :(s.done?'<span class="memberflag">DONE</span>':'')}
+    </div>
+    <div style="font-weight:800;font-size:15px;margin-top:2px">${esc(s.title||'')}</div>
+    ${s.who?`<div class="muted">👤 ${esc(s.who)}</div>`:''}
+    ${reqs.length?`<div style="margin-top:6px"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">Needs</div>
+      <div>${reqs.map(r=>`<span class="picreq">${esc(r)}</span>`).join('')}</div></div>`:''}
+    ${s.notes?`<div class="muted" style="margin-top:6px">${esc(s.notes)}</div>`:''}
+  </div>`;
+}
+
+/* ----------------------------- SHOPPING LIST ------------------------------ */
+function picBuyHTML(){
+  const list=picBuyList(), all=picItems(), un=all.length-picCountedN();
+  let h=printHead('Still to buy — '+esc(picYearKey()), list.length+' item'+(list.length===1?'':'s')+' short');
+  if(un) h+=`<div class="card"><b>${un} item${un===1?'':'s'} not counted yet</b>
+    <p class="muted">This list can only be as complete as the count. Finish the bins and it may well grow.</p></div>`;
+  if(!list.length) return h+'<div class="empty">Nothing is short. Either everything is in the bins, or the count is not done yet.</div>';
+  h+='<div class="card" style="padding:2px 12px">'+list.map(([,it])=>
+    `<div class="picbuy"><div class="picq">${picShortOf(it)}</div>
+      <div style="flex:1"><b>${esc(it.name)}</b>
+        <div class="muted">${esc(it.unit||'')}${it.per?' of '+it.per:''} · have ${it.have}, need ${it.need} · bin ${it.bin||'?'}</div></div>
+    </div>`).join('')+'</div>';
+  h+=`<div class="rowbtns noprint" style="margin-top:10px">
+      <button class="btn small gray" onclick="picShareBuy()">📤 Share</button>
+      <button class="btn small gray" onclick="window.print()">🖨 Print</button>
+    </div>
+    <button class="btn noprint" onclick="picBuyToJobs()">➕ Turn this into ${list.length} job${list.length===1?'':'s'}</button>
+    <p class="muted noprint">They go on the shared list as "Anyone", and you can hand each one to somebody
+      from the Jobs tab.</p>`;
+  return h;
+}
+
+/* ========================= THE MEMBER'S CARD ============================== */
+/* Everybody can see the whole picnic — the jobs, the day, the bins. What they
+   CANNOT do is add, remove, reassign or re-time anything, and they can only
+   tick their own work off. The card opens on their own list, because that is
+   what they came for; everything else is one tap away.                       */
+function picnicMemberHTML(){
+  if(!picOn()) return '';
+  const u=meU(); if(!u) return '';
+  const y=picY();
+  const mine=picJobsOf(u.name), mineDone=picDoneN(mine), mineOut=mine.length-mineDone;
+  const all=picJobs(), allDone=picDoneN(all);
+  const days=picDaysAway();
+  const tab=(k,l)=>`<button class="${picMemTab===k?'on':''}" onclick="picMemTab='${k}';rerender()">${l}</button>`;
+
+  let h=`<h2>🎪 ${esc(y.label||('Picnic '+picYearKey()))}</h2>`;
+  if(y.date) h+=`<p class="muted">${new Date(y.date+'T12:00:00').toLocaleDateString('en-CA',{weekday:'long',month:'long',day:'numeric',year:'numeric'})}${days?' · '+days:''}</p>`;
+
+  if(!mine.length && picMemTab==='mine') picMemTab='all';
+  h+=`<div class="tabbar noprint">${tab('mine','My jobs'+(mineOut?' ('+mineOut+')':''))}${tab('all','Everyone '+allDone+'/'+all.length)}${tab('plan','The day')}${tab('stock','The bins')}</div>`;
+
+  if(picMemTab==='all'){
+    h+=`<p class="muted">The whole club list, so you can see where everything stands. You can tick off
+      your own jobs from here too — the rest are somebody else's to tick.</p>`;
+    const out=all.filter(([,j])=>!j.done), fin=all.filter(([,j])=>!!j.done);
+    h+=`<h2>Still to do — ${out.length}</h2>`;
+    h+= out.length? '<div class="card" style="padding:2px 12px">'+out.map(([id,j])=>picJobRow(id,j,false)).join('')+'</div>'
+      : '<div class="empty">Everything is done. Well done, all.</div>';
+    h+=`<h2>Done — ${fin.length}</h2>`;
+    h+= fin.length? '<div class="card" style="padding:2px 12px">'+fin.map(([id,j])=>picJobRow(id,j,false)).join('')+'</div>'
+      : '<div class="empty">Nothing ticked off yet.</div>';
+    return h;
+  }
+  if(picMemTab==='plan'){
+    h+=`<p class="muted">The running order for the day, and what each station needs. Times are set by an
+      admin — if something here looks wrong, say so and it gets changed in one place for everybody.</p>`;
+    const slots=picSlots();
+    return h + (slots.length? slots.map(([id,s])=>picSlotRow(id,s,false)).join('')
+      : '<div class="empty">The day has not been planned out yet.</div>');
+  }
+  if(picMemTab==='stock'){
+    h+=`<p class="muted">What is in the bins in ${esc(picAdminName())}'s mezzanine — by bin, or as one full
+      list, and the search finds anything and tells you which bin it is in. Counting is an admin job, so
+      there is nothing here to press: it is so you can see what the club already owns before you go and
+      buy any of it.</p>`;
+    return h+picStockHTML(false);
+  }
+
+  // ---- my jobs (the default) ----
+  const pct=mine.length? Math.round(mineDone/mine.length*100) : 0;
+  h+=`<div class="card">
+      <div style="display:flex;justify-content:space-between;font-size:13px"><b>My jobs</b>
+        <b>${mineDone} / ${mine.length} done</b></div>
+      <div class="picbar ${pct>=100?'':'part'}"><i style="width:${pct}%"></i></div>
+    </div>`;
+  if(!mine.length) return h+`<div class="empty">You have no picnic jobs yet. Tap <b>Everyone</b> above to see
+    the whole list — and if something should be yours, ask an admin to put it on you.</div>`+picMyAddBtn();
+  const out=mine.filter(([,j])=>!j.done), fin=mine.filter(([,j])=>!!j.done);
+  h+=`<h2>Still to do — ${out.length}</h2>`;
+  h+= out.length? '<div class="card" style="padding:2px 12px">'+out.map(([id,j])=>picJobRow(id,j,false)).join('')+'</div>'
+    : '<div class="empty">You are all done. 👏</div>';
+  if(fin.length){
+    h+=`<h2>Done — ${fin.length}</h2>
+      <div class="card" style="padding:2px 12px">${fin.map(([id,j])=>picJobRow(id,j,false)).join('')}</div>`;
+  }
+  h+=picMyAddBtn();
+  h+=`<p class="muted">You can put a job on your own list any time. To change what somebody else is doing —
+    or to take off a job an admin gave you — ask ${esc(picAdminName())}.</p>`;
+  return h;
+}
+function picMyAddBtn(){
+  return `<div class="rowbtns noprint" style="margin-top:10px">
+    <button class="btn small" onclick="picMyJobSheet('')">＋ Add a job for myself</button></div>`;
 }
 
 /* ------------- ONE-TIME TIDY-UP: the picnic expense category --------------
