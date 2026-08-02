@@ -454,7 +454,15 @@
    };
    ========================================================================== */
 const APP_VERSION = 'v3.21';
-const FIREBASE_CONFIG = null;   // ← replace null with your config to go live
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
+  authDomain: "three-aces.firebaseapp.com",
+  databaseURL: "https://three-aces-default-rtdb.firebaseio.com",
+  projectId: "three-aces",
+  storageBucket: "three-aces.firebasestorage.app",
+  messagingSenderId: "1078244282125",
+  appId: "1:1078244282125:web:14fa73c7622a41640c6a44"
+};
 
 /* =========================== STARTING DATA ================================
    Seeded automatically the first time the app runs (from your stock-count
@@ -981,7 +989,7 @@ function tabDetailHTML(name, admin){
     </table></div>
     ${admin?`<div class="rowbtns noprint">
       <button class="btn" onclick="payTabModal('${esc(name).replace(/'/g,"\\'")}')">✓ Record a payment on this tab</button>
-    </div>`:`<p class="muted">Pay an admin (cash or e-transfer) and they'll mark it here — this page updates on its own.</p>`}`;
+    </div>`:`<p class="muted">Pay an Administrator (cash or e-transfer) and they'll mark it here — this page updates on its own.</p>`}`;
 }
 function tabModal(name){
   openModal(`<h3><button class="x" onclick="closeModal()">✕</button>🧾 ${esc(name)}'s tab</h3>`
@@ -3440,17 +3448,17 @@ function renderMyClub(){
             ${mn?`<p style="margin:8px 0 0;white-space:pre-wrap">${esc(mn)}</p>`
                 :'<p class="muted" style="margin:8px 0 0">The minutes for this meeting have not been written up yet.</p>'}
           </div>`; }).join('')}
-        <p class="muted">This is what was covered at the meetings you were away for. If something here looks wrong, speak to an admin.</p>`;
+        <p class="muted">This is what was covered at the meetings you were away for. If something here looks wrong, speak to an Administrator.</p>`;
     }
     if(r){
       const cnt={P:0,L:0,AN:0,A:0,NP:0};
       Object.values(myMarks).forEach(v=>{ if(cnt[v]!==undefined) cnt[v]++; });
       html+=`<p class="muted">${attLegendHTML()}<br>My year so far: P ${cnt.P} · L ${cnt.L} · AN ${cnt.AN} · A ${cnt.A}${cnt.NP?' · NP '+cnt.NP:''}</p>`;
     } else {
-      html+=`<p class="muted">You're not on the attendance register yet — ask the admin to add you (the register name must match your login name).</p>`;
+      html+=`<p class="muted">You're not on the attendance register yet — ask an Administrator to add you (the register name must match your login name).</p>`;
     }
   } else {
-    html+=`<p class="muted">The attendance register hasn't been opened yet — it appears once the admin opens the Attendance tab.</p>`;
+    html+=`<p class="muted">The attendance register hasn't been opened yet — it appears once an Administrator opens the Attendance tab.</p>`;
   }
   if(F && !staff){
     const target=F.sponsorTarget||500;
@@ -3665,7 +3673,7 @@ function renderMyMoney(){
       <tr><td>− already paid out to you</td><td class="r pos">${fmt(paidOut)}</td></tr>
       <tr><td><b>Club still owes you</b></td><td class="r ${clubOwes>0.005?'goldtxt':'pos'}"><b>${fmt(Math.max(0,clubOwes))}</b></td></tr>
     </table></div>`:''}
-    <p class="muted">When you hand money in (or get paid your share), an admin records it on the Money screen with the date it actually happened — these numbers update automatically.</p>
+    <p class="muted">When you hand money in (or get paid your share), an Administrator records it on the Money screen with the date it actually happened — these numbers update automatically.</p>
     <h2>Each sale in this period</h2>
     ${inRange.map(s=>`<div class="card salecard">
       <div class="hd"><span>${new Date(s.ts).toLocaleDateString('en-CA')}
@@ -5437,7 +5445,7 @@ function claimModal(id){
       <button class="btn gray" type="button" onclick="_cl.receipt=null;window._feInvNew=null;$('feInvPrev').style.display='none';$('feInvName').style.display='none';toast('Receipt removed')">Remove</button>
     </div>
     <p class="muted" style="margin:4px 0 0">A receipt is <b>not compulsory</b> — file it either way. Claims without one are
-      simply marked so, and an admin can ask you about it.</p>
+      simply marked so, and an Administrator can ask you about it.</p>
     <input type="file" id="feInvCam" accept="image/*" capture="environment" style="display:none" onchange="feInvoicePick(this)">
     <input type="file" id="feInvFile" accept="image/*,.pdf,.doc,.docx,application/pdf" style="display:none" onchange="feInvoicePick(this)">
     <label>Note (what it was, where you bought it)</label>
@@ -5480,7 +5488,7 @@ async function claimSave(){
     note:note||null, receipt:receipt||null, status:'waiting',
     trail:[{ts:Date.now(), by:mine, what:'Filed — '+fmt(amt)+' · '+cat+(receipt?' · receipt attached':' · no receipt')}]};
   await DB.set(['claims',newId()], c);
-  closeModal(); toast('Expense submitted — an admin will review it'); rerender();
+  closeModal(); toast('Expense submitted — an Administrator will review it'); rerender();
 }
 function claimWithdraw(id){
   const c=(S.claims||{})[id]||{};
@@ -5504,7 +5512,7 @@ function claimsMemberHTML(){
   const waiting=mine.filter(([,c])=>c.status==='waiting').reduce((a,[,c])=>a+c.amount,0);
   const paid=mine.filter(([,c])=>c.status==='paid').reduce((a,[,c])=>a+c.amount,0);
   let h=`<h2>💸 My expenses</h2>
-    <p class="muted">File what you paid for out of your own pocket and it goes straight to an admin — no paper,
+    <p class="muted">File what you paid for out of your own pocket and it goes straight to an Administrator — no paper,
       no waiting until the end of the night to hand anything over.</p>
     <div class="statgrid">
       <div class="stat ${owed>0.005?'gold':'green'}"><div class="v">${fmt(owed)}</div>
@@ -5883,7 +5891,7 @@ function exportClaimsCSV(){
 const SPON_ST={
   chasing :{lab:'Chasing it',                 cls:'gold',  ic:'🔎'},
   secured :{lab:'Got it — not sent in yet',   cls:'gold',  ic:'✋'},
-  waiting :{lab:'Waiting for an admin',       cls:'gold',  ic:'🕓'},
+  waiting :{lab:'Waiting for an Administrator',       cls:'gold',  ic:'🕓'},
   back    :{lab:'Sent back to you',           cls:'red',   ic:'↩'},
   done    :{lab:'Confirmed — it counts',      cls:'green', ic:'✔'},
   declined:{lab:'Declined',                   cls:'red',   ic:'✕'}
@@ -5946,7 +5954,7 @@ function sponsorModal(id){
       <p style="margin:6px 0 0;white-space:pre-wrap">${esc(r.backNote)}</p>
       <p class="muted" style="margin:6px 0 0">Fix it below and send it in again.</p></div>`:''}
     <p class="muted">Log the business here as soon as you have spoken to them. Nothing you enter goes into the
-      club's books — an admin does that when the money or the goods actually arrive, and <b>that</b> is what
+      club's books — an Administrator does that when the money or the goods actually arrive, and <b>that</b> is what
       completes your sponsor for the season.</p>
     <label>Who is claiming it</label>
     <input value="${esc(mine)}" disabled style="opacity:.75">
@@ -5973,7 +5981,7 @@ function sponsorModal(id){
     <div class="payrow">
       <button type="button" id="spSchasing" onclick="sponsStatusPick('chasing')">🔎 Still chasing</button>
       <button type="button" id="spSsecured" onclick="sponsStatusPick('secured')">✋ Got it — not ready to send</button>
-      <button type="button" id="spSwaiting" onclick="sponsStatusPick('waiting')">🕓 Send it to the admin</button>
+      <button type="button" id="spSwaiting" onclick="sponsStatusPick('waiting')">🕓 Send it to an Administrator</button>
     </div>
     <p class="muted" id="sp_stathelp" style="margin:0 0 10px"></p>
     <label>Photo of the cheque or the confirmation — optional</label>
@@ -6007,18 +6015,18 @@ function sponsKind(k){
   if(h) h.innerHTML = k==='inkind'
     ? 'Goods or services instead of money — food, printing, a prize. It still counts toward your sponsor in full, '
       +'but it is never counted as club cash, so put down what it is <b>worth</b>.'
-    : 'A cheque, an e-transfer or cash. It goes into the club’s books as income once an admin has it in hand.';
+    : 'A cheque, an e-transfer or cash. It goes into the club’s books as income once an Administrator has it in hand.';
 }
 function sponsStatusPick(s){
   _spStatus=s;
   ['chasing','secured','waiting'].forEach(k=>{ const b=$('spS'+k); if(b) b.className = k===s?'on':''; });
   const h=$('sp_stathelp');
   if(h) h.innerHTML = s==='chasing'
-    ? 'Still talking to them. Nobody is asked to do anything — but it shows on the admin’s list as being chased, '
+    ? 'Still talking to them. Nobody is asked to do anything — but it shows on an Administrator’s list as being chased, '
       +'so another member does not ring the same business.'
     : s==='secured'
     ? 'They have said yes but you are not ready to hand it over. It waits on your list until you send it in.'
-    : 'Goes to an admin now. When they have the '+(_spKind==='inkind'?'goods confirmed':'money in hand')
+    : 'Goes to an Administrator now. When they have the '+(_spKind==='inkind'?'goods confirmed':'money in hand')
       +', they confirm it and your sponsor for the season is done.';
 }
 function sponsDupWarn(){
@@ -6065,14 +6073,14 @@ async function sponsSave(){
     await DB.set(['sponsors',id],{...old, ...core, status:_spStatus, backNote:null,
       trail:sponsStamp(old,(old.status==='back'?'Fixed and sent in again':'Edited')+(ch.length?' — '+ch.join(', '):''))});
     closeModal();
-    toast(_spStatus==='waiting'?'Sent to an admin':'Saved'); rerender(); return;
+    toast(_spStatus==='waiting'?'Sent to an Administrator':'Saved'); rerender(); return;
   }
   const rec={ts:Date.now(), member:mine, ...core, status:_spStatus,
     trail:[{ts:Date.now(), by:mine, what:'Logged — '+biz+' · '+(_spKind==='inkind'?'in-kind':'cash')
       +(amt>0?' '+fmt(amt):'')+' · secured '+dstr(securedTs)}]};
   await DB.set(['sponsors',newId()], rec);
   closeModal();
-  toast(_spStatus==='waiting'? 'Sent to an admin — they confirm it when it lands'
+  toast(_spStatus==='waiting'? 'Sent to an Administrator — they confirm it when it lands'
       : _spStatus==='secured'? 'Saved — send it in when you are ready'
       : 'Saved — logged as being chased');
   rerender();
@@ -6081,7 +6089,7 @@ function sponsSubmit(id){
   const r=(S.sponsors||{})[id]||{};
   if(!(r.amount>0)){ toast('Put a figure on it first — open it and edit',1); return; }
   DB.set(['sponsors',id],{...r, status:'waiting', backNote:null,
-    trail:sponsStamp(r,'Sent in to an admin')}).then(()=>{ toast('Sent to an admin'); rerender(); });
+    trail:sponsStamp(r,'Sent in to an Administrator')}).then(()=>{ toast('Sent to an Administrator'); rerender(); });
 }
 function sponsWithdraw(id){
   const r=(S.sponsors||{})[id]||{};
@@ -6107,7 +6115,7 @@ function sponsorMineHTML(sy){
   const pend=sponsPending(mine);
   let h=`<button class="btn" onclick="sponsorModal()">＋ Log a sponsor</button>`;
   if(pend>0.005) h+=`<p class="muted" style="margin:6px 0 0"><b>${fmt(pend)} logged and waiting.</b>
-    It is not counted above until an admin has the money or the goods in hand — that is what keeps the
+    It is not counted above until an Administrator has the money or the goods in hand — that is what keeps the
     club's sponsor board honest. Nothing is lost; it is all listed below.</p>`;
   h+='<div style="height:10px"></div>';
   if(!shown.length) return h+`<div class="empty">You haven't logged a sponsor for this season yet.</div>`;
@@ -6122,13 +6130,13 @@ function sponsorMineHTML(sy){
         ${r.kind==='inkind'?' <span class="memberflag">IN-KIND</span>':''}</div>
       ${r.status==='back'&&r.backNote?`<div style="margin-top:6px;color:var(--gold)">↩ ${esc(r.backNote)}</div>`:''}
       ${r.status==='declined'&&r.declineNote?`<div style="margin-top:6px" class="neg">✕ ${esc(r.declineNote)}</div>`:''}
-      ${r.status==='done'?`<div style="margin-top:6px" class="pos">✔ Confirmed by ${esc(r.confirmedBy||'an admin')}
+      ${r.status==='done'?`<div style="margin-top:6px" class="pos">✔ Confirmed by ${esc(r.confirmedBy||'an Administrator')}
         on ${new Date(r.confirmedTs||Date.now()).toLocaleDateString('en-CA')} — it is in the books and it counts.</div>`:''}
       <div class="rowbtns" style="margin-top:8px">
         ${r.file?`<button class="btn small gray" onclick="sponsViewFile('${id}')">📎 Photo</button>`:''}
         <button class="btn small gray" onclick="sponsTrail('${id}')">🕘 History</button>
         ${editable?`<button class="btn small gray" onclick="sponsorModal('${id}')">✎ Edit</button>`:''}
-        ${(r.status==='chasing'||r.status==='secured')?`<button class="btn small" onclick="sponsSubmit('${id}')">🕓 Send to admin</button>`:''}
+        ${(r.status==='chasing'||r.status==='secured')?`<button class="btn small" onclick="sponsSubmit('${id}')">🕓 Send to an Administrator</button>`:''}
         ${editable?`<button class="btn small red" onclick="sponsWithdraw('${id}')">Withdraw</button>`:''}
         ${r.status==='declined'?`<button class="btn small gray" onclick="sponsClearDeclined('${id}')">Clear off my list</button>`:''}
       </div></div>`;
@@ -6959,7 +6967,7 @@ function picJobSheet(id){
     <input id="pj_note" value="${esc(j.note||'')}">
     <button class="btn" onclick="picJobSave('${id||''}')">${id?'Save':'Add to the list'}</button>
     ${id?`<button class="btn red" onclick="picJobDel('${id}')">🗑 Remove this job</button>
-      <p class="muted">Only an admin can add or remove a job. Removing asks for your PIN.</p>`:
+      <p class="muted">Only an Administrator can add or remove a job. Removing asks for your PIN.</p>`:
       `<p class="muted">It appears on their phone within a few seconds.</p>`}`);
   picWhoSum();
 }
@@ -7023,7 +7031,7 @@ async function picSeenAll(){
    take back their own while it is still untouched, so a typo is not forever. */
 function picMyJobSheet(id){
   const u=meU(); if(!u||!picOn()) return;
-  if(id && !picMayEditOwn(id)){ toast('Only an admin can change that one',1); return; }
+  if(id && !picMayEditOwn(id)){ toast('Only an Administrator can change that one',1); return; }
   const j=id? (((picY()||{}).jobs||{})[id]||{}) : {};
   openModal(`<h3><button class="x" onclick="closeModal()">✕</button>${id?'✎ My job':'＋ Add a job for myself'}</h3>
     <label>What you are going to do</label>
@@ -7036,11 +7044,11 @@ function picMyJobSheet(id){
     ${id?`<button class="btn red" onclick="picMyJobDel('${id}')">🗑 Take it off my list</button>
       <p class="muted">You can take this one off because you added it and nobody has ticked it yet.</p>`
      :`<p class="muted">It goes on your list straight away and ${esc(picAdminName())} is told it appeared.
-       To put a job on somebody else, ask an admin.</p>`}`);
+       To put a job on somebody else, ask an Administrator.</p>`}`);
 }
 function picAdminName(){
   const a=Object.values(S.users||{}).find(u=>u.role==='admin'&&u.active!==false);
-  return (a&&a.name)||'an admin';
+  return (a&&a.name)||'an Administrator';
 }
 async function picMyJobSave(id){
   const u=meU(); if(!u||!picOn()) return;
@@ -7048,7 +7056,7 @@ async function picMyJobSave(id){
   if(!text){ toast('Say what you are going to do',1); return; }
   const due=$('pm_due').value, note=$('pm_note').value.trim();
   if(id){
-    if(!picMayEditOwn(id)){ toast('Only an admin can change that one',1); return; }
+    if(!picMayEditOwn(id)){ toast('Only an Administrator can change that one',1); return; }
     await DB.set(picPath().concat(['jobs',id,'text']),text);
     await DB.set(picPath().concat(['jobs',id,'due']),due||null);
     await DB.set(picPath().concat(['jobs',id,'note']),note||null);
@@ -7063,7 +7071,7 @@ async function picMyJobSave(id){
   closeModal(); toast('Added to your list'); picMemTab='mine'; rerender();
 }
 function picMyJobDel(id){
-  if(!picMayEditOwn(id)){ toast('Only an admin can take that one off',1); return; }
+  if(!picMayEditOwn(id)){ toast('Only an Administrator can take that one off',1); return; }
   const j=((picY()||{}).jobs||{})[id]||{};
   pinConfirm('Take "'+(j.text||'')+'" off your list?', async()=>{
     if(!picMayEditOwn(id)) return;
@@ -7703,7 +7711,7 @@ function picPlanHTML(){
   const slots=picSlots();
   let h=printHead('The Day — '+esc(picYearKey()),
       slots.length+' stops · times and staffing are yours to change')+`
-    <p class="muted noprint">This is the running order. Only an admin can move a time or change who is on a
+    <p class="muted noprint">This is the running order. Only an Administrator can move a time or change who is on a
       station — everybody else sees it exactly as you leave it.</p>`;
   if(!slots.length) return h+'<div class="empty">Nothing on the plan yet.</div>'+picSlotAddBtn();
   h+=slots.map(([id,s])=>picSlotRow(id,s,true)).join('');
@@ -7804,7 +7812,7 @@ function picnicMemberHTML(){
   }
   if(picMemTab==='stock'){
     h+=`<p class="muted">What is in the bins in ${esc(picAdminName())}'s mezzanine — by bin, or as one full
-      list, and the search finds anything and tells you which bin it is in. Counting is an admin job, so
+      list, and the search finds anything and tells you which bin it is in. Counting is an Administrator job, so
       there is nothing here to press: it is so you can see what the club already owns before you go and
       buy any of it.</p>`;
     return h+picStockHTML(false);
@@ -7818,7 +7826,7 @@ function picnicMemberHTML(){
       <div class="picbar ${pct>=100?'':'part'}"><i style="width:${pct}%"></i></div>
     </div>`;
   if(!mine.length) return h+`<div class="empty">You have no picnic jobs yet. Tap <b>Everyone</b> above to see
-    the whole list — and if something should be yours, ask an admin to put it on you.</div>`+picMyAddBtn();
+    the whole list — and if something should be yours, ask an Administrator to put it on you.</div>`+picMyAddBtn();
   const out=mine.filter(([,j])=>!j.done), fin=mine.filter(([,j])=>!!j.done);
   h+=`<h2>Still to do — ${out.length}</h2>`;
   h+= out.length? '<div class="card" style="padding:2px 12px">'+out.map(([id,j])=>picJobRow(id,j,false)).join('')+'</div>'
@@ -7829,7 +7837,7 @@ function picnicMemberHTML(){
   }
   h+=picMyAddBtn();
   h+=`<p class="muted">You can put a job on your own list any time. To change what somebody else is doing —
-    or to take off a job an admin gave you — ask ${esc(picAdminName())}.</p>`;
+    or to take off a job an Administrator gave you — ask an Administrator.</p>`;
   return h;
 }
 function picMyAddBtn(){
