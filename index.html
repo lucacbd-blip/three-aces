@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#0d0d0d">
-<title>Three Aces — Clothing Sales</title>
+<title>Three Aces Club Manager</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80'>🂡</text></svg>">
 <style>
   :root{ /* LIGHT theme (default) */
@@ -107,6 +107,10 @@
   /* v3.18 — member pricing must be impossible to miss on the Sell tab */
   .memberflag.big{font-size:15px;font-weight:900;letter-spacing:.6px;padding:4px 10px;border-radius:8px;
     text-transform:uppercase;border:2px solid var(--membertx);}
+  /* v3.21 — a complimentary has to read differently from a discount at a glance */
+  .compflag{display:inline-block;background:#e8ddff;color:#4b2a9c;border-radius:6px;
+    font-size:11px;font-weight:900;letter-spacing:.5px;padding:2px 7px;margin-right:6px;}
+  body.dark .compflag{background:#2f2350;color:#c3aaff;}
   .memberlink{font-size:14px;font-weight:800;color:var(--gold);text-decoration:none;}
   .memberlink.on{text-transform:uppercase;letter-spacing:.4px;}
   .qtyctl{display:flex;align-items:center;gap:8px;}
@@ -265,6 +269,9 @@
   .picit{padding:9px 0;border-bottom:1px solid var(--line2);}
   .picit:last-child{border-bottom:0;}
   .picit.sub{padding-left:18px;border-left:2px solid var(--line2);}
+  /* v3.21 — a parent item reads as a drawer, so it looks pressable */
+  .picit.haskids .picnm .picchev{display:inline-block;width:auto;margin-right:2px;}
+  .picit.haskids .picr1:hover .picnm{color:var(--gold);}
   .picr1{display:flex;align-items:center;justify-content:space-between;gap:8px;}
   .picr2{display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap;}
   .picnm{font-weight:700;font-size:14px;flex:1;min-width:0;}
@@ -366,7 +373,7 @@
     <div class="stars"><span class="g">★</span> <span class="w">★</span> <span class="r">★</span></div>
     <h1>THREE ACES</h1>
     <p>ITALIAN CANADIAN CULTURAL CLUB</p>
-    <p style="color:var(--gold);margin-top:10px">Clothing Sales &amp; Inventory</p>
+    <p style="color:var(--gold);margin-top:10px">Club Manager</p>
   </div>
   <div style="max-width:340px;margin:0 auto">
     <label>Name</label>
@@ -446,16 +453,8 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.20';
-const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
-  authDomain: "three-aces.firebaseapp.com",
-  databaseURL: "https://three-aces-default-rtdb.firebaseio.com",
-  projectId: "three-aces",
-  storageBucket: "three-aces.firebasestorage.app",
-  messagingSenderId: "1078244282125",
-  appId: "1:1078244282125:web:14fa73c7622a41640c6a44"
-};
+const APP_VERSION = 'v3.21';
+const FIREBASE_CONFIG = null;   // ← replace null with your config to go live
 
 /* =========================== STARTING DATA ================================
    Seeded automatically the first time the app runs (from your stock-count
@@ -739,14 +738,33 @@ const DB = {
    node so the 3-second live sync never has to download them — a file is only
    fetched when someone taps 📎 to view it.                                   */
 function _filesUrl(id){ return FIREBASE_CONFIG.databaseURL.replace(/\/+$/,'')+'/threeacesFiles/'+encodeURIComponent(id)+'.json'; }
+function _fileMetaUrl(id){ return FIREBASE_CONFIG.databaseURL.replace(/\/+$/,'')+'/threeacesFileMeta'+(id?'/'+encodeURIComponent(id):'')+'.json'; }
+/* v3.21 — how big something is, in words a person reads without counting zeros. */
+function sizeLabel(bytes){
+  const b=Number(bytes)||0;
+  if(b<1024) return b+' B';
+  if(b<1024*1024) return Math.round(b/1024)+' KB';
+  return (Math.round(b/1024/1024*10)/10)+' MB';
+}
+/* The bytes a dataURL actually costs. Base64 is 4 characters per 3 bytes, and
+   the string is stored as-is, so the string length IS the storage cost — that
+   is the number worth showing, not the decoded size.                        */
+function dataUrlBytes(d){ return String(d||'').length; }
 async function fileSave(id,obj){        // obj = {name, type, data(dataURL)}
+  /* v3.21 — alongside every attachment we write a one-line note of its size to
+     a tiny separate node. That is what lets the Data screen say how full the
+     file store is without downloading every invoice to find out.            */
+  const meta={n:(obj&&obj.name)||'', t:(obj&&obj.type)||'', b:dataUrlBytes(obj&&obj.data), ts:Date.now()};
   if(CLOUD){
     const r=await _fx(_filesUrl(id),{method:'PUT',body:JSON.stringify(obj)});
     if(!r.ok) throw new Error('file save failed'+_ruleHint(r.status));
+    try{ await _fx(_fileMetaUrl(id),{method:'PUT',body:JSON.stringify(meta)}); }catch(e){}
     return;
   }
   const all=JSON.parse(localStorage.getItem('threeacesFiles')||'{}');
   all[id]=obj; localStorage.setItem('threeacesFiles',JSON.stringify(all));
+  const mt=JSON.parse(localStorage.getItem('threeacesFileMeta')||'{}');
+  mt[id]=meta; localStorage.setItem('threeacesFileMeta',JSON.stringify(mt));
 }
 async function fileLoad(id){
   if(CLOUD){
@@ -764,6 +782,12 @@ let picTab='supplies', picFilt='all', picWho='', picMemTab='mine';
    the database, because it is where one person is looking right now, not a
    fact about the picnic.                                                   */
 let picQ='', picOpen={}, picStockView='bins';
+/* v3.21 — an item that holds other items (the Three Aces tool box and its twelve
+   contents) gets its own drawer inside the bin drawer. Shut by default, because
+   the whole complaint was that one item ate the screen. Keyed by the head item's
+   id; nothing is remembered between sessions, which is what you want — you open
+   the tool box, count it, and it closes again next time. */
+let picItemOpen={};
 /* --------------------------- HOW A SALE WAS PAID ---------------------------
    Cash      — the SELLER walked away holding the money, so the seller owes the
                club everything they collected minus the profit share they keep.
@@ -778,6 +802,14 @@ const isTabSale=s=>s.payment==='Pay Later';
 const isDirectSale=s=>s.payment==='Interac';                 // straight to the club
 const isSellerCash=s=>!isTabSale(s)&&!isDirectSale(s);       // seller is holding it
 let cartDisc=null;   // {type:'pct'|'amt', value:n} — volume discount on the current sale
+/* v3.21 — COMPLIMENTARY.
+   The club has always done give-aways by typing a 100% volume discount. That works
+   at the till but it is invisible afterwards: it looks like any other discount, and
+   nothing says who authorised it. A complimentary is its own thing now — flagged on
+   the sale, PIN-gated, stamped with the name of whoever gave it away, and counted
+   separately in the report so the club can see what it hands out over a season.
+   The goods still leave the building, so stock still comes down. */
+let cartComp=null;   // {by:name} — the whole sale is complimentary (100% off)
 let stockView='grid', stockSortSize=null, reorderShowAll=false;
 
 const $=id=>document.getElementById(id);
@@ -1044,7 +1076,7 @@ function pinKey(k){
     }
   }
 }
-function logout(){ me=null; cart=[]; cartBuyer=''; cartDisc=null; memberUnlocked=false; sessionStorage.removeItem('ta_me'); rerender(); }
+function logout(){ me=null; cart=[]; cartBuyer=''; cartDisc=null; cartComp=null; memberUnlocked=false; sessionStorage.removeItem('ta_me'); rerender(); }
 
 // PC keyboard support on the login page: type digits (main row or number pad),
 // Backspace to erase, Esc/C to clear. Typing in the Name box is unaffected.
@@ -1127,6 +1159,12 @@ function discountedLines(){
   });
   const subtotal=Math.round(base.reduce((a,x)=>a+x.tot,0)*100)/100;
   let discAmt=0;
+  // A complimentary zeroes the whole sale outright. It is NOT run through the
+  // discount maths — it is its own flag, so the report can tell the two apart.
+  if(cartComp){
+    base.forEach(x=>{ x.newTot=0; x.unit=0; });
+    return {base, subtotal, discAmt:0, total:0, comp:true};
+  }
   if(cartDisc && subtotal>0){
     discAmt = cartDisc.type==='pct'
       ? subtotal*Math.min(100,cartDisc.value)/100
@@ -1163,39 +1201,88 @@ function openCart(){
       <div class="qtyctl">
         <button onclick="qty(${i},-1)">−</button><b>${l.qty}</b><button onclick="qty(${i},1)">+</button>
       </div></div>`).join('')}
-    ${cartDisc?`<div class="cartline">
+    ${cartComp?`<div class="cartline">
+      <div class="d"><div class="nm"><span class="compflag">🎁 COMPLIMENTARY</span> — nothing to collect</div>
+        <div class="sub">Given away by <b>${esc(cartComp.by)}</b> ·
+          <a href="#" style="color:var(--red)" onclick="cartComp=null;openCart();renderCartBar();return false">charge for it after all</a></div></div>
+      <div class="neg"><b>−${fmt(subtotal)}</b></div></div>
+      <div class="cart-total" style="font-size:15px;color:var(--muted)"><span>Retail value given away</span><span>${fmt(subtotal)}</span></div>`:''}
+    ${cartDisc&&!cartComp?`<div class="cartline">
       <div class="d"><div class="nm">Volume discount — ${cartDisc.type==='pct'?cartDisc.value+'%':fmt(cartDisc.value)+' off'}</div>
         <div class="sub"><a href="#" style="color:var(--red)" onclick="cartDisc=null;openCart();renderCartBar();return false">remove discount</a></div></div>
       <div class="neg"><b>−${fmt(discAmt)}</b></div></div>
       <div class="cart-total" style="font-size:15px;color:var(--muted)"><span>Subtotal</span><span>${fmt(subtotal)}</span></div>`:''}
     <div class="cart-total"><span>Total to collect</span><span class="goldtxt">${fmt(total)}</span></div>
-    <button class="btn gray" style="margin-bottom:10px" onclick="discountModal()">％ Volume discount ${cartDisc?'(change)':''}</button>
-    <label>Payment</label>
+    ${cartComp?'':`<button class="btn gray" style="margin-bottom:10px" onclick="discountModal()">％ Volume discount ${cartDisc?'(change)':''}</button>`}
+    ${cartComp?'':`<button class="btn gray" style="margin-bottom:10px" onclick="compModal()">🎁 Complimentary — give this away</button>`}
+    ${cartComp?`<p class="muted" style="margin:0 0 10px">There is no payment to take, so there is nothing to
+      choose here. Nobody's tab is touched.</p>`:`<label>Payment</label>
     <div class="payrow">
       ${PAY_METHODS.map(p=>`<button class="${payMethod===p?'on':''}" onclick="payMethod='${p}';openCart()">${p}</button>`).join('')}
     </div>
     ${payMethod==='Interac'?`<p class="muted" style="margin:6px 0 0">Tapped or e-transferred straight to the club — you are not
-      holding this money, so it never shows up as cash for you to hand in. Your profit share on it is paid back to you.</p>`:''}
+      holding this money, so it never shows up as cash for you to hand in. Your profit share on it is paid back to you.</p>`:''}`}
     ${(()=>{
       // v3.18 — attribution on every payment type. Pay Later is a debt ("who owes this"),
       // Cash / Interac is simply a record of who took it ("which member is purchasing this"),
       // because otherwise a cash member-price sale leaves no trace of who it went to.
       const memLine = cart.some(l=>l.member);
-      const lab = payMethod==='Pay Later'
+      const lab = cartComp
+        ? 'Who is this going to? (optional — leave blank if it went to the public)'
+        : payMethod==='Pay Later'
         ? 'Who owes this? (tracked on their tab until they pay)'
         : (memLine
             ? 'Which member is purchasing this? (required — this is a member price)'
             : 'Which member is purchasing this? (optional — leave blank for a public sale)');
       return `<label>${lab}</label>
       <select id="buyerSel" onchange="cartBuyer=this.value">
-        <option value="">${payMethod==='Pay Later'?'— pick the member —':'— nobody / public sale —'}</option>
+        <option value="">${(payMethod==='Pay Later'&&!cartComp)?'— pick the member —':'— nobody / public —'}</option>
         ${Object.values(S.users||{}).filter(u=>u.active!==false).map(u=>
           `<option ${cartBuyer===u.name?'selected':''}>${esc(u.name)}</option>`).join('')}
       </select><div style="height:10px"></div>`;
     })()}
-    <button class="btn" onclick="checkout()">✓ Complete Sale — ${fmt(total)}</button>
+    <button class="btn" onclick="checkout()">${cartComp?'🎁 Complete — Complimentary, collect nothing':'✓ Complete Sale — '+fmt(total)}</button>
     <div class="rowbtns"><button class="btn gray" onclick="closeModal()">Keep Selling</button>
-    <button class="btn red" onclick="cart=[];cartDisc=null;cartBuyer='';memberUnlocked=false;closeModal();renderCartBar()">Cancel Sale</button></div>`);
+    <button class="btn red" onclick="cart=[];cartDisc=null;cartComp=null;cartBuyer='';memberUnlocked=false;closeModal();renderCartBar()">Cancel Sale</button></div>`);
+}
+/* v3.21 — the complimentary gate.
+   Same shape as the member-price unlock: it says the number out loud, takes YOUR
+   OWN PIN, and puts your name on it. Anybody can authorise one — the point is not
+   to stop it happening, it is that the club knows it happened and who did it. */
+function compModal(){
+  const full=dmFull();
+  openModal(`<h3><button class="x" onclick="openCart()">✕</button>🎁 Complimentary</h3>
+    <p class="muted">This gives the <b>whole sale</b> away — nothing is collected. The items still come
+      off the shelf, because they are leaving the building. It is recorded as a complimentary in your
+      name, not as a discount, so the club can see everything it has given away.</p>
+    <div class="card" style="margin:0 0 12px">
+      ${cart.map(l=>`<div style="display:flex;justify-content:space-between">
+        <span>${l.qty}× ${esc(l.item)} ${esc(l.size)}</span>
+        <b>${fmt((l.member?(l.cost||0):(l.price||0))*l.qty)}</b></div>`).join('')}
+      <div style="display:flex;justify-content:space-between;font-size:20px;font-weight:800;
+           border-top:1px solid var(--line);margin-top:6px;padding-top:6px">
+        <span class="neg">Value given away</span><b class="neg">${fmt(full)}</b></div>
+      <div style="display:flex;justify-content:space-between;font-size:16px;margin-top:4px">
+        <span>You will collect</span><b class="goldtxt">${fmt(0)}</b></div>
+    </div>
+    <label>Your 4-digit PIN (this complimentary is recorded under your name)</label>
+    <input id="cp_pin" type="password" inputmode="numeric" maxlength="4" autocomplete="off"
+      style="font-size:26px;text-align:center;letter-spacing:10px"
+      onkeydown="if(event.key==='Enter')compGo()">
+    <div style="height:12px"></div>
+    <button class="btn" onclick="compGo()">🎁 Yes — give it away</button>
+    <div style="height:8px"></div>
+    <button class="btn gray" onclick="openCart()">Cancel — charge for it</button>`);
+  setTimeout(()=>{ const el=$('cp_pin'); if(el) el.focus(); },100);
+}
+function compGo(){
+  const el=$('cp_pin'); if(!el) return;
+  if(el.value!==meU().pin){ toast('That\'s not your PIN — nothing was given away',1); el.value=''; return; }
+  const full=dmFull();
+  cartComp={by:meU().name};
+  cartDisc=null;                      // a complimentary replaces any discount on the sale
+  toast('Complimentary — '+fmt(full)+' given away by '+meU().name);
+  openCart(); renderCartBar();
 }
 let _dmType='pct';
 function discountModal(){
@@ -1242,8 +1329,15 @@ function dmPrev(){
     box.style.display='block'; return;
   }
   const bad = _dmType==='pct' && v>100;
+  // 100% off is not a discount, it is a give-away. Send it to the right door.
+  const wholeSale = (_dmType==='pct' && v===100) || (_dmType==='amt' && c.full>0 && c.off>=c.full);
   box.innerHTML = bad
     ? `<div class="neg"><b>Percent can't be over 100.</b></div>`
+    : wholeSale
+    ? `<div><b class="goldtxt">That takes the whole sale to ${fmt(0)}.</b>
+         <p class="muted" style="margin:6px 0 0">That is a <b>complimentary</b>, not a discount — the club tracks
+           give-aways separately so it can see what it hands out. Go back and use the
+           <b>🎁 Complimentary</b> button on the sale instead.</p></div>`
     : `<div style="display:flex;justify-content:space-between;font-size:16px">
          <span class="muted">Total was</span><b style="text-decoration:line-through">${fmt(c.full)}</b></div>
        <div style="display:flex;justify-content:space-between;font-size:16px">
@@ -1262,6 +1356,12 @@ function applyDiscount(){
   if(v<=0){ toast('Enter the discount amount',1); return; }
   if(_dmType==='pct' && v>100){ toast('Percent can\'t be over 100',1); return; }
   const c=dmCalc(v);
+  // v3.21 — taking the sale to zero by hand used to be how give-aways were done.
+  // It is a complimentary: send it down that road so it gets flagged and counted.
+  if((_dmType==='pct' && v===100) || (c.full>0 && c.off>=c.full)){
+    toast('That is a complimentary — confirming it there instead',0);
+    compModal(); return;
+  }
   cartDisc={type:_dmType, value:Math.round(v*100)/100, by:meU().name};
   toast('Discount applied — '+fmt(c.full)+' → '+fmt(c.now));
   openCart(); renderCartBar();
@@ -1327,10 +1427,15 @@ function qty(i,d){
 let _busy=false;
 async function checkout(){
   if(_busy||!cart.length) return;
-  if(payMethod==='Pay Later' && !cartBuyer){ toast('Pick which member owes this',1); return; }
-  // v3.18 — a member price has to be attributed to a member, whatever the payment type
-  if(payMethod!=='Pay Later' && cart.some(l=>l.member) && !cartBuyer){
-    toast('This is a member price — pick which member is purchasing it',1); return; }
+  // v3.21 — a complimentary collects nothing, so there is no debt and no member
+  // price to attribute. It is always recorded as Cash of $0.00.
+  if(cartComp) payMethod='Cash';
+  if(!cartComp){
+    if(payMethod==='Pay Later' && !cartBuyer){ toast('Pick which member owes this',1); return; }
+    // v3.18 — a member price has to be attributed to a member, whatever the payment type
+    if(payMethod!=='Pay Later' && cart.some(l=>l.member) && !cartBuyer){
+      toast('This is a member price — pick which member is purchasing it',1); return; }
+  }
   _busy=true;
   const done=[];
   try{
@@ -1342,21 +1447,26 @@ async function checkout(){
       done.push(l);
     }
     const u=meU();
-    const {base, discAmt, total}=discountedLines();
+    const {base, subtotal, discAmt, total}=discountedLines();
     const sale={ts:Date.now(), sellerId:me, sellerName:u.name, sellerPct:u.profitPct||0,
       payment:payMethod, buyer:cartBuyer||null,
       voided:false, eventName:(S.settings&&S.settings.eventName)||'',
-      discount: cartDisc? {type:cartDisc.type, value:cartDisc.value, amount:discAmt, by:cartDisc.by||u.name} : null,
+      // v3.21 — a complimentary is its own record: who gave it away, when, and what
+      // it was worth at the price the club would have charged.
+      comp: cartComp? {by:cartComp.by||u.name, ts:Date.now(), value:subtotal} : null,
+      discount: (cartDisc&&!cartComp)? {type:cartDisc.type, value:cartDisc.value, amount:discAmt, by:cartDisc.by||u.name} : null,
       lines:base.map(x=>({itemId:x.l.itemId,item:x.l.item,size:x.l.size,qty:x.l.qty,
         price:x.unit, orig:(x.unit!==(x.l.regular??x.l.price))?(x.l.regular??x.l.price):null,
         salePct:x.l.salePct||0, grp:groupOf(S.items[x.l.itemId]),
         cost:x.l.cost, member:!!x.l.member, adhoc:!!x.l.adhoc})),
       total};
     await DB.push(['sales'], sale);
-    const msg = sale.payment==='Pay Later'
+    const msg = sale.comp
+      ? 'Complimentary recorded — '+fmt(sale.comp.value)+' given away'+(sale.buyer?' to '+sale.buyer:'')
+      : sale.payment==='Pay Later'
       ? 'Sale recorded — '+fmt(sale.total)+' on '+sale.buyer+"'s tab"
       : 'Sale recorded — '+fmt(sale.total)+' '+sale.payment+(sale.buyer?' — '+sale.buyer:'');
-    cart=[]; cartBuyer=''; cartDisc=null; payMethod='Cash'; memberUnlocked=false; closeModal(); renderCartBar();
+    cart=[]; cartBuyer=''; cartDisc=null; cartComp=null; payMethod='Cash'; memberUnlocked=false; closeModal(); renderCartBar();
     toast(msg);
   }finally{ _busy=false; }
 }
@@ -1613,7 +1723,7 @@ function renderSales(){
         · ${esc(s.sellerName)} ${s.voided?'<span class="voidtag">VOIDED</span>':''}${s.edited?' <span class="voidtag" style="color:var(--gold)">EDITED</span>':''}</span>
         <span>${fmt(sub)}${slGroup&&Math.abs(sub-s.total)>0.005?` <span class="muted">of ${fmt(s.total)}</span>`:''}</span></div>
       <div class="lines">${lines.map(l=>`${l.qty}× ${esc(l.item)} ${esc(l.size)}${l.member?' (member)':''}`).join(' · ')}
-        · ${esc(s.payment)}${s.buyer?(s.payment==='Pay Later'?` — <b>${esc(s.buyer)} owes</b>`:` — <b>${esc(s.buyer)}</b>`):''}${s.discount?` · <b class="neg">−${fmt(s.discount.amount)} discount</b> <span class="muted">(by ${esc(s.discount.by||s.sellerName)})</span>`:''}</div>
+        · ${s.comp?'<span class="compflag">🎁 COMPLIMENTARY</span>':esc(s.payment)}${s.buyer?(s.payment==='Pay Later'&&!s.comp?` — <b>${esc(s.buyer)} owes</b>`:` — <b>${esc(s.buyer)}</b>`):''}${s.comp?` · <b class="neg">${fmt(compValueOf(s))} given away</b> <span class="muted">(by ${esc(s.comp.by||s.sellerName)})</span>`:''}${s.discount&&!s.comp?` · <b class="neg">−${fmt(s.discount.amount)} discount</b> <span class="muted">(by ${esc(s.discount.by||s.sellerName)})</span>`:''}</div>
       <div class="lines muted">${[...new Set(lines.map(lineGroup))].map(g=>GRP_LABEL[g]).join(' · ')}</div>
       ${s.edited&&s.edited.movedFrom?`<div class="lines muted">📅 Back-dated from ${new Date(s.edited.movedFrom).toLocaleString('en-CA')} by ${esc(s.edited.by||'')}</div>`:''}
       ${s.note?`<div class="lines" style="color:var(--gold)">📝 ${esc(s.note)}</div>`:''}
@@ -1634,12 +1744,15 @@ function exportShownSalesCSV(){
   let list=salesSorted().reverse().filter(([,s])=>s.ts>=from&&s.ts<=to);
   if(slWho==='mine') list=list.filter(([,s])=>s.sellerId===me);
   else if(slWho!=='all') list=list.filter(([,s])=>s.sellerName===slWho);
-  const rows=[['Date','Time','Type of sale','Seller','Item','Size','Qty','Unit Price','Line Total','Payment','Owed By','Voided','Note','Back-dated From']];
+  const rows=[['Date','Time','Type of sale','Seller','Item','Size','Qty','Unit Price','Line Total','Payment','Owed By','Complimentary','Given Away By','Value Given Away','Voided','Note','Back-dated From']];
   list.forEach(([,s])=>{ const d=new Date(s.ts);
     s.lines.filter(l=>!slGroup||lineGroup(l)===slGroup).forEach(l=>rows.push([
       d.toLocaleDateString('en-CA'), d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}),
       GRP_LABEL[lineGroup(l)].replace(/^\S+\s/,''), s.sellerName, l.item, l.size, l.qty, l.price,
-      Math.round(l.price*l.qty*100)/100, s.payment, s.buyer||'', s.voided?'Y':'', s.note||'',
+      Math.round(l.price*l.qty*100)/100, s.payment, s.buyer||'',
+      isComp(s)?'Y':'', isComp(s)?(s.comp.by||s.sellerName):'',
+      isComp(s)?Math.round((l.member?(l.cost||0):lineList(l))*(l.qty||0)*100)/100:'',
+      s.voided?'Y':'', s.note||'',
       (s.edited&&s.edited.movedFrom)?new Date(s.edited.movedFrom).toLocaleString('en-CA'):'']));
   });
   dl('three-aces-sales-'+dstr(from)+'-to-'+dstr(to)+'.csv', rows.map(r=>r.map(csvCell).join(',')).join('\n'));
@@ -2901,13 +3014,15 @@ function feInvoicePick(inp){
   const f=inp.files&&inp.files[0]; if(!f) return;
   if(!(f.type||'').startsWith('image/')){
     // PDF / Word / any document — stored as-is (no compression possible)
-    if(f.size>4*1024*1024){ toast('File too big — keep it under 4 MB, or take a photo of it instead',1); inp.value=''; return; }
+    // v3.21 — a document cannot be squeezed, so the ceiling on one has to be
+    // low enough that the database does not fill up with them.
+    if(f.size>2*1024*1024){ toast('That file is '+sizeLabel(f.size)+' — too big. Keep documents under 2 MB, or take a photo of it instead',1); inp.value=''; return; }
     const rd=new FileReader();
     rd.onload=()=>{
       window._feInvNew={name:f.name||'invoice', type:f.type||'application/octet-stream', data:rd.result};
       const pv=$('feInvPrev'); if(pv) pv.style.display='none';
-      const nm=$('feInvName'); if(nm){ nm.textContent='📄 '+f.name+' — attached'; nm.style.display='block'; }
-      toast('Invoice file attached');
+      const nm=$('feInvName'); if(nm){ nm.textContent='📄 '+f.name+' — attached ('+sizeLabel(dataUrlBytes(rd.result))+')'; nm.style.display='block'; }
+      toast('Attached — '+sizeLabel(dataUrlBytes(rd.result)));
     };
     rd.readAsDataURL(f); inp.value=''; return;
   }
@@ -2915,20 +3030,37 @@ function feInvoicePick(inp){
   rd.onload=()=>{
     const img=new Image();
     img.onload=()=>{
-      let mx=1200,q=0.8,data='';
-      for(let k=0;k<3;k++){
+      /* v3.21 — SQUEEZE HARDER.
+         A phone photo off a modern camera is 3–6 MB. The old settings (1200px,
+         quality 0.8, stop under 450 KB, three tries) still left half a megabyte
+         per receipt sitting in the database forever. An invoice only has to be
+         READABLE, not printable: 1000px on the long edge is plenty to read a
+         total off, and the target is now 200 KB. We step the size and the
+         quality down together over more passes, and take the last result if
+         even that will not get there — a big attachment beats a lost one.   */
+      const MAXPX=1000, TARGET=200000;
+      const before=dataUrlBytes(rd.result);
+      let mx=MAXPX, q=0.72, data='', k=0;
+      for(k=0;k<6;k++){
         const sc=Math.min(1,mx/Math.max(img.width,img.height));
         const cv=document.createElement('canvas');
         cv.width=Math.max(1,Math.round(img.width*sc)); cv.height=Math.max(1,Math.round(img.height*sc));
-        cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+        const cx=cv.getContext('2d');
+        cx.fillStyle='#fff'; cx.fillRect(0,0,cv.width,cv.height);   // no black edges on a transparent PNG
+        cx.drawImage(img,0,0,cv.width,cv.height);
         data=cv.toDataURL('image/jpeg',q);
-        if(data.length<450000) break;
-        mx*=0.7; q=0.7;
+        if(data.length<TARGET) break;
+        mx=Math.round(mx*0.8); q=Math.max(0.45,Math.round((q-0.07)*100)/100);
       }
+      const after=dataUrlBytes(data);
       window._feInvNew={name:f.name||'photo.jpg', type:'image/jpeg', data};
       const nm=$('feInvName'); if(nm) nm.style.display='none';
       const pv=$('feInvPrev'); if(pv){ pv.src=data; pv.style.display='block'; }
-      toast('Invoice photo attached');
+      // Say what it did. People want to know the photo went in, and the club
+      // wants to see that the shrinking is actually working.
+      toast(before>after
+        ? 'Photo attached — shrunk from '+sizeLabel(before)+' to '+sizeLabel(after)
+        : 'Photo attached — '+sizeLabel(after));
     };
     img.src=rd.result;
   };
@@ -3332,10 +3464,17 @@ function renderMyClub(){
       .filter(t=>t.kind==='income'&&t.cat==='Donations'&&t.member&&(t.member||'').trim().toLowerCase()===(u.name||'').trim().toLowerCase()
         &&sponsorYearOf(t.ts)===sy-1);
     const got=mine.reduce((a,t)=>a+t.amount,0), gotLast=last.reduce((a,t)=>a+t.amount,0);
+    /* v3.21 — a donation that came in through the member's own sponsor log is shown
+       in full detail further down (with its status, photo and history), so listing it
+       up here as well would show the same sponsor to them twice. Only donations an
+       admin typed straight into the books appear in this short list. Both kinds still
+       count towards `got` — the total above is unchanged.                            */
+    const direct=mine.filter(t=>!t.sponsorId);
     html+=`<h2>⭐ My sponsor — ${sponsorYearLabel(sy)}</h2>
       <div class="stat ${got>=target?'green':'red'}"><div class="v">${got>=target?'✔ Done':fmt(target-got)+' to go'}</div>
         <div class="l">${got>=target?'Sponsor secured for this season — thank you!':'Every member secures a '+fmt(target)+' sponsor each season, or self-sponsors'}</div></div>
-      ${mine.length?`<div class="card">${mine.map(t=>`<div style="padding:4px 0"><b>${esc(t.sponsor||'Donation')}</b> — ${fmt(t.amount)}${t.inkind?' <span class="memberflag">IN-KIND</span>':''} <span class="muted">${new Date(t.ts).toLocaleDateString('en-CA')}</span></div>`).join('')}</div>`:''}
+      ${direct.length?`<div class="card">${direct.map(t=>`<div style="padding:4px 0"><b>${esc(t.sponsor||'Donation')}</b> — ${fmt(t.amount)}${t.inkind?' <span class="memberflag">IN-KIND</span>':''} <span class="muted">${new Date(t.ts).toLocaleDateString('en-CA')}</span></div>`).join('')}</div>`:''}
+      ${sponsorMineHTML(sy)}
       ${sponsorNoticeHTML(target,sy)}
       ${gotLast>0.005?`<p class="muted">Last season (${sponsorYearLabel(sy-1)}) you secured ${fmt(gotLast)}. That one is closed — it does not carry over.</p>`:''}`;
   }
@@ -3542,11 +3681,11 @@ function renderMyMoney(){
 /* ------------------------------- ADMIN ------------------------------------ */
 function renderAdmin(){
   if(!isAdmin()){ view='sell'; rerender(); return; }
-  let tabs=[['report','Report'],['money','Money'],['books','Books'],['claims','Claims'+claimsBadge()],['events','Event P&L'],['attend','Attendance'],['reorder','Reorder'],['restock','Restock'],['items','Items'],['users','Users'],['settings','Settings'],['data','Data']];
+  let tabs=[['report','Report'],['money','Money'],['books','Books'],['claims','Claims'+claimsBadge()],['sponsors','Sponsors'+sponsBadge()],['events','Event P&L'],['attend','Attendance'],['reorder','Reorder'],['restock','Restock'],['items','Items'],['users','Users'],['settings','Settings'],['data','Data']];
   tabs.splice(tabs.findIndex(([t])=>t==='reorder'),0,['picnic','Picnic'+picnicBadge()]);
   if(!clubRecOn()){
-    tabs=tabs.filter(([t])=>t!=='books'&&t!=='attend'&&t!=='events'&&t!=='claims');
-    if(adminTab==='books'||adminTab==='attend'||adminTab==='events'||adminTab==='claims') adminTab='report';
+    tabs=tabs.filter(([t])=>t!=='books'&&t!=='attend'&&t!=='events'&&t!=='claims'&&t!=='sponsors');
+    if(adminTab==='books'||adminTab==='attend'||adminTab==='events'||adminTab==='claims'||adminTab==='sponsors') adminTab='report';
   }
   $('adminTabs').innerHTML=tabs.map(([t,l])=>
     `<button class="${adminTab===t?'on':''}" onclick="adminTab='${t}';rerender()">${l}</button>`).join('');
@@ -3555,6 +3694,7 @@ function renderAdmin(){
   if(adminTab==='money') b.innerHTML=moneyHTML();
   if(adminTab==='books') b.innerHTML=booksHTML();
   if(adminTab==='claims') b.innerHTML=claimsHTML();
+  if(adminTab==='sponsors') b.innerHTML=sponsorsHTML();
   if(adminTab==='events') b.innerHTML=eventsHTML();
   if(adminTab==='attend') b.innerHTML=attendHTML();
   if(adminTab==='picnic') b.innerHTML=picnicHTML();
@@ -3638,9 +3778,19 @@ let repFrom=null, repTo=null, repPreset='today', repSeller='', repItem='', repDi
 function lineList(l){ return (l.orig!=null? l.orig : l.price); }        // shelf price
 function lineOff(l){ return Math.max(0,(lineList(l)-l.price))*(l.qty||0); }
 function lineCut(l){ return lineOff(l)>0.005; }
+/* v3.21 — what a complimentary was worth. New sales carry the figure on the record;
+   older ones (and any hand-typed 100% job from before this version) get it worked
+   back out of the lines, so the report never shows a give-away as $0.00. */
+function isComp(s){ return !!(s && s.comp); }
+function compValueOf(s){
+  if(s && s.comp && s.comp.value!=null) return s.comp.value;
+  return Math.round((s&&s.lines||[]).reduce((a,l)=>
+    a + (l.member? (l.cost||0) : lineList(l)) * (l.qty||0), 0)*100)/100;
+}
 // Why this line came in under the shelf price — in plain words, for the drill-down.
 function lineWhy(l,s){
   const w=[];
+  if(s&&s.comp){ return ['complimentary — given away by '+(s.comp.by||s.sellerName||'—')]; }
   if(l.member) w.push('member price (at cost)');
   if(l.salePct>0) w.push(l.salePct+'% off — item on sale');
   if(s&&s.discount) w.push('share of the '+(s.discount.type==='pct'?s.discount.value+'%':fmt(s.discount.value))
@@ -3654,6 +3804,7 @@ function repScopedSales(){
   let sales=salesSorted().map(([id,s])=>({id,s})).filter(x=>!x.s.voided&&x.s.ts>=from&&x.s.ts<=to);
   if(repSeller) sales=sales.filter(x=>x.s.sellerName===repSeller);
   if(repDisc==='sale') sales=sales.filter(x=>x.s.discount);
+  if(repDisc==='comp') sales=sales.filter(x=>isComp(x.s));
   return sales;
 }
 // ...and one place that decides which LINES of a scoped sale are in scope.
@@ -3684,10 +3835,11 @@ function repDrill(kind,key){
   const want=l=> kind==='group' ? lineGroup(l)===key
              : kind==='item'  ? (l.item+' — '+l.size)===key
              : kind==='off'   ? lineCut(l)
-             : true;                                  // 'seller' — whole sale
+             : true;                                  // 'seller' / 'comp' — whole sale
   const hits=[];
   repScopedSales().forEach(({id,s})=>{
     if(kind==='seller' && s.sellerName!==key) return;
+    if(kind==='comp' && !isComp(s)) return;
     const lines=repScopedLines(s).filter(want);
     if(lines.length) hits.push({id,s,lines});
   });
@@ -3698,6 +3850,7 @@ function repDrill(kind,key){
   const title = kind==='group' ? (GRP_LABEL[key]||key)
               : kind==='item'  ? key
               : kind==='off'   ? 'Everything sold below shelf price'
+              : kind==='comp'  ? '🎁 Complimentary — everything given away'
               : 'Sold by '+key;
   const rows=hits.map(({id,s,lines})=>{
     const paid = s.payment==='Pay Later'
@@ -3717,7 +3870,10 @@ function repDrill(kind,key){
           <td class="r"><b>${fmt(l.price)}</b></td>
           <td class="r ${o>0.005?'neg':'muted'}">${o>0.005?'−'+fmt(o):'—'}</td></tr>`; }).join('')}
       </table>
-      ${s.discount?`<p class="muted" style="margin:6px 0 0">🧾 A ${s.discount.type==='pct'?s.discount.value+'%':fmt(s.discount.value)+' off'}
+      ${s.comp?`<p style="margin:6px 0 0;color:var(--gold)">🎁 <b>Complimentary</b> — this whole sale was given
+        away by <b>${esc(s.comp.by||s.sellerName)}</b>. Nothing was collected. Worth <b>${fmt(compValueOf(s))}</b>
+        at the price the club would have charged, and the stock came off the shelf.</p>`:''}
+      ${s.discount&&!s.comp?`<p class="muted" style="margin:6px 0 0">🧾 A ${s.discount.type==='pct'?s.discount.value+'%':fmt(s.discount.value)+' off'}
         volume discount (−${fmt(s.discount.amount)}) was applied to this whole sale by <b>${esc(s.discount.by||s.sellerName)}</b>,
         spread across all ${s.lines.length} line${s.lines.length===1?'':'s'} on it${s.lines.length>lines.length?` — only ${lines.length} shown here`:''}.</p>`:''}
       ${s.note?`<p style="margin:6px 0 0;color:var(--gold)">📝 ${esc(s.note)}</p>`:''}
@@ -3746,12 +3902,25 @@ function reportHTML(){
   // which would include lines this report has filtered out.
   let offList=0, cutLines=0, volSales=0;
   let rev=0,cogs=0,units=0,nSales=0;
+  // v3.21 — give-aways counted in their own right: how many, what they were worth
+  // at shelf price, how many pieces walked out, and who authorised them.
+  let compSales=0, compValue=0, compUnits=0; const compBy={};
   const bySeller={}, byItem={}, byGroup={};
   sales.forEach(s=>{
     const lines = repScopedLines(s);
     if(!lines.length) return;
     nSales++;
-    if(s.discount) volSales++;
+    if(s.discount&&!s.comp) volSales++;
+    if(isComp(s)){
+      compSales++;
+      compValue += lines.reduce((a,l)=>a+(l.member?(l.cost||0):lineList(l))*(l.qty||0),0);
+      compUnits += lines.reduce((a,l)=>a+(l.qty||0),0);
+      const who=(s.comp.by||s.sellerName||'—');
+      compBy[who]=compBy[who]||{n:0,value:0,units:0};
+      compBy[who].n++;
+      compBy[who].value += lines.reduce((a,l)=>a+(l.member?(l.cost||0):lineList(l))*(l.qty||0),0);
+      compBy[who].units += lines.reduce((a,l)=>a+(l.qty||0),0);
+    }
     lines.forEach(l=>{ const o=lineOff(l); if(o>0.005){ offList+=o; cutLines++; } });
     const pct=(s.sellerPct||0)/100;
     let sRev=0,sProf=0,sUnits=0;
@@ -3780,6 +3949,7 @@ function reportHTML(){
   const filterSub=(repSeller?'seller: '+repSeller+' · ':'')+(repItem?'item: '+repItem+' · ':'')
     +(repGroup?'type: '+GRP_LABEL[repGroup].replace(/^\S+\s/,'')+' · ':'')
     +(repDisc==='sale'?'sales that carried a volume discount · ':'')
+    +(repDisc==='comp'?'complimentary — sales that were given away · ':'')
     +(repDisc==='line'?'only the items sold below shelf price · ':'');
   return printHead('Sales Report', filterSub + dstr(from)+' to '+dstr(to)) + `
    <div class="payrow noprint" style="flex-wrap:wrap">
@@ -3811,8 +3981,11 @@ function reportHTML(){
        <option value="">All sales — full price and marked down together</option>
        <option value="line" ${repDisc==='line'?'selected':''}>💸 Only the items that were sold below shelf price</option>
        <option value="sale" ${repDisc==='sale'?'selected':''}>🧾 Whole sales that carried a volume discount</option>
+       <option value="comp" ${repDisc==='comp'?'selected':''}>🎁 Complimentary — everything that was given away</option>
      </select>
    </div>
+   ${repDisc==='comp'?`<p class="muted noprint" style="margin:-6px 0 12px">Every sale below was given away —
+     nothing was collected for any of it. The figures are what the club would have taken at shelf price.</p>`:''}
    ${repDisc==='sale'?`<p class="muted noprint" style="margin:-6px 0 12px">A volume discount is taken off the
      <b>whole sale</b> and spread across its lines. Some items on these sales still went out at full shelf price —
      the money came off the others. To see only what was actually marked down, pick the first option instead.</p>`:''}
@@ -3825,10 +3998,23 @@ function reportHTML(){
      ${offList>0.005?`<div class="stat red" style="cursor:pointer" onclick="repDrill('off','')">
        <div class="v">−${fmt(offList)}</div>
        <div class="l">Off shelf price (${cutLines} line${cutLines===1?'':'s'}${volSales?', '+volSales+' with a volume discount':''}) — tap</div></div>`:''}
+     ${compSales?`<div class="stat red" style="cursor:pointer" onclick="repDrill('comp','')">
+       <div class="v">${fmt(compValue)}</div>
+       <div class="l">🎁 Complimentary — ${compSales} sale${compSales===1?'':'s'}, ${compUnits} item${compUnits===1?'':'s'} given away — tap</div></div>`:''}
      <div class="stat red"><div class="v">${fmt(cogs)}</div><div class="l">Cost of goods sold</div></div>
      <div class="stat gold"><div class="v">${fmt(profit)}</div><div class="l">Profit</div></div>
      <div class="stat"><div class="v">${fmt(rev-toSellers)}</div><div class="l">Net to club (rev − seller share)</div></div>
    </div>
+   ${compSales?`<h2>🎁 Complimentary — what was given away</h2>
+   <p class="muted noprint" style="margin:-6px 0 8px">Give-aways are recorded separately from discounts. The
+     value is what the club would have taken at shelf price; the stock came off the shelf either way.</p>
+   <div class="card"><table><tr><th>Given away by</th><th class="r">Sales</th><th class="r">Items</th><th class="r">Value</th></tr>
+   ${Object.entries(compBy).sort((a,b)=>b[1].value-a[1].value).map(([n,e])=>
+     `<tr><td>${esc(n)}</td><td class="r">${e.n}</td><td class="r"><b>${e.units}</b></td>
+       <td class="r neg">${fmt(e.value)}</td></tr>`).join('')}
+   <tr><td><b>Total</b></td><td class="r"><b>${compSales}</b></td><td class="r"><b>${compUnits}</b></td>
+     <td class="r neg"><b>${fmt(compValue)}</b></td></tr>
+   </table></div>`:''}
    <h2>By type of sale</h2>
    <p class="muted noprint" style="margin:-6px 0 8px">Tap any row on this page to see the actual sales behind
      it — the date, who rang it up, how it was paid, and the shelf price against what was really charged.</p>
@@ -4239,6 +4425,11 @@ function moneyHTML(){
           <div class="v">${fmt(co)}</div>
           <div class="l">🧾 Owed to members for expenses they paid</div>
           <div class="sub">${cp>0.005?fmt(cp)+' already paid back in cash — that came out of the cash box':'approved claims not yet paid out'}</div></div>`:''})()}
+     ${(()=>{const w=sponsWaiting(), t=w.reduce((a,[,r])=>a+(r.amount||0),0); return w.length?
+       `<div class="stat gold drilltile" onclick="adminTab='sponsors';rerender()">
+          <div class="v">${fmt(t)}</div>
+          <div class="l">⭐ Sponsors waiting on me — ${w.length}</div>
+          <div class="sub">members have secured this but it is NOT in the books yet — confirm it once the money or the goods are in hand</div></div>`:''})()}
      <div class="stat ${outstanding>0.005?'red':'green'} drilltile" onclick="moneyDrill('outstanding')">
        <div class="v">${fmt(outstanding)}</div>
        <div class="l">Still outstanding (total)</div>
@@ -4822,7 +5013,7 @@ function setClubRecords(){
     ()=>DB.set(['settings','clubRecords'],!on).then(()=>toast(on?'Club records hidden on all phones':'Club records ON — all phones see them now')));
 }
 async function downloadBackup(){
-  let tree, files;
+  let tree, files, fileMeta;
   if(CLOUD){
     toast('Building the backup — reading the whole database…');
     let r; try{ r=await _fx(_restUrl([]),{cache:'no-store'}); }catch(e){ r=null; }
@@ -4832,14 +5023,18 @@ async function downloadBackup(){
       const rf=await _fx(FIREBASE_CONFIG.databaseURL.replace(/\/+$/,'')+'/threeacesFiles.json',{cache:'no-store'});
       files=rf.ok? await rf.json() : null;
     }catch(e){ files=null; }
+    // v3.21 — the size manifest rides along, so a restored database still knows
+    // how much room its attachments take.
+    try{ const rm=await _fx(_fileMetaUrl(''),{cache:'no-store'}); fileMeta=rm.ok? await rm.json() : null; }catch(e){ fileMeta=null; }
   }else{
     tree=S; files=JSON.parse(localStorage.getItem('threeacesFiles')||'null');
+    fileMeta=JSON.parse(localStorage.getItem('threeacesFileMeta')||'null');
   }
   if(!tree||!tree.users){ toast('The database looks empty — backup not saved',1); return; }
   const d=new Date(), pad=n=>String(n).padStart(2,'0');
   const name='three-aces-backup-'+d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'-'+pad(d.getHours())+pad(d.getMinutes())+'.json';
-  dl(name, JSON.stringify({app:'Three Aces Sales App', version:APP_VERSION,
-    savedAt:d.toISOString(), data:tree, files:files||null}));
+  dl(name, JSON.stringify({app:'Three Aces Club Manager', version:APP_VERSION,
+    savedAt:d.toISOString(), data:tree, files:files||null, fileMeta:fileMeta||null}));
   toast('Backup downloaded — keep it somewhere safe (email it to yourself, or a USB stick)');
 }
 function restoreBackupPick(inp){
@@ -4847,7 +5042,8 @@ function restoreBackupPick(inp){
   const rd=new FileReader();
   rd.onload=()=>{
     let b; try{ b=JSON.parse(rd.result); }catch(e){ toast('That file is not a Three Aces backup',1); return; }
-    const data=(b&&b.app==='Three Aces Sales App'&&b.data)? b.data : null;
+    const OKAPP=['Three Aces Club Manager','Three Aces Sales App'];
+    const data=(b&&OKAPP.indexOf(b.app)>=0&&b.data)? b.data : null;
     if(!data||!data.users||!data.items){ toast('That file is not a Three Aces backup',1); return; }
     const when=b.savedAt? new Date(b.savedAt).toLocaleString('en-CA') : 'an unknown date';
     pinConfirm('RESTORE the backup from '+when+'? This REPLACES everything currently in the database — items, stock, sales, users, money, books, attendance — with what is in that file. Every phone switches to it within seconds. This cannot be undone (unless you have a newer backup).',
@@ -4856,11 +5052,13 @@ function restoreBackupPick(inp){
           const r=await _fx(_restUrl([]),{method:'PUT',body:JSON.stringify(data)});
           if(!r.ok){ toast('Restore failed — check the connection',1); return; }
           if(b.files){ try{ await _fx(FIREBASE_CONFIG.databaseURL.replace(/\/+$/,'')+'/threeacesFiles.json',{method:'PUT',body:JSON.stringify(b.files)}); }catch(e){} }
+          if(b.fileMeta){ try{ await _fx(_fileMetaUrl(''),{method:'PUT',body:JSON.stringify(b.fileMeta)}); }catch(e){} }
           _lastJson='';
           S=Object.assign({items:{},users:{},sales:{},settings:{},restocks:{},payments:{}}, data);
         }else{
           S=Object.assign({items:{},users:{},sales:{},settings:{},restocks:{},payments:{}}, data);
           if(b.files) localStorage.setItem('threeacesFiles',JSON.stringify(b.files));
+          if(b.fileMeta) localStorage.setItem('threeacesFileMeta',JSON.stringify(b.fileMeta));
           DB._persist();
         }
         if(me && !S.users[me]) me=null;
@@ -4916,6 +5114,40 @@ function securityHTML(){
       locks out any phone still on the old file.</p>
   </div>`;
 }
+/* v3.21 — how much room the attachments are taking.
+   Reads the little size manifest, NOT the files themselves, so this costs a
+   couple of kilobytes however many invoices there are. Attachments saved by
+   v3.20 and earlier have no manifest line, so they are counted separately and
+   said out loud rather than quietly left out of the total.                 */
+async function fileStoreCheck(){
+  const box=$('fsBox'); if(box) box.innerHTML='Checking…';
+  let meta=null, ids=null;
+  try{
+    if(CLOUD){
+      const r=await _fx(_fileMetaUrl(''),{cache:'no-store'});
+      meta=r.ok? await r.json() : null;
+      const rs=await _fx(FIREBASE_CONFIG.databaseURL.replace(/\/+$/,'')+'/threeacesFiles.json?shallow=true',{cache:'no-store'});
+      ids=rs.ok? await rs.json() : null;
+    }else{
+      meta=JSON.parse(localStorage.getItem('threeacesFileMeta')||'null');
+      ids=JSON.parse(localStorage.getItem('threeacesFiles')||'null');
+    }
+  }catch(e){ if(box) box.innerHTML='<span class="neg">Could not read the file store — check the connection.</span>'; return; }
+  const M=meta||{}, rows=Object.entries(M);
+  const total=rows.reduce((a,[,m])=>a+(Number(m&&m.b)||0),0);
+  const held=ids? Object.keys(ids).length : rows.length;
+  const older=Math.max(0, held-rows.length);
+  const big=rows.slice().sort((a,b)=>(b[1].b||0)-(a[1].b||0)).slice(0,3);
+  if(!box) return;
+  if(!held){ box.innerHTML='No attachments stored yet.'; return; }
+  box.innerHTML=`<b>${held} attachment${held===1?'':'s'}</b>`
+    + (rows.length? ` · <b>${sizeLabel(total)}</b> across the ${rows.length} saved since v3.21`
+        + ` · about <b>${sizeLabel(Math.round(total/rows.length))}</b> each` : '')
+    + (older? `<div>${older} older one${older===1?'':'s'} from before v3.21 — their sizes were never recorded,`
+        + ` so they are not in that figure. They are the big ones.</div>` : '')
+    + (big.length? '<div style="margin-top:6px">Largest: '+big.map(([,m])=>
+        esc(m.n||'attachment')+' ('+sizeLabel(m.b)+')').join(' · ')+'</div>' : '');
+}
 function dataHTML(){
   return securityHTML()+`<div class="card">
     <b>💾 Backup — the whole database in one file</b>
@@ -4928,6 +5160,15 @@ function dataHTML(){
     </div>
     <input type="file" id="restFile" accept=".json,application/json" style="display:none" onchange="restoreBackupPick(this)">
     </div>
+    <div class="card">
+    <b>📎 Attachment storage</b>
+    <p class="muted">Every invoice photo and receipt is squeezed before it is saved — around 200 KB each, down
+      from whatever the camera produced. They live outside the main database so the app never downloads them
+      unless somebody taps 📎. Check here now and then to see how much room they are taking.</p>
+    <div id="fsBox" class="muted">Not checked yet.</div>
+    <div class="rowbtns">
+      <button class="btn gray" onclick="fileStoreCheck()">📊 Check attachment storage</button>
+    </div></div>
     <div class="card">
     <b>Export</b>
     <div class="rowbtns">
@@ -4957,9 +5198,9 @@ function dataHTML(){
 let _pcFn=null;
 function pinConfirm(msg, fn){
   _pcFn=fn;
-  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>⚠ Admin PIN required</h3>
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>⚠ ${isAdmin()?'Admin PIN required':'PIN required'}</h3>
     <p class="muted">${esc(msg)}</p>
-    <label>Enter YOUR 4-digit PIN to confirm</label>
+    <label>Enter YOUR OWN 4-digit PIN to confirm</label>
     <input id="pc_pin" type="password" inputmode="numeric" maxlength="4" autocomplete="off"
       style="font-size:26px;text-align:center;letter-spacing:10px"
       onkeydown="if(event.key==='Enter')pinConfirmGo()">
@@ -5000,14 +5241,17 @@ function dl(name,text){
 }
 function csvCell(v){ v=String(v??''); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
 function exportSalesCSV(){
-  const rows=[['Date','Time','Event','Seller','Type of sale','Item','Size','Qty','Unit Price','Orig Price','Unit Cost','Line Total','Line Profit','Member Sale','Payment','Owed By','Order Discount','Discount By','Voided']];
+  const rows=[['Date','Time','Event','Seller','Type of sale','Item','Size','Qty','Unit Price','Orig Price','Unit Cost','Line Total','Line Profit','Member Sale','Payment','Owed By','Order Discount','Discount By','Complimentary','Given Away By','Value Given Away','Voided']];
   salesSorted().reverse().forEach(([,s])=>{
     const d=new Date(s.ts);
     s.lines.forEach(l=>rows.push([d.toLocaleDateString('en-CA'),d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}),
       s.eventName||'',s.sellerName,GRP_LABEL[lineGroup(l)].replace(/^\S+\s/,''),l.item,l.size,l.qty,l.price,l.orig||'',l.cost,
       Math.round(l.price*l.qty*100)/100,Math.round((l.price-l.cost)*l.qty*100)/100,
       l.member?'Y':'',s.payment,s.buyer||'',s.discount?s.discount.amount:'',
-      s.discount?(s.discount.by||s.sellerName):'',s.voided?'Y':'']));
+      s.discount?(s.discount.by||s.sellerName):'',
+      isComp(s)?'Y':'', isComp(s)?(s.comp.by||s.sellerName):'',
+      isComp(s)?Math.round((l.member?(l.cost||0):lineList(l))*(l.qty||0)*100)/100:'',
+      s.voided?'Y':'']));
   });
   dl('three-aces-sales.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'));
 }
@@ -5072,7 +5316,7 @@ function toggleTheme(){
   applyTheme();
 }
 applyTheme();
-$('verTag').textContent='Three Aces Sales App · '+APP_VERSION;
+$('verTag').textContent='Three Aces Club Manager · '+APP_VERSION;
 
 /* ------------------------------ MODAL ------------------------------------- */
 function openModal(html){ $('modalBox').innerHTML=html; $('modalBg').classList.add('open'); }
@@ -5614,6 +5858,505 @@ function exportClaimsCSV(){
   dl('three-aces-expense-claims.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'));
 }
 
+/* ====================== MEMBER SPONSOR LOGGING (v3.21) ====================
+   Luca: "there is no facility for the member to upload their sponsor and
+   whether it is in kind or cash ... when they secure it, it needs to be date
+   stamped and then they should be able to submit it to admin. When Admin
+   receives the cash or confirmation of in kind donation they should have
+   their sponsor requirement completed."
+
+   THE ONE RULE THAT DRIVES THE WHOLE DESIGN: the sponsor board must never
+   show money the club has not actually received. So a member's entry does
+   NOT write a Donations entry into the books. It lives in its own store
+   until an admin confirms it, and the ADMIN'S CONFIRMATION is what writes
+   the book entry. sponsorSecured() carries on reading the books exactly as
+   it always did, and the books stay honest.
+
+   The written entry is dated to the day the member SECURED it, not the day
+   the admin got round to confirming it — so a sponsor landed on July 29th
+   counts in the season it was earned in, even if it is confirmed in August.
+
+   An admin can still type a donation straight into the books the old way.
+   That path is untouched: it is how sponsors that never went through a
+   member get recorded.                                                     */
+
+const SPON_ST={
+  chasing :{lab:'Chasing it',                 cls:'gold',  ic:'🔎'},
+  secured :{lab:'Got it — not sent in yet',   cls:'gold',  ic:'✋'},
+  waiting :{lab:'Waiting for an admin',       cls:'gold',  ic:'🕓'},
+  back    :{lab:'Sent back to you',           cls:'red',   ic:'↩'},
+  done    :{lab:'Confirmed — it counts',      cls:'green', ic:'✔'},
+  declined:{lab:'Declined',                   cls:'red',   ic:'✕'}
+};
+function sponsAll(){
+  return Object.entries(S.sponsors||{}).sort((a,b)=>(b[1].ts||0)-(a[1].ts||0));
+}
+function sponsOf(name){
+  const k=(name||'').trim().toLowerCase();
+  return sponsAll().filter(([,r])=>(r.member||'').trim().toLowerCase()===k);
+}
+// The season an entry belongs to is decided by the day it was SECURED, so
+// nothing has to be moved on Aug 1 — the records sort themselves.
+function sponsYearOf(r){ return sponsorYearOf((r&&(r.securedTs||r.ts))||Date.now()); }
+function sponsIn(y,list){ return (list||sponsAll()).filter(([,r])=>sponsYearOf(r)===y); }
+function sponsWaiting(){ return sponsAll().filter(([,r])=>r.status==='waiting'); }
+function sponsBadge(){ const n=sponsWaiting().length; return n? ' ('+n+')' : ''; }
+// Anything a member has logged that has NOT been confirmed. It is shown to
+// them so they can see it is not lost — and it is never added to the quota,
+// because the club has not got the money yet.
+const SPON_PENDING=['chasing','secured','waiting','back'];
+function sponsPending(list){
+  return Math.round((list||[]).filter(([,r])=>SPON_PENDING.indexOf(r.status)>=0)
+    .reduce((a,[,r])=>a+(r.amount||0),0)*100)/100;
+}
+function sponsStamp(r,what){
+  const t=Array.isArray(r&&r.trail)? r.trail.slice() : [];
+  t.push({ts:Date.now(), by:(meU()&&meU().name)||'', what});
+  return t;
+}
+/* Two members ringing the same business is a real problem at this club, so
+   the app says so — as a warning, never as a block. The member on the phone
+   knows things the app does not.                                           */
+function sponsDupes(bizName,y,exceptId){
+  const k=(bizName||'').trim().toLowerCase();
+  if(!k) return [];
+  const mine=((meU()||{}).name||'').trim().toLowerCase();
+  return sponsIn(y).filter(([id,r])=>id!==exceptId
+    && (r.sponsor||'').trim().toLowerCase()===k
+    && (r.member||'').trim().toLowerCase()!==mine
+    && r.status!=='declined');
+}
+function sponsWhatLine(r){
+  return (r.kind==='inkind'? 'In-kind — '+((r.what||'goods or services')) : 'Cash');
+}
+
+/* ---------------------- MEMBER: LOG A SPONSOR ----------------------------- */
+let _sp=null, _spKind='cash', _spStatus='waiting';
+function sponsorModal(id){
+  const r=id? {...(S.sponsors||{})[id]} : {kind:'cash', status:'waiting', securedTs:Date.now()};
+  _sp={id, file:r.file||null};
+  _spKind = r.kind==='inkind'?'inkind':'cash';
+  _spStatus = (id && SPON_PENDING.indexOf(r.status)>=0) ? (r.status==='back'?'waiting':r.status) : 'waiting';
+  window._feInvNew=null;
+  const hasFile=!!(r.file&&String(r.file).startsWith('file:'));
+  const mine=(meU()&&meU().name)||'';
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>${id?'✎ Edit my sponsor':'⭐ Log a sponsor'}</h3>
+    ${r.status==='back'&&r.backNote?`<div class="card" style="border-color:var(--red)">
+      <b class="neg">↩ Sent back to you</b>
+      <p style="margin:6px 0 0;white-space:pre-wrap">${esc(r.backNote)}</p>
+      <p class="muted" style="margin:6px 0 0">Fix it below and send it in again.</p></div>`:''}
+    <p class="muted">Log the business here as soon as you have spoken to them. Nothing you enter goes into the
+      club's books — an admin does that when the money or the goods actually arrive, and <b>that</b> is what
+      completes your sponsor for the season.</p>
+    <label>Who is claiming it</label>
+    <input value="${esc(mine)}" disabled style="opacity:.75">
+    <label>Business / sponsor name</label>
+    <input id="sp_biz" value="${esc(r.sponsor||'')}" placeholder="e.g. MTF Group" onblur="sponsDupWarn()">
+    <div id="sp_dup" class="muted" style="margin:2px 0 8px"></div>
+    <label>Cash or in-kind?</label>
+    <div class="payrow">
+      <button type="button" id="spKcash" class="${_spKind==='cash'?'on':''}" onclick="sponsKind('cash')">💵 Cash</button>
+      <button type="button" id="spKink" class="${_spKind==='inkind'?'on':''}" onclick="sponsKind('inkind')">🎁 In-kind</button>
+    </div>
+    <p class="muted" id="sp_kindhelp" style="margin:0 0 8px"></p>
+    <label id="sp_amtlab">How much $</label>
+    <input id="sp_amt" type="text" inputmode="decimal" value="${r.amount||''}" placeholder="0.00">
+    <div id="sp_whatwrap" style="display:none">
+      <label>What are they giving?</label>
+      <input id="sp_what" value="${esc(r.what||'')}" placeholder="e.g. 20 cases of water, printing for the banners">
+    </div>
+    <label>Date you secured it</label>
+    <input id="sp_date" type="date" value="${dstr(r.securedTs||Date.now())}">
+    <p class="muted" style="margin:2px 0 8px">The day they said yes — not today, if they differ. This is the date
+      that decides which sponsor season it counts in, so it matters at the end of July.</p>
+    <label>Where are you at with it?</label>
+    <div class="payrow">
+      <button type="button" id="spSchasing" onclick="sponsStatusPick('chasing')">🔎 Still chasing</button>
+      <button type="button" id="spSsecured" onclick="sponsStatusPick('secured')">✋ Got it — not ready to send</button>
+      <button type="button" id="spSwaiting" onclick="sponsStatusPick('waiting')">🕓 Send it to the admin</button>
+    </div>
+    <p class="muted" id="sp_stathelp" style="margin:0 0 10px"></p>
+    <label>Photo of the cheque or the confirmation — optional</label>
+    <img id="feInvPrev" src="" style="max-height:130px;border-radius:8px;display:none;margin:4px 0">
+    <div id="feInvName" class="muted" style="display:${hasFile?'block':'none'};margin:4px 0">📎 Already attached to this sponsor</div>
+    <div class="rowbtns">
+      <button class="btn gray" type="button" onclick="$('feInvCam').click()">📷 Take a photo</button>
+      <button class="btn gray" type="button" onclick="$('feInvFile').click()">📎 Attach a file</button>
+    </div>
+    <div class="rowbtns">
+      <button class="btn gray" type="button" onclick="_sp.file=null;window._feInvNew=null;$('feInvPrev').style.display='none';$('feInvName').style.display='none';toast('Photo removed')">Remove</button>
+    </div>
+    <input type="file" id="feInvCam" accept="image/*" capture="environment" style="display:none" onchange="feInvoicePick(this)">
+    <input type="file" id="feInvFile" accept="image/*,.pdf,.doc,.docx,application/pdf" style="display:none" onchange="feInvoicePick(this)">
+    <p class="muted" style="margin:4px 0 0">Photos are shrunk automatically before they are saved, so it is fine
+      to just take one with your phone.</p>
+    <label>Note — optional</label>
+    <input id="sp_note" value="${esc(r.note||'')}" placeholder="e.g. Cheque to be picked up from Tony at the shop">
+    <div style="height:12px"></div>
+    <button class="btn" onclick="sponsSave()">✓ ${id?'Save':'Save this sponsor'}</button>
+    <div style="height:8px"></div>
+    <button class="btn gray" onclick="closeModal()">Cancel</button>`);
+  sponsKind(_spKind); sponsStatusPick(_spStatus); sponsDupWarn();
+}
+function sponsKind(k){
+  _spKind=k;
+  const a=$('spKcash'), b=$('spKink'); if(a) a.className=k==='cash'?'on':''; if(b) b.className=k==='inkind'?'on':'';
+  const w=$('sp_whatwrap'); if(w) w.style.display = k==='inkind'?'block':'none';
+  const l=$('sp_amtlab'); if(l) l.textContent = k==='inkind'? 'What is it worth $' : 'How much $';
+  const h=$('sp_kindhelp');
+  if(h) h.innerHTML = k==='inkind'
+    ? 'Goods or services instead of money — food, printing, a prize. It still counts toward your sponsor in full, '
+      +'but it is never counted as club cash, so put down what it is <b>worth</b>.'
+    : 'A cheque, an e-transfer or cash. It goes into the club’s books as income once an admin has it in hand.';
+}
+function sponsStatusPick(s){
+  _spStatus=s;
+  ['chasing','secured','waiting'].forEach(k=>{ const b=$('spS'+k); if(b) b.className = k===s?'on':''; });
+  const h=$('sp_stathelp');
+  if(h) h.innerHTML = s==='chasing'
+    ? 'Still talking to them. Nobody is asked to do anything — but it shows on the admin’s list as being chased, '
+      +'so another member does not ring the same business.'
+    : s==='secured'
+    ? 'They have said yes but you are not ready to hand it over. It waits on your list until you send it in.'
+    : 'Goes to an admin now. When they have the '+(_spKind==='inkind'?'goods confirmed':'money in hand')
+      +', they confirm it and your sponsor for the season is done.';
+}
+function sponsDupWarn(){
+  const box=$('sp_dup'); if(!box) return;
+  const biz=(($('sp_biz')||{}).value||'').trim();
+  const d=sponsDupes(biz, currentSponsorYear(), _sp&&_sp.id);
+  box.innerHTML = d.length
+    ? '<span class="neg">⚠ '+d.map(([,r])=>esc(r.member||'Someone')+' logged '+esc(r.sponsor||'')+' on '
+        +new Date(r.securedTs||r.ts).toLocaleDateString('en-CA',{month:'short',day:'numeric'})).join('; ')
+      +'. Worth a word before you call them — you are not blocked.</span>'
+    : '';
+}
+async function sponsSave(){
+  const biz=(($('sp_biz')||{}).value||'').trim();
+  if(!biz){ toast('Put the business name in',1); return; }
+  const amt=Math.round((parseFloat(String((($('sp_amt')||{}).value||'')).replace(/[^0-9.]/g,''))||0)*100)/100;
+  const what=(($('sp_what')||{}).value||'').trim();
+  if(_spKind==='inkind' && !what){ toast('Say what they are giving',1); return; }
+  // Chasing is allowed with no figure yet — everything else has to have one,
+  // because the quota is a number and the board has to add up.
+  if(_spStatus!=='chasing' && amt<=0){ toast(_spKind==='inkind'?'Put down what it is worth':'Put down how much it is for',1); return; }
+  const d=(($('sp_date')||{}).value||'');
+  const securedTs = d? new Date(d+'T12:00').getTime() : Date.now();
+  if(securedTs > Date.now()+86400000){ toast('That date is in the future — check it',1); return; }
+  const note=(($('sp_note')||{}).value||'').trim().slice(0,400);
+  const id=_sp.id, invNew=window._feInvNew;
+  const old=id? ((S.sponsors||{})[id]||{}) : null;
+  let file=_sp.file;
+  if(invNew){
+    const fid=newId();
+    try{ await fileSave(fid, invNew); file='file:'+fid; }
+    catch(e){ toast('Could not save the photo — check the connection',1); return; }
+  }
+  const mine=meU().name;
+  const core={sponsor:biz, kind:_spKind, amount:amt, what:_spKind==='inkind'?(what||null):null,
+    securedTs, note:note||null, file:file||null};
+  if(id){
+    const ch=[];
+    if((old.sponsor||'')!==biz) ch.push('sponsor '+(old.sponsor||'—')+' → '+biz);
+    if(Math.abs((old.amount||0)-amt)>0.005) ch.push(fmt(old.amount||0)+' → '+fmt(amt));
+    if((old.kind||'cash')!==_spKind) ch.push('now '+(_spKind==='inkind'?'in-kind':'cash'));
+    if(dstr(old.securedTs||0)!==dstr(securedTs)) ch.push('secured '+dstr(old.securedTs||0)+' → '+dstr(securedTs));
+    if((old.status||'')!==_spStatus) ch.push('now '+((SPON_ST[_spStatus]||{}).lab||_spStatus).toLowerCase());
+    await DB.set(['sponsors',id],{...old, ...core, status:_spStatus, backNote:null,
+      trail:sponsStamp(old,(old.status==='back'?'Fixed and sent in again':'Edited')+(ch.length?' — '+ch.join(', '):''))});
+    closeModal();
+    toast(_spStatus==='waiting'?'Sent to an admin':'Saved'); rerender(); return;
+  }
+  const rec={ts:Date.now(), member:mine, ...core, status:_spStatus,
+    trail:[{ts:Date.now(), by:mine, what:'Logged — '+biz+' · '+(_spKind==='inkind'?'in-kind':'cash')
+      +(amt>0?' '+fmt(amt):'')+' · secured '+dstr(securedTs)}]};
+  await DB.set(['sponsors',newId()], rec);
+  closeModal();
+  toast(_spStatus==='waiting'? 'Sent to an admin — they confirm it when it lands'
+      : _spStatus==='secured'? 'Saved — send it in when you are ready'
+      : 'Saved — logged as being chased');
+  rerender();
+}
+function sponsSubmit(id){
+  const r=(S.sponsors||{})[id]||{};
+  if(!(r.amount>0)){ toast('Put a figure on it first — open it and edit',1); return; }
+  DB.set(['sponsors',id],{...r, status:'waiting', backNote:null,
+    trail:sponsStamp(r,'Sent in to an admin')}).then(()=>{ toast('Sent to an admin'); rerender(); });
+}
+function sponsWithdraw(id){
+  const r=(S.sponsors||{})[id]||{};
+  pinConfirm('Withdraw your '+(r.sponsor||'sponsor')+' entry? It disappears completely — nothing is recorded '
+    +'and nobody is asked to confirm anything.',
+    async()=>{ await DB.set(['sponsors',id],null); toast('Withdrawn'); });
+}
+async function sponsClearDeclined(id){
+  const r=(S.sponsors||{})[id]||{};
+  await DB.set(['sponsors',id,'declineHidden'],true);
+  await DB.set(['sponsors',id,'trail'],sponsStamp(r,'Cleared off the member\'s list'));
+  toast('Cleared off your list'); rerender();
+}
+
+/* --------------- MEMBER: THE SPONSOR BLOCK ON THE CLUB TAB ---------------- */
+/* Sits under the ⭐ My sponsor tile. The tile itself still reads the BOOKS, so
+   what "counts" is unchanged; this only adds what the member has logged and
+   what is still waiting on somebody.                                        */
+function sponsorMineHTML(sy){
+  const u=meU(); if(!u) return '';
+  const mine=sponsIn(sy, sponsOf(u.name));
+  const shown=mine.filter(([,r])=>!(r.status==='declined'&&r.declineHidden));
+  const pend=sponsPending(mine);
+  let h=`<button class="btn" onclick="sponsorModal()">＋ Log a sponsor</button>`;
+  if(pend>0.005) h+=`<p class="muted" style="margin:6px 0 0"><b>${fmt(pend)} logged and waiting.</b>
+    It is not counted above until an admin has the money or the goods in hand — that is what keeps the
+    club's sponsor board honest. Nothing is lost; it is all listed below.</p>`;
+  h+='<div style="height:10px"></div>';
+  if(!shown.length) return h+`<div class="empty">You haven't logged a sponsor for this season yet.</div>`;
+  h+=shown.map(([id,r])=>{
+    const m=SPON_ST[r.status]||SPON_ST.waiting;
+    const editable=SPON_PENDING.indexOf(r.status)>=0;
+    return `<div class="card"${r.status==='declined'?' style="opacity:.55"':''}>
+      <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+        <b>${esc(r.sponsor||'')}</b><b class="goldtxt">${r.amount>0?fmt(r.amount):'—'}</b></div>
+      <div class="muted">${esc(sponsWhatLine(r))} · secured ${new Date(r.securedTs||r.ts).toLocaleDateString('en-CA',{month:'short',day:'numeric',year:'numeric'})}${r.note?' · '+esc(r.note):''}</div>
+      <div style="margin-top:6px"><span class="voidtag" style="color:var(--${m.cls==='green'?'pos':m.cls==='gold'?'gold':'neg'})">${m.ic} ${m.lab}</span>
+        ${r.kind==='inkind'?' <span class="memberflag">IN-KIND</span>':''}</div>
+      ${r.status==='back'&&r.backNote?`<div style="margin-top:6px;color:var(--gold)">↩ ${esc(r.backNote)}</div>`:''}
+      ${r.status==='declined'&&r.declineNote?`<div style="margin-top:6px" class="neg">✕ ${esc(r.declineNote)}</div>`:''}
+      ${r.status==='done'?`<div style="margin-top:6px" class="pos">✔ Confirmed by ${esc(r.confirmedBy||'an admin')}
+        on ${new Date(r.confirmedTs||Date.now()).toLocaleDateString('en-CA')} — it is in the books and it counts.</div>`:''}
+      <div class="rowbtns" style="margin-top:8px">
+        ${r.file?`<button class="btn small gray" onclick="sponsViewFile('${id}')">📎 Photo</button>`:''}
+        <button class="btn small gray" onclick="sponsTrail('${id}')">🕘 History</button>
+        ${editable?`<button class="btn small gray" onclick="sponsorModal('${id}')">✎ Edit</button>`:''}
+        ${(r.status==='chasing'||r.status==='secured')?`<button class="btn small" onclick="sponsSubmit('${id}')">🕓 Send to admin</button>`:''}
+        ${editable?`<button class="btn small red" onclick="sponsWithdraw('${id}')">Withdraw</button>`:''}
+        ${r.status==='declined'?`<button class="btn small gray" onclick="sponsClearDeclined('${id}')">Clear off my list</button>`:''}
+      </div></div>`;
+  }).join('');
+  return h;
+}
+
+/* ----------------------- ADMIN: THE SPONSORS SCREEN ----------------------- */
+function sponsorsHTML(){
+  const y=sponsorYrShown(), years=sponsorYears();
+  const inYr=sponsIn(y);
+  const waiting=inYr.filter(([,r])=>r.status==='waiting');
+  const chasing=inYr.filter(([,r])=>r.status==='chasing'||r.status==='secured');
+  const done=inYr.filter(([,r])=>r.status==='done');
+  const other=inYr.filter(([,r])=>r.status==='back'||r.status==='declined');
+  const waitTot=waiting.reduce((a,[,r])=>a+(r.amount||0),0);
+  const doneTot=done.reduce((a,[,r])=>a+(r.amount||0),0);
+  const card=([id,r],mode)=>`<div class="card">
+    <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+      <b>${esc(r.member||'')}</b><b class="goldtxt">${r.amount>0?fmt(r.amount):'—'}</b></div>
+    <div><b>${esc(r.sponsor||'')}</b> — ${esc(sponsWhatLine(r))}${r.kind==='inkind'?' <span class="memberflag">IN-KIND</span>':''}</div>
+    <div class="muted">Secured ${new Date(r.securedTs||r.ts).toLocaleDateString('en-CA',{month:'short',day:'numeric',year:'numeric'})}
+      · logged ${new Date(r.ts).toLocaleDateString('en-CA')}${r.note?' · '+esc(r.note):''}</div>
+    ${!r.file?`<div style="margin-top:6px"><span class="memberflag">NO PHOTO ATTACHED</span></div>`:''}
+    ${r.status==='done'?`<div class="pos" style="margin-top:6px">✔ Confirmed ${new Date(r.confirmedTs||r.ts).toLocaleDateString('en-CA')}
+      by ${esc(r.confirmedBy||'')} — written into the books dated ${new Date(r.securedTs||r.ts).toLocaleDateString('en-CA')}</div>`:''}
+    ${r.status==='declined'?`<div class="neg" style="margin-top:6px">✕ Declined${r.declineNote?' — '+esc(r.declineNote):''}</div>`:''}
+    ${r.status==='back'?`<div style="margin-top:6px;color:var(--gold)">↩ Sent back${r.backNote?' — '+esc(r.backNote):''}</div>`:''}
+    <div class="rowbtns noprint" style="margin-top:8px">
+      ${r.file?`<button class="btn small gray" onclick="sponsViewFile('${id}')">📎 Photo</button>`
+              :`<button class="btn small gray" disabled style="opacity:.4">No photo</button>`}
+      <button class="btn small gray" onclick="sponsTrail('${id}')">🕘 History</button>
+      ${mode==='waiting'?`<button class="btn small" onclick="sponsConfirm('${id}')">✓ ${r.kind==='inkind'?'In-kind confirmed':'Cash received'}</button>
+        <button class="btn small gray" onclick="sponsBackSheet('${id}')">↩ Send back</button>
+        <button class="btn small red" onclick="sponsDeclineSheet('${id}')">✕ Decline</button>`:''}
+      ${mode==='chasing'?`<button class="btn small" onclick="sponsConfirm('${id}')">✓ Confirm it anyway</button>`:''}
+      ${r.status==='done'?`<button class="btn small red" onclick="sponsUnconfirm('${id}')">↩ Undo the confirmation</button>`:''}
+      ${isAdmin()?`<button class="btn small red" onclick="sponsDelete('${id}')">🗑</button>`:''}
+    </div></div>`;
+  return printHead('Member sponsors — '+sponsorYearLabel(y),'As at '+new Date().toLocaleDateString('en-CA')) + `
+    <p class="muted noprint">Members log their own sponsors on their Club tab. Nothing they log touches the books —
+      <b>confirming</b> is what writes the donation in, and the entry is dated to the day the member
+      <b>secured</b> it, not today. That is what puts it in the right sponsor season when somebody lands one on
+      July 29th and you confirm it in August. You can still type a donation straight into the Books the old way
+      for any sponsor that never went through a member.</p>
+    <div class="tabbar noprint">${years.map(yy=>
+      `<button class="${yy===y?'on':''}" onclick="sponsorYr=${yy};rerender()">${yy}</button>`).join('')}</div>
+    <div class="statgrid">
+      <div class="stat ${waiting.length?'gold':'green'}"><div class="v">${waiting.length}</div>
+        <div class="l">Waiting for me</div><div class="sub">${fmt(waitTot)} — not in the books yet</div></div>
+      <div class="stat green"><div class="v">${fmt(doneTot)}</div>
+        <div class="l">Confirmed this season</div><div class="sub">${done.length} sponsor${done.length===1?'':'s'}, in the books</div></div>
+      <div class="stat"><div class="v">${chasing.length}</div>
+        <div class="l">Being chased</div><div class="sub">logged, not sent in yet</div></div>
+    </div>
+    <h2>🕓 Waiting for me</h2>
+    ${waiting.map(x=>card(x,'waiting')).join('')||'<div class="empty">Nothing waiting — you are all caught up.</div>'}
+    <h2>🔎 Being chased</h2>
+    ${chasing.length?`<p class="muted noprint">Members have logged these but not sent them in. They are here so
+      two people do not ring the same business.</p>`:''}
+    ${chasing.map(x=>card(x,'chasing')).join('')||'<div class="empty">Nothing being chased.</div>'}
+    <h2>✔ Confirmed</h2>
+    ${done.map(x=>card(x,'done')).join('')||'<div class="empty">Nothing confirmed yet this season.</div>'}
+    ${other.length?'<h2>📦 Sent back &amp; declined</h2>'+other.map(x=>card(x,'other')).join(''):''}
+    <button class="btn gray noprint" style="margin-top:8px" onclick="exportSponsorsCSV()">⬇ Sponsors CSV</button>
+    <button class="btn gray noprint" onclick="window.print()">🖨 Print / Save as PDF</button>`;
+}
+
+/* ------------------------ ADMIN: THE ACTIONS ------------------------------ */
+function sponsConfirm(id){
+  const r=(S.sponsors||{})[id]||{};
+  const when=new Date(r.securedTs||r.ts).toLocaleDateString('en-CA');
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>✓ ${r.kind==='inkind'?'In-kind confirmed':'Cash received'}</h3>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between"><span>${esc(r.member||'')}</span><b class="goldtxt">${fmt(r.amount||0)}</b></div>
+      <div><b>${esc(r.sponsor||'')}</b> — ${esc(sponsWhatLine(r))}</div>
+      <div class="muted">Secured ${when}${r.note?' · '+esc(r.note):''}</div>
+    </div>
+    <label>Amount you are confirming $</label>
+    <input id="sc_amt" type="text" inputmode="decimal" value="${r.amount||''}">
+    <p class="muted" style="margin:2px 0 8px">Change it if what arrived was different. The change is written into
+      the sponsor's history with your name on it, and the member sees it.</p>
+    <div class="card" style="border-color:var(--gold)">
+      <b>What this does</b>
+      <p class="muted" style="margin:6px 0 0">Writes a <b>Donations</b> entry into the Books for
+        <b>${esc(r.member||'')}</b> dated <b>${when}</b> — the day they secured it, not today — so it lands in the
+        ${sponsorYearLabel(sponsYearOf(r))} season.
+        ${r.kind==='inkind'
+          ? 'It is marked <b>in-kind</b>, so it completes their sponsor but is never counted as club cash.'
+          : 'It counts as club income the same as a donation you type in yourself.'}
+        Their sponsor requirement is completed the moment you press this.</p>
+    </div>
+    <button class="btn" onclick="sponsConfirmGo('${id}')">✓ Confirm and put it in the books</button>
+    <div style="height:8px"></div>
+    <button class="btn gray" onclick="closeModal()">Cancel</button>`);
+}
+async function sponsConfirmGo(id){
+  const r=(S.sponsors||{})[id]; if(!r) return;
+  const amt=Math.round((parseFloat(String((($('sc_amt')||{}).value||r.amount)).replace(/[^0-9.]/g,''))||0)*100)/100;
+  if(amt<=0){ toast('Enter the amount you are confirming',1); return; }
+  const changed=Math.abs(amt-(r.amount||0))>0.005;
+  /* The book entry. Same shape as a donation typed straight in on the Books
+     tab, so sponsorSecured(), the sponsor board, the year totals and the Event
+     P&L all pick it up with nothing changed. `sponsorId` here and `txnId` on
+     the record are the pair that stops it ever being written twice.        */
+  const txnId=r.txnId||newId();
+  await DB.set(['finance','txns',txnId],{
+    ts:r.securedTs||r.ts, kind:'income', cat:'Donations', amount:amt,
+    member:r.member||null, sponsor:r.sponsor||null, inkind:r.kind==='inkind',
+    note:(r.kind==='inkind'?(r.what?r.what+' — ':'')+'in-kind sponsor':'member sponsor')
+      +(r.note?' — '+r.note:''),
+    by:meU().name, invoice:r.file||null, sponsorId:id});
+  await DB.set(['sponsors',id],{...r, amount:amt, status:'done', txnId,
+    confirmedBy:meU().name, confirmedTs:Date.now(), backNote:null,
+    trail:sponsStamp(r,'Confirmed'+(changed?' — '+fmt(r.amount||0)+' → '+fmt(amt):'')
+      +' · written into the books dated '+dstr(r.securedTs||r.ts))});
+  // toast() writes with textContent, so escaping here would show a literal &amp;.
+  closeModal(); toast('Confirmed — '+(r.member||'')+"'s sponsor is complete"); rerender();
+}
+function sponsUnconfirm(id){
+  const r=(S.sponsors||{})[id]||{};
+  pinConfirm('Undo the confirmation of '+(r.member||'')+"'s "+(r.sponsor||'sponsor')+'? The donation comes '
+    +'straight back out of the books, and their sponsor goes back to not being complete.',
+    async()=>{
+      if(r.txnId) await DB.set(['finance','txns',r.txnId],null);
+      await DB.set(['sponsors',id],{...r, status:'waiting', txnId:null, confirmedBy:null, confirmedTs:null,
+        trail:sponsStamp(r,'Confirmation undone — book entry removed')});
+      toast('Confirmation undone');
+    });
+}
+function sponsBackSheet(id){
+  const r=(S.sponsors||{})[id]||{};
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>↩ Send it back to ${esc(r.member||'')}</h3>
+    <p class="muted">Use this when something needs fixing — the wrong figure, the wrong date, no photo of the
+      cheque. They see your note, fix it and send it in again. Nothing goes into the books in the meantime and
+      their sponsor stays outstanding.</p>
+    <label>What needs fixing?</label>
+    <textarea id="sb_note" rows="3" placeholder="e.g. Can you photograph the cheque before you drop it in?"></textarea>
+    <div style="height:10px"></div>
+    <button class="btn" onclick="sponsBackGo('${id}')">↩ Send it back</button>
+    <div style="height:8px"></div>
+    <button class="btn gray" onclick="closeModal()">Cancel</button>`);
+}
+async function sponsBackGo(id){
+  const r=(S.sponsors||{})[id]; if(!r) return;
+  const n=(($('sb_note')||{}).value||'').trim().slice(0,400);
+  if(!n){ toast('Say what needs fixing so they know',1); return; }
+  await DB.set(['sponsors',id],{...r, status:'back', backNote:n, trail:sponsStamp(r,'Sent back — '+n)});
+  closeModal(); toast('Sent back to '+r.member); rerender();
+}
+function sponsDeclineSheet(id){
+  const r=(S.sponsors||{})[id]||{};
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>✕ Decline this sponsor</h3>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between"><span>${esc(r.member||'')}</span><b>${fmt(r.amount||0)}</b></div>
+      <div class="muted">${esc(r.sponsor||'')} · ${esc(sponsWhatLine(r))}</div>
+    </div>
+    <p class="muted">Declining drops it out of every total straight away, on your side and theirs, and their
+      sponsor stays outstanding. Nothing goes into the books. The record and your reason are kept in its history.</p>
+    <label>Why are you declining it? (they will see this)</label>
+    <textarea id="sd_note" rows="3" placeholder="e.g. Spoke to them — they are sponsoring the golf day instead"></textarea>
+    <div style="height:10px"></div>
+    <button class="btn red" onclick="sponsDeclineGo('${id}')">✕ Decline it</button>
+    <div style="height:8px"></div>
+    <button class="btn gray" onclick="closeModal()">Cancel</button>`);
+}
+async function sponsDeclineGo(id){
+  const r=(S.sponsors||{})[id]; if(!r) return;
+  const n=(($('sd_note')||{}).value||'').trim().slice(0,400);
+  if(!n){ toast('Give them a reason',1); return; }
+  await DB.set(['sponsors',id],{...r, status:'declined', declineNote:n, trail:sponsStamp(r,'Declined — '+n)});
+  closeModal(); toast('Declined'); rerender();
+}
+function sponsDelete(id){
+  const r=(S.sponsors||{})[id]||{};
+  pinConfirm('Delete '+(r.member||'')+"'s "+(r.sponsor||'sponsor')+' entry for good?'
+    +(r.txnId?' The donation it wrote into the books comes out too.':'')
+    +' The record and its whole history disappear — declining it instead keeps the record.',
+    async()=>{
+      if(r.txnId) await DB.set(['finance','txns',r.txnId],null);
+      await DB.set(['sponsors',id],null);
+      closeModal(); toast('Deleted');
+    });
+}
+function sponsTrail(id){
+  const r=(S.sponsors||{})[id]||{};
+  const t=(Array.isArray(r.trail)?r.trail:[]).slice().sort((a,b)=>a.ts-b.ts);
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>🕘 History — ${esc(r.member||'')} · ${esc(r.sponsor||'')}</h3>
+    <p class="muted">${esc(sponsWhatLine(r))} · secured ${new Date(r.securedTs||r.ts).toLocaleDateString('en-CA')}</p>
+    <div class="card">
+      ${t.length? t.map(x=>`<div style="padding:6px 0;border-bottom:1px solid var(--line)">
+        <b>${esc(x.what||'')}</b>
+        <div class="muted">${new Date(x.ts).toLocaleString('en-CA')} · ${esc(x.by||'')}</div></div>`).join('')
+        : '<div class="empty">No history recorded.</div>'}
+    </div>
+    <p class="muted">Every step is written here automatically — logged, edited, sent in, sent back, confirmed,
+      declined — with who did it and when. Nobody can edit or clear this list, admin included.</p>
+    <button class="btn gray" onclick="closeModal()">Close</button>`);
+}
+async function sponsViewFile(id){
+  const r=(S.sponsors||{})[id];
+  if(!r||!r.file) return;
+  const head=`<h3><button class="x" onclick="closeModal()">✕</button>📎 ${esc(r.member||'')} — ${esc(r.sponsor||'')} · ${fmt(r.amount||0)}</h3>`;
+  const note=r.note?'<p class="muted">'+esc(r.note)+'</p>':'';
+  if(String(r.file).startsWith('data:')){
+    openModal(head+`<img src="${r.file}" style="width:100%;border-radius:10px">`+note); return;
+  }
+  openModal(head+'<div class="empty">Loading…</div>');
+  const f=await fileLoad(String(r.file).slice(5));
+  if(!f||!f.data){ openModal(head+'<div class="empty">Could not load it — check the connection and try again.</div>'+note); return; }
+  const dlb=`<a class="btn gray" style="display:block;text-align:center;text-decoration:none;margin-top:8px" href="${f.data}" download="${esc(f.name||'sponsor')}">⬇ Download ${esc(f.name||'file')}</a>`;
+  if((f.type||'').startsWith('image/')) openModal(head+`<img src="${f.data}" style="width:100%;border-radius:10px">`+note+dlb);
+  else if(f.type==='application/pdf') openModal(head+`<embed src="${f.data}" type="application/pdf" style="width:100%;height:60vh;border-radius:10px">`+note+dlb);
+  else openModal(head+`<div class="card">📄 <b>${esc(f.name||'document')}</b></div>`+note+dlb);
+}
+function exportSponsorsCSV(){
+  const rows=[['Logged','Member','Sponsor','Cash / in-kind','What they gave','Amount','Date secured',
+    'Sponsor season','Status','Photo','Note','Confirmed by','Confirmed on','Sent back / declined reason']];
+  sponsAll().slice().reverse().forEach(([,r])=>rows.push([
+    new Date(r.ts).toLocaleDateString('en-CA'), r.member||'', r.sponsor||'',
+    r.kind==='inkind'?'In-kind':'Cash', r.what||'', r.amount||0,
+    new Date(r.securedTs||r.ts).toLocaleDateString('en-CA'), sponsorYearLabel(sponsYearOf(r)),
+    (SPON_ST[r.status]||{}).lab||r.status||'', r.file?'Y':'', r.note||'',
+    r.confirmedBy||'', r.confirmedTs?new Date(r.confirmedTs).toLocaleDateString('en-CA'):'',
+    r.backNote||r.declineNote||'']));
+  dl('three-aces-member-sponsors.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'));
+}
+
 /* ========================= THE PICNIC MODULE (v3.19) ======================
    Three things live in here, and they are all the same picnic:
 
@@ -5857,23 +6600,35 @@ function picNeedLabel(it){
 }
 
 function picSameName(a,b){ return (a||'').trim().toLowerCase()===(b||'').trim().toLowerCase(); }
-function picJobsOf(name){ return picJobs().filter(([,j])=>picSameName(j.who,name)); }
+/* v3.21 — MORE THAN ONE NAME ON A JOB.
+   `j.who` stays a plain string on the record, but it is now read as a
+   comma-separated list. That is deliberate: every job written by every earlier
+   version holds exactly one name, and a one-name string parses to a one-name
+   list, so nothing has to be migrated and an old backup still restores clean.
+   Luca's rule for a shared job: it is ONE job, not one each. Whoever ticks it
+   ticks it for everybody, and `doneBy` records which of them did it.        */
+function picWhoList(j){
+  return String((j&&j.who)||'').split(',').map(s=>s.trim()).filter(Boolean);
+}
+function picWhoLabel(j){ const l=picWhoList(j); return l.length? l.join(', ') : 'Anyone'; }
+function picJobHasName(j,name){ return picWhoList(j).some(n=>picSameName(n,name)); }
+function picJobsOf(name){ return picJobs().filter(([,j])=>picJobHasName(j,name)); }
 function picDoneN(list){ return (list||picJobs()).filter(([,j])=>!!j.done).length; }
 // Everyone who has a job, plus every user of the app, so an admin can hand a
 // job to somebody who has never had one before.
 function picPeople(){
   const seen=[], add=n=>{ n=(n||'').trim(); if(n && !seen.some(x=>picSameName(x,n))) seen.push(n); };
-  picJobs().forEach(([,j])=>add(j.who));
+  picJobs().forEach(([,j])=>picWhoList(j).forEach(add));
   Object.values(S.users||{}).forEach(u=>add(u.name));
   return seen.sort((a,b)=>a.localeCompare(b));
 }
-function picMayTick(j){ return isAdmin() || (meU() && picSameName(j.who, meU().name)); }
+function picMayTick(j){ return isAdmin() || (meU() && picJobHasName(j, meU().name)); }
 /* A job with a name on it that matches nobody's login is a job that only an
    admin can ever tick. That is a silent trap — the person is on the list, they
    just never see it — so the Jobs screen says who is missing a login.       */
 function picNoLogin(){
   const users=Object.values(S.users||{}).filter(u=>u.active!==false).map(u=>u.name||'');
-  return [...new Set(picJobs().map(([,j])=>(j.who||'').trim()).filter(Boolean))]
+  return [...new Set(picJobs().flatMap(([,j])=>picWhoList(j)))]
     .filter(n=>!users.some(u=>picSameName(u,n))).sort();
 }
 
@@ -5910,7 +6665,7 @@ function picJobList(){
   const all=picJobs();
   if(picWho==='out') return all.filter(([,j])=>!j.done);
   if(picWho==='done') return all.filter(([,j])=>!!j.done);
-  if(picWho==='any') return all.filter(([,j])=>!(j.who||'').trim());
+  if(picWho==='any') return all.filter(([,j])=>picWhoList(j).length===0);
   if(picWho) return picJobsOf(picWho);
   return all;
 }
@@ -5993,7 +6748,9 @@ function picTypeHave(id, el){
 /* Ticking a job. An admin may tick anybody's; everybody else, only their own. */
 async function picToggleJob(id){
   const j=((picY()||{}).jobs||{})[id]; if(!j) return;
-  if(!picMayTick(j)){ toast('That one is '+esc(j.who||'someone else')+'\'s to tick off',1); return; }
+  // v3.21 — a shared job is ONE job, not one each: whoever ticks it ticks it for
+  // everybody on it, and doneBy below records which of them actually did it.
+  if(!picMayTick(j)){ toast('That one is '+picWhoLabel(j)+'\'s to tick off',1); return; }
   if(j.done){
     await DB.set(picPath().concat(['jobs',id,'done']),null);
     await DB.set(picPath().concat(['jobs',id,'doneBy']),null);
@@ -6184,10 +6941,18 @@ function picJobSheet(id){
     <label>What needs doing</label>
     <input id="pj_text" value="${esc(j.text||'')}" placeholder="e.g. Buy 24 eggs for the egg toss">
     <label>Whose job it is</label>
-    <select id="pj_who">
-      <option value=""${!j.who?' selected':''}>Anyone — nobody in particular</option>
-      ${people.map(n=>`<option value="${esc(n)}"${picSameName(j.who,n)?' selected':''}>${esc(n)}</option>`).join('')}
-    </select>
+    <p class="muted" style="margin:0 0 6px">Tick everyone who is on it — you can tick as many as you like.
+      Tick nobody and it sits under <b>Anyone</b> for whoever gets to it first.
+      A job with several names is <b>one job shared</b>, not one each: whoever ticks it off
+      ticks it off for all of them, and the app records which of them did it.</p>
+    <div class="card" style="margin:0 0 4px;padding:4px 10px;max-height:210px;overflow:auto">
+      ${people.length? people.map(n=>`<label style="display:flex;gap:8px;align-items:center;margin:6px 0;font-weight:400">
+        <input type="checkbox" class="pjwho" value="${esc(n)}" ${picJobHasName(j,n)?'checked':''}
+          style="width:auto" onchange="picWhoSum()">
+        <span>${esc(n)}</span></label>`).join('')
+        : `<p class="muted" style="margin:8px 0">Nobody to pick from yet — add members under People first.</p>`}
+    </div>
+    <div id="pj_whosum" class="muted" style="margin:0 0 12px"></div>
     <label>Needed by — optional</label>
     <input id="pj_due" type="date" value="${esc(j.due||'')}">
     <label>Note — optional</label>
@@ -6196,12 +6961,30 @@ function picJobSheet(id){
     ${id?`<button class="btn red" onclick="picJobDel('${id}')">🗑 Remove this job</button>
       <p class="muted">Only an admin can add or remove a job. Removing asks for your PIN.</p>`:
       `<p class="muted">It appears on their phone within a few seconds.</p>`}`);
+  picWhoSum();
+}
+/* v3.21 — reading the ticked names back out of the picker. One place, used by
+   both the live summary line and the save, so the two can never disagree. */
+function picWhoPicked(){
+  return [...document.querySelectorAll('#modalBox .pjwho:checked')].map(x=>x.value);
+}
+function picWhoSum(){
+  const box=$('pj_whosum'); if(!box) return;
+  const l=picWhoPicked();
+  box.innerHTML = !l.length
+    ? 'Nobody ticked — this one goes on the <b>Anyone</b> list.'
+    : l.length===1
+    ? '<b>'+esc(l[0])+'</b>’s job.'
+    : 'Shared by <b>'+l.map(esc).join('</b>, <b>')+'</b> — '+l.length+
+      ' names, one job. Any one of them can tick it off for the rest.';
 }
 async function picJobSave(id){
   if(!isAdmin()) return;
   const text=$('pj_text').value.trim();
   if(!text){ toast('Say what needs doing',1); return; }
-  const rec={text:text, who:$('pj_who').value.trim(), order:0};
+  // Stored as a comma-separated string so every earlier version's one-name
+  // records stay valid and an old backup still restores clean.
+  const rec={text:text, who:picWhoPicked().join(', '), order:0};
   const due=$('pj_due').value; if(due) rec.due=due;
   const note=$('pj_note').value.trim(); if(note) rec.note=note;
   if(id){
@@ -6216,7 +6999,7 @@ async function picJobSave(id){
     rec.order=picJobs().reduce((m,[,j])=>Math.max(m,j.order||0),0)+1;
     await DB.push(picPath().concat(['jobs']),rec);
   }
-  closeModal(); toast(rec.who? 'Added to '+rec.who+'\'s list' : 'Added to the shared list'); rerender();
+  closeModal(); toast(rec.who? 'Added to '+picWhoLabel(rec)+'\'s list' : 'Added to the shared list'); rerender();
 }
 function picJobDel(id){
   if(!isAdmin()) return;
@@ -6349,18 +7132,88 @@ async function picSlotDone(id){
 }
 
 /* ---------------- SHOPPING LIST → JOBS, AND SHARING ----------------------- */
+/* v3.21 — a shopping-list job now carries the id of the item it came from.
+   That stamp is what lets the To Buy tab find the job again later and show
+   who is fetching it, instead of raising a second job beside the first.
+   Jobs written by v3.20 have no stamp, so picBuyJobFor falls back to the
+   wording those versions generated and adopts the job rather than doubling
+   it up — nothing has to be migrated.                                      */
+function picBuyJobText(it){
+  return 'Buy '+picShortOf(it)+((it.unit)?' '+it.unit:'')+' — '+(it.name||'');
+}
+function picBuyJobFor(id,it){
+  const jobs=picJobs();
+  const open=jobs.find(([,j])=>j.buy===id && !j.done);
+  if(open) return open;
+  const stamped=jobs.find(([,j])=>j.buy===id);
+  if(stamped) return stamped;
+  const tail=' — '+((it&&it.name)||'');
+  if(tail===' — ') return null;
+  return jobs.find(([,j])=>!j.done && String(j.text||'').slice(0,4)==='Buy '
+    && String(j.text||'').slice(-tail.length)===tail) || null;
+}
 async function picBuyToJobs(){
   if(!isAdmin()) return;
   const list=picBuyList();
   if(!list.length){ toast('Nothing short — nothing to buy',1); return; }
-  let n=picJobs().reduce((m,[,j])=>Math.max(m,j.order||0),0);
-  for(const [,it] of list){
-    const q=picShortOf(it);
-    const txt='Buy '+q+(it.unit?' '+it.unit:'')+' — '+it.name;
-    if(picJobs().some(([,j])=>!j.done && j.text===txt)) continue;   // don't double up
-    await DB.push(picPath().concat(['jobs']),{text:txt, who:'', order:++n, note:'From the stock count · Bin '+(it.bin||'?')});
+  let n=picJobs().reduce((m,[,j])=>Math.max(m,j.order||0),0), made=0;
+  for(const [id,it] of list){
+    if(picBuyJobFor(id,it)) continue;                               // don't double up
+    await DB.push(picPath().concat(['jobs']),{text:picBuyJobText(it), who:'', buy:id,
+      order:++n, note:'From the stock count · Bin '+(it.bin||'?')});
+    made++;
   }
-  toast(list.length+' job'+(list.length===1?'':'s')+' added to the shared list'); rerender();
+  toast(made? made+' job'+(made===1?'':'s')+' added to the shared list'
+            : 'They are all on the jobs list already'); rerender();
+}
+
+/* v3.21 — handing one line of the shopping list to somebody.
+   Luca's ask: assign the buy list by item, and the assignment BECOMES that
+   member's job. So this does not invent a parallel kind of record — it makes
+   (or re-uses) the ordinary picnic job and puts the names on it. Several
+   names are allowed, same rule as any other job: one job shared, whoever
+   picks it up ticks it off for the rest.                                   */
+function picBuyAssign(id){
+  if(!isAdmin()) return;
+  const it=((picY()||{}).items||{})[id]; if(!it) return;
+  const ex=picBuyJobFor(id,it), j=ex?ex[1]:{}, people=picPeople();
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>🛒 Who is picking this up?</h3>
+    <div class="card" style="margin:0 0 12px">
+      <b>${esc(it.name||'')}</b>
+      <div class="muted">${picShortOf(it)} short${it.unit?' · '+esc(it.unit):''} · bin ${esc(String(it.bin||'?'))}</div>
+    </div>
+    <p class="muted" style="margin:0 0 6px">Tick whoever is getting it. It goes on their jobs list
+      ${ex?'— this one is already on the list, so you are just changing the names on it.'
+         :'as <b>"'+esc(picBuyJobText(it))+'"</b>.'}
+      Tick nobody and it sits under <b>Anyone</b>.</p>
+    <div class="card" style="margin:0 0 4px;padding:4px 10px;max-height:210px;overflow:auto">
+      ${people.length? people.map(n=>`<label style="display:flex;gap:8px;align-items:center;margin:6px 0;font-weight:400">
+        <input type="checkbox" class="pjwho" value="${esc(n)}" ${picJobHasName(j,n)?'checked':''}
+          style="width:auto" onchange="picWhoSum()">
+        <span>${esc(n)}</span></label>`).join('')
+        : `<p class="muted" style="margin:8px 0">Nobody to pick from yet — add members under People first.</p>`}
+    </div>
+    <div id="pj_whosum" class="muted" style="margin:0 0 12px"></div>
+    <button class="btn" onclick="picBuyAssignSave('${id}')">${ex?'Save':'Put it on the jobs list'}</button>
+    <button class="btn gray" onclick="closeModal()">Cancel</button>`);
+  picWhoSum();
+}
+async function picBuyAssignSave(id){
+  if(!isAdmin()) return;
+  const it=((picY()||{}).items||{})[id]; if(!it) return;
+  const who=picWhoPicked().join(', ');
+  const ex=picBuyJobFor(id,it);
+  if(ex){
+    await DB.set(picPath().concat(['jobs',ex[0],'who']), who||null);
+    await DB.set(picPath().concat(['jobs',ex[0],'buy']), id);
+  }else{
+    const n=picJobs().reduce((m,[,j])=>Math.max(m,j.order||0),0)+1;
+    await DB.push(picPath().concat(['jobs']),{text:picBuyJobText(it), who:who, buy:id,
+      order:n, note:'From the stock count · Bin '+(it.bin||'?')});
+  }
+  closeModal();
+  toast(who? (it.name||'')+' → '+who : (it.name||'')+' is on the shared list for anyone');
+  rerender();
 }
 function picBuyText(){
   const list=picBuyList();
@@ -6393,7 +7246,7 @@ function picExportCSV(){
   rows.push([]);
   rows.push(['Whose job','Job','Done','Done on','Note']);
   picJobs().forEach(([,j])=>rows.push([
-    j.who||'Anyone', j.text||'', j.done?'yes':'no',
+    picWhoLabel(j), j.text||'', j.done?'yes':'no',
     j.done?new Date(j.done).toLocaleDateString('en-CA'):'', j.note||'']));
   dl('picnic-'+picYearKey()+'.csv', rows.map(r=>r.map(csvCell).join(',')).join('\n'));
 }
@@ -6543,7 +7396,7 @@ function picnicBadge(){
 function picnicHTML(){
   if(!picOn()) return picSetupHTML();
   const y=picY();
-  const tabs=[['supplies','📦 Supplies'],['jobs','✅ Jobs'],['plan','🕐 The day'],['buy','🛒 To buy'+(picBuyList().length?' ('+picBuyList().length+')':'')]];
+  const tabs=[['supplies','📦 Supplies'],['jobs','✅ Jobs'],['plan','🕐 The Day'],['buy','🛒 To Buy'+(picBuyList().length?' ('+picBuyList().length+')':'')]];
   if(!tabs.some(([t])=>t===picTab)) picTab='supplies';
   const days=picDaysAway();
   return `<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
@@ -6613,8 +7466,8 @@ function picStockHTML(live){
     <input class="searchbox noprint" id="picSearch_${sfx}" value="${esc(picQ)}"
       placeholder="🔍 Find an item — it tells you which bin"
       oninput="picQ=this.value;picStockRedraw(${live?1:0})">
-    <div class="tabbar noprint">${vtab('bins','📦 By bin')}${vtab('list','📋 Full list')}
-      ${chip('all','All '+all.length)}${chip('un','Not counted '+(all.length-counted))}${chip('short','Short '+short)}</div>
+    <div class="tabbar noprint">${vtab('bins','📦 By Bin')}${vtab('list','📋 Full List')}
+      ${chip('all','All '+all.length)}${chip('un','Not Counted '+(all.length-counted))}${chip('short','Short '+short)}</div>
     <div id="picStockList_${sfx}">${picStockBody(live)}</div>`;
 
   if(live) h+=`<div class="rowbtns noprint" style="margin-top:10px">
@@ -6682,13 +7535,42 @@ function picStockBody(live){
         ${live?`<button class="picx" onclick="event.stopPropagation();picBinSheet('${n}')">✎</button>`:''}
       </div>
       ${open? `<div class="picbinbody">${rows.length
-          ? rows.map(([id,it])=>picItemRow(id,it,live,live&&picFilt==='all')).join('')
+          ? picRowBlocks(rows).map(b=>picBlockHTML(b,live,live&&picFilt==='all')).join('')
           : '<div class="muted" style="padding:10px 0;font-size:12.5px">'+
             (own.length? 'Nothing in this bin matches the filter.' : 'This bin is empty.')+'</div>'}</div>` : ''}
     </div>`;
   }).join('');
 }
 function picBinToggle(n,live){ picOpen[n]=!picOpen[n]; picStockRedraw(live); }
+function picItemToggle(id,live){ picItemOpen[id]=!picItemOpen[id]; picStockRedraw(live); }
+/* Same grouping rule as picBinBlocks, but run over the rows that survived the
+   filter and the search rather than over the whole bin. If a parent has been
+   filtered out from under its children, the first surviving child becomes the
+   head of its own block — better than orphan rows floating with no context. */
+function picRowBlocks(rows){
+  const blocks=[];
+  rows.forEach(row=>{
+    if(row[1].parent && blocks.length) blocks[blocks.length-1].push(row);
+    else blocks.push([row]);
+  });
+  return blocks;
+}
+/* One item, or one item with its contents folded up underneath it. */
+function picBlockHTML(block,live,mv){
+  const [hid,head]=block[0], kids=block.slice(1);
+  if(!kids.length) return picItemRow(hid,head,live,mv,null,false);
+  const open=picItemOpen[hid]===true;
+  return picItemRow(hid,head,live,mv,kids,open)
+    + (open? kids.map(([id,it])=>picItemRow(id,it,live,false,null,false)).join('') : '');
+}
+// The one-line summary of what is folded away, so a shut row still tells you
+// whether there is anything to worry about inside it.
+function picKidSummary(kids){
+  const un=kids.filter(([,i])=>!picIsCounted(i)).length;
+  const sh=kids.filter(([,i])=>picShortOf(i)>0).length;
+  return [kids.length+' inside', un? un+' not counted':'', sh? '<b class="neg">'+sh+' short</b>':'']
+    .filter(Boolean).join(' · ');
+}
 function picBinsOpenAll(v,live){
   picBins().forEach(n=>{ if(v) picOpen[n]=true; else delete picOpen[n]; });
   picStockRedraw(live);
@@ -6716,17 +7598,19 @@ function picFlatHTML(list,live,q){
 }
 // One item. `live` false renders it read-only, for a member looking at the list.
 // `mv` adds the admin's up/down arrows.
-function picItemRow(id,it,live,mv){
+function picItemRow(id,it,live,mv,kids,open){
   const counted=picIsCounted(it), short=picShortOf(it);
   const tag = !counted? '<span class="pictag un">NOT COUNTED</span>'
     : short? '<span class="pictag short">BUY '+short+'</span>'
     : (+it.have||0)>(+it.need||0)? '<span class="pictag over">+'+((+it.have)-(+it.need))+'</span>'
     : '<span class="pictag ok">OK</span>';
   const tot=counted&&+it.per? ' ≈ '+((+it.have||0)*(+it.per)).toLocaleString('en-CA') : '';
-  return `<div class="picit${it.parent?' sub':''}">
-    <div class="picr1">
-      <div><div class="picnm">${esc(it.name||'')}</div>
-        <div class="picneed">${esc(picNeedLabel(it))}</div></div>
+  const hasKids=!!(kids&&kids.length);
+  return `<div class="picit${it.parent?' sub':''}${hasKids?' haskids':''}">
+    <div class="picr1"${hasKids?` style="cursor:pointer" onclick="picItemToggle('${id}',${live?1:0})"`:''}>
+      <div><div class="picnm">${hasKids?`<span class="picchev">${open?'▾':'▸'}</span> `:''}${esc(it.name||'')}</div>
+        <div class="picneed">${esc(picNeedLabel(it))}</div>
+        ${hasKids?`<div class="picneed">${open?'▾ contents shown · ':''}${picKidSummary(kids)}</div>`:''}</div>
       ${tag}
     </div>
     ${live? `<div class="picr2">
@@ -6748,11 +7632,13 @@ function picItemRow(id,it,live,mv){
 /* -------------------------------- JOBS ------------------------------------ */
 function picJobsHTML(){
   const all=picJobs(), done=picDoneN(all);
-  const people=[...new Set(all.map(([,j])=>(j.who||'').trim()))].filter(Boolean).sort();
+  // v3.21 — one job can carry several names, so the chip row is built from the
+  // flattened list rather than from the raw field.
+  const people=[...new Set(all.flatMap(([,j])=>picWhoList(j)))].sort((a,b)=>a.localeCompare(b));
   const pct=all.length? Math.round(done/all.length*100) : 0;
   const list=picJobList();
   const chip=(k,l)=>`<button class="${picWho===k?'on':''}" onclick="picWho='${jsq(k)}';rerender()">${l}</button>`;
-  const anyN=all.filter(([,j])=>!(j.who||'').trim()).length;
+  const anyN=all.filter(([,j])=>picWhoList(j).length===0).length;
 
   const nologin=picNoLogin(), fresh=picNewFromMembers();
   let h=printHead('Picnic jobs — '+esc(picYearKey()), done+' of '+all.length+' done')+`
@@ -6805,7 +7691,7 @@ function picJobRow(id,j,admin){
   return `<div class="picjob${j.done?' done':''}">
     <div class="pictick${j.done?' on':''}${can?'':' locked'}" onclick="picToggleJob('${id}')">${j.done?'✓':''}</div>
     <div class="pictx">${esc(j.text||'')}${j.member?' <span class="picadd">ADDED BY '+esc((j.addedBy||'').toUpperCase())+'</span>':''}
-      <span class="picby">${esc(j.who||'Anyone')}${j.done?' · done '+new Date(j.done).toLocaleDateString('en-CA',{month:'short',day:'numeric'})+(j.doneBy?' by '+esc(j.doneBy):''):''}${j.due&&!j.done?' · needed by '+esc(j.due):''}${j.note?' · '+esc(j.note):''}</span></div>
+      <span class="picby">${esc(picWhoLabel(j))}${j.done?' · done '+new Date(j.done).toLocaleDateString('en-CA',{month:'short',day:'numeric'})+(j.doneBy?' by '+esc(j.doneBy):''):''}${j.due&&!j.done?' · needed by '+esc(j.due):''}${j.note?' · '+esc(j.note):''}</span></div>
     ${boss? picMvBtns('Job',id,picJobMoveable(id,-1),picJobMoveable(id,1)) : ''}
     ${boss?`<button class="picx" onclick="picJobSheet('${id}')">✎</button>`
       : own?`<button class="picx" onclick="picMyJobSheet('${id}')">✎</button>`:''}
@@ -6815,7 +7701,7 @@ function picJobRow(id,j,admin){
 /* ------------------------------- THE DAY ---------------------------------- */
 function picPlanHTML(){
   const slots=picSlots();
-  let h=printHead('The day — '+esc(picYearKey()),
+  let h=printHead('The Day — '+esc(picYearKey()),
       slots.length+' stops · times and staffing are yours to change')+`
     <p class="muted noprint">This is the running order. Only an admin can move a time or change who is on a
       station — everybody else sees it exactly as you leave it.</p>`;
@@ -6853,18 +7739,27 @@ function picBuyHTML(){
   if(un) h+=`<div class="card"><b>${un} item${un===1?'':'s'} not counted yet</b>
     <p class="muted">This list can only be as complete as the count. Finish the bins and it may well grow.</p></div>`;
   if(!list.length) return h+'<div class="empty">Nothing is short. Either everything is in the bins, or the count is not done yet.</div>';
-  h+='<div class="card" style="padding:2px 12px">'+list.map(([,it])=>
-    `<div class="picbuy"><div class="picq">${picShortOf(it)}</div>
+  h+='<div class="card" style="padding:2px 12px">'+list.map(([id,it])=>{
+    const jb=picBuyJobFor(id,it), names=jb?picWhoList(jb[1]):[];
+    return `<div class="picbuy"><div class="picq">${picShortOf(it)}</div>
       <div style="flex:1"><b>${esc(it.name)}</b>
-        <div class="muted">${esc(it.unit||'')}${it.per?' of '+it.per:''} · have ${it.have}, need ${it.need} · bin ${it.bin||'?'}</div></div>
-    </div>`).join('')+'</div>';
+        <div class="muted">${esc(it.unit||'')}${it.per?' of '+it.per:''} · have ${it.have}, need ${it.need} · bin ${it.bin||'?'}</div>
+        <div class="muted" style="font-size:11.5px;margin-top:2px">${
+          jb&&jb[1].done? '<b class="goldtxt">✓ got it</b>'+(jb[1].doneBy?' — '+esc(jb[1].doneBy):'')
+          : names.length? '🛒 <b>'+names.map(esc).join(', ')+'</b>'+(names.length>1?' — shared':'')
+          : jb? 'on the jobs list · nobody has taken it'
+          : '<span class="muted">not handed out yet</span>'}</div></div>
+      ${isAdmin()?`<button class="btn small gray noprint" onclick="picBuyAssign('${id}')"
+        >${names.length?'✎ Change':'👤 Assign'}</button>`:''}
+    </div>`;}).join('')+'</div>';
   h+=`<div class="rowbtns noprint" style="margin-top:10px">
       <button class="btn small gray" onclick="picShareBuy()">📤 Share</button>
       <button class="btn small gray" onclick="window.print()">🖨 Print</button>
     </div>
     <button class="btn noprint" onclick="picBuyToJobs()">➕ Turn this into ${list.length} job${list.length===1?'':'s'}</button>
-    <p class="muted noprint">They go on the shared list as "Anyone", and you can hand each one to somebody
-      from the Jobs tab.</p>`;
+    <p class="muted noprint">Anything already handed out is left alone. The rest go on the shared list as
+      "Anyone" — and you can hand any line to somebody with <b>Assign</b> above, which puts it straight
+      on their own jobs list.</p>`;
   return h;
 }
 
@@ -6886,7 +7781,7 @@ function picnicMemberHTML(){
   if(y.date) h+=`<p class="muted">${new Date(y.date+'T12:00:00').toLocaleDateString('en-CA',{weekday:'long',month:'long',day:'numeric',year:'numeric'})}${days?' · '+days:''}</p>`;
 
   if(!mine.length && picMemTab==='mine') picMemTab='all';
-  h+=`<div class="tabbar noprint">${tab('mine','My jobs'+(mineOut?' ('+mineOut+')':''))}${tab('all','Everyone '+allDone+'/'+all.length)}${tab('plan','The day')}${tab('stock','The bins')}</div>`;
+  h+=`<div class="tabbar noprint">${tab('mine','My Jobs'+(mineOut?' ('+mineOut+')':''))}${tab('all','Everyone '+allDone+'/'+all.length)}${tab('stock','The Bins')}${tab('plan','The Day')}</div>`;
 
   if(picMemTab==='all'){
     h+=`<p class="muted">The whole club list, so you can see where everything stands. You can tick off
@@ -6918,7 +7813,7 @@ function picnicMemberHTML(){
   // ---- my jobs (the default) ----
   const pct=mine.length? Math.round(mineDone/mine.length*100) : 0;
   h+=`<div class="card">
-      <div style="display:flex;justify-content:space-between;font-size:13px"><b>My jobs</b>
+      <div style="display:flex;justify-content:space-between;font-size:13px"><b>My Jobs</b>
         <b>${mineDone} / ${mine.length} done</b></div>
       <div class="picbar ${pct>=100?'':'part'}"><i style="width:${pct}%"></i></div>
     </div>`;
