@@ -104,6 +104,9 @@
   body.dark .saleflag{background:#4a1010;color:#ff9c9c;}
   .memberflag{display:inline-block;background:var(--memberbg);color:var(--membertx);border-radius:6px;
     font-size:11px;padding:2px 6px;margin-left:6px;}
+  /* v3.24 — which picnic a book entry was bought for, said out loud on the entry */
+  .picfortag{display:inline-block;background:#e7f1ff;color:#12457e;border:1px solid #b9d4f5;
+    border-radius:6px;font-size:11px;font-weight:800;padding:2px 6px;margin-left:6px;white-space:nowrap;}
   /* v3.18 — member pricing must be impossible to miss on the Sell tab */
   .memberflag.big{font-size:15px;font-weight:900;letter-spacing:.6px;padding:4px 10px;border-radius:8px;
     text-transform:uppercase;border:2px solid var(--membertx);}
@@ -456,7 +459,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.23';
+const APP_VERSION = 'v3.24';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -1026,6 +1029,30 @@ function saleLines(sales){
 }
 
 /* ============================== RENDERING ================================= */
+// ── One-shot data top-ups ────────────────────────────────────────────────────
+// FIN_SEED only ever runs on a brand-new club, so a new category added there
+// would never reach a club that is already running. These run once, on an admin
+// screen (a member's phone has no write permission for settings), and set a flag
+// so they never run again. _migRan stops it firing on every 3-second poll.
+let _migRan=false;
+function runMigrations(){
+  if(_migRan || !_ready || !me) return;
+  _migRan=true;
+  const F=S.finance;
+  if(!F || !F.cats || !isAdmin()) return;
+  // v3.24 — "Annual Picnic - Supplies" for the things you buy for the picnic that
+  // are not park fees, entertainment or prizes: cups, plates, tablecloths.
+  if(!F.catsV324){
+    const want='Annual Picnic - Supplies';
+    const cur=(F.cats.expense||[]).slice();
+    const at=cur.indexOf('Annual Picnic - Prizes');       // sit it with the other picnic lines
+    const next=cur.slice(); next.splice(at>=0?at+1:next.length,0,want);
+    Promise.resolve()
+      .then(()=>cur.includes(want)?null:DB.set(['finance','cats','expense'],next))
+      .then(()=>DB.set(['finance','catsV324'],true))
+      .catch(()=>{ _migRan=false; });   // no write permission or offline — try again later
+  }
+}
 function rerender(){
   const _fsnap=picFocusSnap();   // taken before anything is torn down
   updateBanner();
@@ -1033,6 +1060,7 @@ function rerender(){
   applyLogo();
   if(me && !S.users[me]) me=null;   // user removed remotely
   if(!me){ showLogin(); return; }
+  runMigrations();
   $('login').classList.remove('active');
   $('appHeader').style.display='flex';
   $('nav').style.display='flex';
@@ -1828,12 +1856,13 @@ const FIN_SEED={
   cats:{
     income:['Donations','Member Fees','Other Income'],
     expense:['Christmas Party - Hall','Christmas Party - Gifts','Annual Picnic - Park Fees',
-      'Annual Picnic - Entertainment','Annual Picnic - Prizes','Picnic - Expenses',
+      'Annual Picnic - Entertainment','Annual Picnic - Prizes','Annual Picnic - Supplies','Picnic - Expenses',
       '3 Aces Merchandise','Charity','Attendance Re-Imbursement','Personal Care',
       'Entertainment','3 Aces Meetings','Misc']
   },
   txns:{},
-  imported2026:true
+  imported2026:true,
+  catsV324:true
 };
 // 2026 entries transcribed line-by-line from the Excel cell notes (fixed ids = safe to re-import)
 function _d(m,d){ return new Date(2026,m-1,d,12).getTime(); }
@@ -2211,6 +2240,7 @@ function booksHTML(){
         <div>${t.inkind?`<b class="goldtxt">🎁 ${fmt(t.amount)} value</b> <span class="memberflag">IN-KIND — not income</span>`:`<b class="${t.kind==='income'?'pos':'neg'}">${t.kind==='income'?'+':'−'}${fmt(t.amount)}</b>`}
           <span class="muted">${new Date(t.ts).toLocaleDateString('en-CA')}</span>
           ${t.sponsor?' · <b>'+esc(t.sponsor)+'</b>':''}
+          ${picForBadge(t)}
           <div class="muted">${t.member?(t.kind==='income'?'secured by ':'reimbursed to ')+esc(t.member):''}${t.member&&t.note?' · ':''}${t.note?esc(t.note):''}</div></div>
         <span style="flex:0 0 auto" class="noprint">${t.invoice?`<button class="btn small gray" onclick="viewInvoice('${t.id}')">📎</button>`:''}
         <button class="btn small gray" onclick="finEntryModal('${t.id}')">✎</button></span>
@@ -2348,6 +2378,13 @@ function evCalc(ev){
   const txWhy=t=>{
     if(exTx[t.id]) return null;                                  // taken out by hand
     if(inTx[t.id]) return 'added to this event by hand';
+    // A picnic tag is the last word. Tag an entry "Picnic 2027" and the 2027
+    // picnic claims it whatever its category or date, and every other event
+    // ignores it — which is what stops one "Annual Picnic - Prizes" entry being
+    // counted twice, once by 2026 and once by 2027. No tag = behave as before.
+    if(t.picFor)
+      return (ev.picYr && String(ev.picYr)===String(t.picFor))
+        ? 'tagged for the '+t.picFor+' picnic' : null;
     if(t.kind==='income' && t.cat==='Donations')
       return (ev.donYr && sponsorYearOf(t.ts)===ev.donYr)
         ? 'sponsorship secured for the '+ev.donYr+' sponsor year' : null;
@@ -2447,6 +2484,29 @@ async function evPut(id,obj){
   return key;
 }
 
+// Money tagged for a picnic that no event has claimed would be money nobody can
+// see — it would sit in the books and appear on no P&L at all. Say so, loudly,
+// with the amount, so it gets fixed the moment it happens.
+function evOrphanHTML(list){
+  const claimed=new Set((list||[]).map(e=>e.picYr).filter(Boolean).map(String));
+  const lost={};
+  Object.values((S.finance||{}).txns||{}).forEach(t=>{
+    if(!t.picFor || claimed.has(String(t.picFor)) || t.inkind) return;
+    const k=String(t.picFor);
+    lost[k]=(lost[k]||0)+(t.kind==='income'? t.amount : -t.amount);
+  });
+  const yrs=Object.keys(lost).sort();
+  if(!yrs.length) return '';
+  return `<div class="card noprint" style="border-color:var(--gold)">
+    <b>🧺 Tagged for a picnic that has no event yet</b>
+    ${yrs.map(k=>`<p class="muted" style="margin:6px 0 0"><b>${fmt(Math.abs(lost[k]))}</b> is tagged
+      <b>Picnic ${esc(k)}</b>, but no event on this page is set to the ${esc(k)} picnic, so it is counted nowhere.
+      Set one up — or open an existing event and pick “The ${esc(k)} picnic” — and it will land there on its own.</p>`).join('')}
+    <div style="height:8px"></div>
+    <button class="btn gray" onclick="evEditModal(null)">＋ Set up the event</button>
+  </div>`;
+}
+
 /* ------------------------------ THE PAGE ---------------------------------- */
 function eventsHTML(){
   if(!S.finance){
@@ -2506,6 +2566,7 @@ function eventsHTML(){
         <div class="l">Of what came in was spent</div></div>
     </div>
     <div class="card"><p style="margin:0">${story}</p></div>
+    ${evOrphanHTML(list)}
 
     <h2>Money in</h2>
     <div class="card"><table>
@@ -2687,6 +2748,12 @@ function evEditModal(id){
   const on=(g.cats||[]);
   const tagOpts=evSaleTags();
   const spYears=[...new Set(sponsorYears().concat(g.donYr?[g.donYr]:[]))].sort((a,b)=>b-a);
+  // Which picnic does this event represent? Suggested from the event's own year,
+  // so setting up "Annual Picnic 2027" ticks 2027 without anybody being asked.
+  const picYrs=[...new Set(picYearList().concat([picYearKey()],g.picYr?[String(g.picYr)]:[])
+    .filter(Boolean).map(String))].sort().reverse();
+  const gPic = g.picYr!=null ? String(g.picYr)
+             : (window._ev.id ? '' : (picYrs.includes(String(yr))&&/picnic/i.test(g.name||'') ? String(yr) : ''));
   const tick=(cls,val,checked,label,hint)=>`<label style="display:flex;gap:8px;align-items:flex-start;margin:5px 0;font-weight:400">
     <input type="checkbox" class="${cls}" value="${esc(val)}" ${checked?'checked':''} style="width:auto;margin-top:3px">
     <span>${esc(label)}${hint?`<div class="muted" style="font-size:12px">${hint}</div>`:''}</span></label>`;
@@ -2702,7 +2769,7 @@ function evEditModal(id){
 
   openModal(`<div id="evEditBox"><h3><button class="x" onclick="closeModal()">✕</button>${ev?'Set up':'New'} event</h3>
     <label>What is it called?</label>
-    <input id="ev_name" value="${esc(g.name||'')}" placeholder="Annual Picnic ${yr}">
+    <input id="ev_name" value="${esc(g.name||'')}" placeholder="Annual Picnic ${yr}" oninput="evPicYrSuggest()">
     <label>First day</label>
     <input id="ev_from" type="date" value="${dstr(g.from||Date.now())}">
     <label>Last day <span class="muted">(the same date if it is a one-day event)</span></label>
@@ -2717,6 +2784,15 @@ function evEditModal(id){
     </select>
     <p class="muted" style="margin:4px 0 0">The sponsor year turns over on Aug 1, right after the picnic, so a whole
       season of sponsorship is what pays for that one day. In-kind donations are listed but never counted as income.</p>
+
+    ${picYrs.length?`<label>Is this a picnic? Which year?</label>
+    <select id="ev_picyr" onchange="this.dataset.touched=1">
+      <option value=""${gPic?'':' selected'}>— not a picnic —</option>
+      ${picYrs.map(k=>`<option value="${esc(k)}"${String(gPic)===String(k)?' selected':''}>The ${esc(k)} picnic</option>`).join('')}
+    </select>
+    <p class="muted" style="margin:4px 0 0">Any book entry tagged for this picnic year is counted here whatever its
+      category or date — and is ignored by every other event, so nothing gets counted twice. Espresso cups bought in
+      August ${yr} for the ${picYrs[0]} picnic land on the ${picYrs[0]} picnic, not this one.</p>`:''}
 
     <label>Event names used on the till</label>
     ${tagOpts.length? tagOpts.map(([nm,ct])=>tick('evtag',nm,(g.tags||[]).includes(nm),nm,
@@ -2746,6 +2822,19 @@ function evEditModal(id){
         expense stays exactly where it is in the books.</p>`:''}
   </div>`);
 }
+// Type "Annual Picnic 2027" into the name and the picnic year ticks itself.
+// It only ever fills a box the user has left alone — it never overwrites a choice.
+function evPicYrSuggest(){
+  const sel=$('ev_picyr'); if(!sel||sel.dataset.touched) return;
+  const nm=($('ev_name')||{value:''}).value||'';
+  if(!/picnic/i.test(nm)){ sel.value=''; return; }
+  const yrs=[...sel.options].map(o=>o.value).filter(Boolean);
+  const inName=(nm.match(/(19|20)\d\d/g)||[]).filter(y=>yrs.includes(y));
+  if(inName.length){ sel.value=inName[0]; return; }
+  const f=($('ev_from')||{value:''}).value;
+  const fy=f? String(new Date(f+'T00:00:00').getFullYear()) : '';
+  sel.value = yrs.includes(fy) ? fy : '';
+}
 async function evSaveModal(){
   const name=$('ev_name').value.trim();
   if(!name){ toast('Give the event a name',1); return; }
@@ -2754,10 +2843,11 @@ async function evSaveModal(){
   const tags=[...document.querySelectorAll('.evtag:checked')].map(x=>x.value)
     .concat($('ev_tag').value.split(',').map(x=>x.trim()).filter(Boolean));
   const donYr=$('ev_don').value? +$('ev_don').value : null;
+  const picYr=($('ev_picyr')&&$('ev_picyr').value)||null;
   await evPut(window._ev&&window._ev.id, {name,
     from: f? new Date(f+'T00:00:00').getTime() : null,
     to:   t? new Date(t+'T23:59:59').getTime() : null,
-    cats, tags:[...new Set(tags)], donYr});
+    cats, tags:[...new Set(tags)], donYr, picYr});
   closeModal(); toast('Event saved');
 }
 function evDelete(id){
@@ -2782,6 +2872,51 @@ function exportEventCSV(){
     [c.net>=0?'PROFIT':'LOSS','','','','',c.net]);
   dl('three-aces-'+ev.name.toLowerCase().replace(/[^a-z0-9]+/g,'-')+'.csv',
     rows.map(r=>r.map(csvCell).join(',')).join('\n'));
+}
+
+// ── Which picnic is this for? ────────────────────────────────────────────────
+// The category says WHAT the money was for (park fees, prizes, supplies).
+// This says WHICH PICNIC it belongs to. They are different questions, which is
+// why we do not stamp years onto category names. Buy the espresso cups in
+// August 2026 for the 2027 picnic: the date stays August 2026 so the books are
+// true, the tag says 2027 so the cost lands on next year's picnic.
+// An entry with no tag behaves exactly the way it always has.
+function picForDefault(kind){ return kind==='income' ? '' : (picYearKey()||''); }
+// Union in the current picnic and whatever this entry is already tagged with,
+// so the box can never open on a year that is missing from its own list.
+function picForYears(also){
+  return [...new Set(picYearList().concat([picYearKey()],also||[])
+    .filter(Boolean).map(String))].sort().reverse();
+}
+function picForFieldHTML(t,editing,id){
+  const yrs=picForYears([t&&t.picFor]);
+  if(!yrs.length) return '';                       // no picnic set up yet — don't ask
+  id=id||'fe_picfor';
+  const cur = editing ? (t.picFor||'') : picForDefault(t.kind);
+  return `<label>Which picnic is this for?</label>
+    <select id="${id}" onchange="picForHint('${id}')">
+      <option value=""${cur?'':' selected'}>— not a picnic expense —</option>
+      ${yrs.map(k=>`<option value="${esc(k)}"${String(k)===String(cur)?' selected':''}>Picnic ${esc(k)}</option>`).join('')}
+    </select>
+    <div id="${id}Hint" class="muted" style="margin:2px 0 8px"></div>`;
+}
+function picForVal(id){ const s=$(id||'fe_picfor'); return (s&&s.value)||null; }
+function picForHint(id,fixedDate){
+  id=id||'fe_picfor';
+  const el=$(id+'Hint'); if(!el) return;
+  if(fixedDate!=null) el.dataset.d=fixedDate;
+  const v=picForVal(id);
+  const dEl=$('fe_date');
+  const d=el.dataset.d || (dEl?dEl.value:'');
+  const by=String(d? new Date(d+'T12:00').getFullYear() : new Date().getFullYear());
+  el.textContent = !v
+    ? 'Not counted against any picnic — it just sits in the books under its category.'
+    : (String(v)===by
+        ? 'Counted against the '+v+' picnic.'
+        : 'The money leaves the '+by+' books, but the cost lands on the '+v+' picnic.');
+}
+function picForBadge(t){
+  return t && t.picFor ? `<span class="picfortag">🧺 Picnic ${esc(t.picFor)}</span>` : '';
 }
 
 function finEntryModal(id){
@@ -2809,7 +2944,8 @@ function finEntryModal(id){
     <label id="fe_amtLab">${t.inkind?'Value of the item $ (not added to income)':'Amount $'}</label>
     <input id="fe_amt" type="text" inputmode="decimal" value="${t.amount}">
     <label>Date</label>
-    <input id="fe_date" type="date" value="${dstr(t.ts)}">
+    <input id="fe_date" type="date" onchange="picForHint()" value="${dstr(t.ts)}">
+    ${picForFieldHTML(t,!!id)}
     <div id="feIncOnly" style="display:${t.kind==='income'?'block':'none'}">
       <label>Sponsor / source (e.g. "MTF Group")</label>
       <input id="fe_sponsor" value="${esc(t.sponsor||'')}">
@@ -2844,6 +2980,7 @@ function finEntryModal(id){
     <div style="height:12px"></div>
     <button class="btn" onclick="saveFinEntry()">✓ Save Entry</button>
     ${id?`<div style="height:8px"></div><button class="btn red" onclick="finDeleteEntry('${id}')">Delete entry</button>`:''}`);
+  picForHint();
 }
 // Deleting a figure out of the books needs the same PIN as changing one.
 function finDeleteEntry(id){
@@ -2867,6 +3004,12 @@ function feKind(k){
     sel.innerHTML='<option value="" selected disabled>Pick a category…</option>'
       +cats.map(x=>`<option>${esc(x)}</option>`).join('')+'<option value="__new">＋ New category…</option>';
   }
+  // Income is usually sponsorship, which is already matched by sponsor year, so
+  // flipping to Income clears the picnic tag. Flipping back to Expense puts the
+  // current picnic back. Only on a NEW entry — never silently re-tag an old one.
+  const pf=$('fe_picfor');
+  if(pf && !window._fe.id) pf.value=picForDefault(k);
+  picForHint();
 }
 function feInkind(ink){
   $('feCash').classList.toggle('on',!ink);
@@ -2888,7 +3031,7 @@ async function saveFinEntry(){
     member:$('fe_member').value||null,
     sponsor:k==='income'?($('fe_sponsor').value.trim()||null):null,
     inkind:k==='income'?$('fe_inkind').classList.contains('on'):false,
-    note:$('fe_note').value.trim()||null, by:meU().name};
+    note:$('fe_note').value.trim()||null, picFor:picForVal(), by:meU().name};
   const editingId=window._fe.id, invNew=window._feInvNew, invOld=window._feInv||null;
   // Everything above only READS the form. Everything below is the actual commit —
   // it runs from captured values, so the PIN screen is free to replace the form.
@@ -2912,16 +3055,17 @@ async function saveFinEntry(){
     if(Math.abs((was.amount||0)-t.amount)>0.005) changes.push(fmt(was.amount||0)+' → '+fmt(t.amount));
     if((was.cat||'')!==t.cat) changes.push('category '+(was.cat||'—')+' → '+t.cat);
     if(dstr(was.ts)!==dstr(t.ts)) changes.push('date '+dstr(was.ts)+' → '+dstr(t.ts));
+    if((was.picFor||'')!==(t.picFor||'')) changes.push('picnic '+(was.picFor||'none')+' → '+(t.picFor||'none'));
     return pinConfirm('You are changing a book entry that is already recorded'
       +(changes.length?': '+changes.join(', '):'')+'. This moves the club balance.', commit);
   }
   return commit();
 }
 function exportBooksCSV(){
-  const rows=[['Date','Type','Category','Amount','In-Kind','Sponsor/Source','Member','Note','Recorded By']];
+  const rows=[['Date','Type','Category','Amount','In-Kind','Sponsor/Source','Member','For Picnic','Note','Recorded By']];
   Object.values(S.finance.txns||{}).sort((a,b)=>a.ts-b.ts).forEach(t=>
     rows.push([new Date(t.ts).toLocaleDateString('en-CA'),t.kind,t.cat,t.amount,
-      t.inkind?'Y':'',t.sponsor||'',t.member||'',t.note||'',t.by||'']));
+      t.inkind?'Y':'',t.sponsor||'',t.member||'',t.picFor||'',t.note||'',t.by||'']));
   dl('three-aces-books.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'));
 }
 
@@ -5635,6 +5779,7 @@ function claimApprove(id){
     <input id="ca_amt" type="text" inputmode="decimal" value="${c.amount||''}">
     <p class="muted" style="margin:2px 0 8px">Change it if you agreed a different figure — the change is written into
       the claim's history with your name on it, and the member sees it.</p>
+    ${picForFieldHTML({kind:'expense', picFor:(c.picFor||picForDefault('expense'))}, true, 'ca_picfor')}
     <div class="card" style="border-color:var(--gold)">
       <b>What this does</b>
       <p class="muted" style="margin:6px 0 0">Writes a <b>${esc(c.cat||'')}</b> expense into the Books dated
@@ -5645,6 +5790,7 @@ function claimApprove(id){
     <button class="btn" onclick="claimApproveGo('${id}')">✔ Approve and put it in the books</button>
     <div style="height:8px"></div>
     <button class="btn gray" onclick="closeModal()">Cancel</button>`);
+  picForHint('ca_picfor', dstr(c.date||c.ts||Date.now()));
 }
 async function claimApproveGo(id){
   const c=(S.claims||{})[id]; if(!c) return;
@@ -5658,8 +5804,10 @@ async function claimApproveGo(id){
     ts:c.date||c.ts, kind:'expense', cat:c.cat, amount:Math.round(amt*100)/100,
     member:c.member||null, sponsor:null, inkind:false,
     note:(c.note?c.note+' — ':'')+'member expense claim', by:meU().name,
+    picFor:(($('ca_picfor')||{}).value)||null,
     invoice:c.receipt||null, claim:id});
   await DB.set(['claims',id],{...c, amount:Math.round(amt*100)/100, status:'approved',
+    picFor:(($('ca_picfor')||{}).value)||null,
     txnId, approvedBy:meU().name, approvedTs:Date.now(), backNote:null,
     trail:claimStamp(c,'Approved'+(changed?' — '+fmt(c.amount||0)+' → '+fmt(amt):'')+' · written into the books')});
   closeModal(); toast('Approved — '+fmt(amt)+' is now in the books'); rerender();
