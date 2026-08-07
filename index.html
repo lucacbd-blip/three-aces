@@ -459,7 +459,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.24';
+const APP_VERSION = 'v3.25';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -7761,6 +7761,114 @@ function picOrdinal(){ return picOrdinalFor(picYearKey(), picY()||{}); }
 // over to next year's card without anybody having to remember it.
 function picSdFont(){ return sdFontKey(((S.settings||{}).sdFont)||SD_FONT_DEFAULT); }
 
+/* ========================= WHAT THIS PICNIC HAS COST ========================
+   The Books answer "when did the money move" — which is why they stop at this
+   calendar year, and why they should. This answers a different question that
+   nobody could ask before: "what have we spent on NEXT year's picnic so far?"
+   Buy espresso cups in August 2026 for the 2027 picnic and the $140 is a 2026
+   book entry — correct, that is when it left the bank — but it is 2027 picnic
+   money, and this is where you see it. Click a picnic year, see its money.
+   Nothing has to be set up. The picnic year you already made IS the container.
+   -------------------------------------------------------------------------- */
+// Every book entry tagged for one picnic year, whatever year it was paid in.
+function picMoneyTxns(k){
+  k=String(k||picYearKey());
+  return Object.entries((S.finance||{}).txns||{}).map(([id,t])=>({id,...t}))
+    .filter(t=>String(t.picFor||'')===k).sort((a,b)=>a.ts-b.ts);
+}
+function picMoneyCalc(k){
+  k=String(k||picYearKey());
+  const list=picMoneyTxns(k);
+  const exps=list.filter(t=>t.kind==='expense'&&!t.inkind);
+  const inc =list.filter(t=>t.kind==='income'&&!t.inkind);
+  const ink =list.filter(t=>t.inkind);
+  const by={};
+  exps.forEach(t=>{ const c=t.cat||'Uncategorised';
+    (by[c]=by[c]||{cat:c,n:0,amt:0}); by[c].n++; by[c].amt+=t.amount; });
+  const rows=Object.values(by).map(r=>({...r,amt:Math.round(r.amt*100)/100}))
+    .sort((a,b)=>b.amt-a.amt);
+  const tot=l=>Math.round(l.reduce((a,t)=>a+(t.amount||0),0)*100)/100;
+  // What was paid out in which calendar year — the whole point of the tag is
+  // that these are allowed to differ, so say so out loud rather than hiding it.
+  const byYr={};
+  exps.forEach(t=>{ const y=new Date(t.ts).getFullYear(); byYr[y]=Math.round(((byYr[y]||0)+t.amount)*100)/100; });
+  return {k, list, exps, inc, ink, rows, byYr,
+    spent:tot(exps), income:tot(inc), inkVal:tot(ink)};
+}
+function picMoneyHTML(){
+  const k=picYearKey(), c=picMoneyCalc(k);
+  const h=printHead('Picnic money — '+k, 'What the '+k+' picnic has cost so far');
+  if(!c.list.length) return h+`<div class="card">
+      <b>Nothing has been put against the ${esc(k)} picnic yet</b>
+      <p class="muted">When you write an expense into the Books, there is a box that asks
+        <b>“Which picnic is this for?”</b>. Leave it on <b>Picnic ${esc(k)}</b> and it lands here — even if you
+        pay for it a year early. The date on the entry stays the day the money actually left, so the Books
+        still balance against the bank.</p>
+      ${clubRecOn()?`<div style="height:8px"></div>
+        <button class="btn" onclick="picMoneyAdd()">＋ Log an expense for this picnic</button>`:''}
+    </div>`;
+  const yrs=Object.keys(c.byYr).map(Number).sort();
+  const early=yrs.filter(y=>String(y)!==String(k));
+  return h+`
+    <div class="statgrid">
+      <div class="stat red"><div class="v">${fmt(c.spent)}</div><div class="l">Spent on Picnic ${esc(k)}</div></div>
+      ${c.income?`<div class="stat green"><div class="v">${fmt(c.income)}</div><div class="l">Money in</div></div>`:''}
+      ${c.inkVal?`<div class="stat gold"><div class="v">${fmt(c.inkVal)}</div><div class="l">In-kind (not money)</div></div>`:''}
+    </div>
+    ${early.length?`<div class="card" style="border-color:var(--gold)">
+      <b>🧺 Paid for ahead of time</b>
+      <p class="muted">${early.map(y=>`<b>${fmt(c.byYr[y])}</b> of this left the bank in <b>${y}</b>`).join(', and ')}${
+        c.byYr[k]?`, with <b>${fmt(c.byYr[k])}</b> in <b>${esc(k)}</b> itself`:''}.
+        The early money sits in the ${early.map(y=>'<b>'+y+'</b>').join(' and ')} Books, where it belongs — that
+        really is when it went out of the account. It is counted against the ${esc(k)} picnic here because that
+        is what it bought.</p>
+    </div>`:''}
+    <h2>Where it went</h2>
+    <div class="card"><table>
+      <tr><th>Category</th><th class="r">Entries</th><th class="r">Spent</th></tr>
+      ${c.rows.map(r=>`<tr class="drill" onclick="picMoneyDrill('${jsq(r.cat)}')">
+        <td>${esc(r.cat)}</td><td class="r muted">${r.n}</td>
+        <td class="r neg"><b>${fmt(r.amt)}</b></td></tr>`).join('')}
+      <tr class="drilltot"><td>Total spent on Picnic ${esc(k)}</td>
+        <td class="r">${c.exps.length}</td><td class="r">${fmt(c.spent)}</td></tr>
+    </table></div>
+    <p class="muted noprint">Tap any line to see the individual entries behind it.</p>
+    ${c.ink.length?`<div class="card"><b>🎁 In-kind — donated, not bought</b>
+      <p class="muted">${c.ink.map(t=>esc(t.sponsor||t.note||'item')+' — '+fmt(t.amount||0)).join(' · ')}.
+        Counted toward the sponsor quota, never added to the money above, because nothing was actually paid.</p></div>`:''}
+    <div class="rowbtns noprint" style="margin-top:10px">
+      ${clubRecOn()?`<button class="btn small gray" onclick="picMoneyAdd()">＋ Log an expense</button>`:''}
+      <button class="btn small gray" onclick="window.print()">🖨 Print</button>
+    </div>`;
+}
+// Straight into a new Book entry. The picnic box already defaults to whichever
+// picnic year is on screen, so there is nothing extra to remember to tick.
+function picMoneyAdd(){
+  if(!clubRecOn()){ toast('Club records are switched off in Settings',1); return; }
+  adminTab='books'; rerender(); finEntryModal(null);
+}
+function picMoneyDrill(cat){
+  const k=picYearKey(), c=picMoneyCalc(k);
+  const list=c.exps.filter(t=>(t.cat||'Uncategorised')===cat);
+  const sub=Math.round(list.reduce((a,t)=>a+t.amount,0)*100)/100;
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>${esc(cat)}</h3>
+    <div class="stat red" style="margin:0 0 4px"><div class="v">${fmt(sub)}</div>
+      <div class="l">${esc(cat)} — Picnic ${esc(k)}</div></div>
+    <p class="muted" style="margin:6px 0 10px">Every entry tagged for the ${esc(k)} picnic and filed under this
+      category — whatever year the money actually left.</p>
+    <div class="card"><table>
+      <tr><th>Paid</th><th>What / who</th><th class="r">Amount</th></tr>
+      ${list.map(t=>`<tr>
+        <td style="white-space:nowrap;vertical-align:top">${_dDate(t.ts)}</td>
+        <td>${t.note?esc(t.note):'<span class="muted">—</span>'}${t.invoice?' <span class="muted">📎</span>':''}
+          ${t.member?`<div class="muted">paid / reimbursed to ${esc(t.member)}</div>`:''}
+          <div class="noprint" style="margin-top:3px"><button class="btn small gray"
+            onclick="closeModal();adminTab='books';rerender();finEntryModal('${t.id}')">✎ edit this entry</button></div></td>
+        <td class="r neg" style="vertical-align:top;white-space:nowrap"><b>${fmt(t.amount)}</b></td></tr>`).join('')}
+      <tr class="drilltot"><td colspan="2">${list.length} entr${list.length===1?'y':'ies'}</td>
+        <td class="r">${fmt(sub)}</td></tr></table></div>`);
+}
+
 /* ============================ THE ADMIN SCREEN ============================ */
 function picnicBadge(){
   if(!picOn()) return '';
@@ -7773,6 +7881,8 @@ function picnicHTML(){
   if(!picOn()) return picSetupHTML();
   const y=picY();
   const tabs=[['supplies','📦 Supplies'],['jobs','✅ Jobs'],['plan','🕐 The Day'],['buy','🛒 To Buy'+(picBuyList().length?' ('+picBuyList().length+')':'')]];
+  // The money for THIS picnic, whichever year it was actually spent in.
+  if(clubRecOn()) tabs.push(['money','💰 Money']);
   if(!tabs.some(([t])=>t===picTab)) picTab='supplies';
   const days=picDaysAway();
   return `<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
@@ -7788,7 +7898,7 @@ function picnicHTML(){
     <div class="tabbar noprint" style="margin-bottom:10px">${tabs.map(([t,l])=>
       `<button class="${picTab===t?'on':''}" onclick="picTab='${t}';rerender()">${l}</button>`).join('')}</div>
     ${picTab==='supplies'? picSuppliesHTML() : picTab==='jobs'? picJobsHTML()
-      : picTab==='plan'? picPlanHTML() : picBuyHTML()}`;
+      : picTab==='plan'? picPlanHTML() : picTab==='money'? picMoneyHTML() : picBuyHTML()}`;
 }
 function picSetupHTML(){
   return `<h2>🎪 The picnic</h2>
