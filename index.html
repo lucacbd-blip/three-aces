@@ -459,7 +459,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.25';
+const APP_VERSION = 'v3.26';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -1973,6 +1973,21 @@ function isStaffName(name){
   return roleOfName(name)==='retail';
 }
 
+/* Two different years, and muddling them is what made the books read wrong.
+   The DATE says when the money moved. That is what the balance runs on, it
+   never changes, and it is what has to match the bank statement.
+   The PICNIC TAG says which picnic the cost was for. That is the year whose
+   category line it belongs on.
+   Buy espresso cups in August 2026 for the 2027 picnic: the $140 leaves the
+   2026 account (so 2026's balance is still right) but it is 2027's Annual
+   Picnic - Supplies, not 2026's. Only expenses move. Sponsorship money stays
+   in the year it was banked, because that is the year it was banked.        */
+function finCostYear(t){
+  const d=new Date(t.ts).getFullYear();
+  if(!t || t.kind!=='expense' || !t.picFor) return d;
+  const p=parseInt(t.picFor,10);
+  return isFinite(p)? p : d;
+}
 function finCalc(y){
   const F=S.finance, op=F.opening;
   if(y<op.year){ const h=(F.history||{})[String(y)];
@@ -1992,7 +2007,20 @@ function finCalc(y){
     .filter(p=>p.kind==='misc'&&new Date(p.ts).getFullYear()===y)
     .reduce((a,p)=>a+(p.amount||0),0);
   const totalIn=prev+salesAuto+incCash+miscAuto;
+  // The same entries again, sorted into the year the COST belongs to rather than
+  // the year the cash moved. Everything above is untouched, so the balance, the
+  // carry-forward and the year-over-year table all still run on real cash.
+  const catTx=Object.entries(F.txns||{}).map(([id,t])=>({id,...t}))
+    .filter(t=>finCostYear(t)===y).sort((a,b)=>b.ts-a.ts);
+  // Money that went out this year for a later picnic…
+  const paidAhead=tx.filter(t=>t.kind==='expense'&&finCostYear(t)!==y)
+    .sort((a,b)=>finCostYear(a)-finCostYear(b));
+  // …and cost sitting on this year whose cash already left in another one.
+  const paidBefore=catTx.filter(t=>t.kind==='expense'&&new Date(t.ts).getFullYear()!==y)
+    .sort((a,b)=>a.ts-b.ts);
+  const sum=l=>Math.round(l.reduce((a,t)=>a+(t.amount||0),0)*100)/100;
   return {prev, salesAuto, incCash, inkind, expenses, tx, miscAuto,
+    catTx, paidAhead, paidBefore, paidAheadAmt:sum(paidAhead), paidBeforeAmt:sum(paidBefore),
     totalIn, balance:Math.round((totalIn-expenses)*100)/100,
     pctSpent: totalIn>0? expenses/totalIn : 0};
 }
@@ -2044,10 +2072,30 @@ function finDrill(kind,cat){
   const c=finCalc(finYear); if(!c||c.hist) return;
   const F=S.finance, tx=c.tx;
 
+  /* ---- money bought early, or bought in an earlier year ---- */
+  if(kind==='ahead'||kind==='before'){
+    const ahead=kind==='ahead';
+    const list=ahead? c.paidAhead : c.paidBefore;
+    const amt =ahead? c.paidAheadAmt : c.paidBeforeAmt;
+    return openModal(_drillTitle(ahead?'Paid ahead for a later picnic':'Already paid in an earlier year',
+      ahead
+        ? 'This money left the club account in '+finYear+', which is why it is inside the '+finYear+' total — but it '
+          +'was bought for a later picnic, so it is counted on that picnic’s category lines instead of this '
+          +'year’s. Nothing is counted twice and the '+finYear+' balance still matches the bank.'
+        : 'These costs belong to '+finYear+' and are shown on the category lines above, but the cash for them went '
+          +'out in an earlier year and was already taken off that year’s balance. They are subtracted back off '
+          +'here so the same money is never counted twice.',
+      amt, ahead?'red':'gold')
+      + _drillTxTable(list, ahead?'Paid ahead':'Paid in an earlier year')
+      + `<p class="muted">Each line shows the date the money actually left. The 🧺 tag on the entry says which
+        picnic it was bought for — open any entry with <b>✎ edit this entry</b> to change either one.</p>`);
+  }
+
   /* ---- one income / expense category ---- */
   if(kind==='income'||kind==='expense'){
-    const cash=tx.filter(t=>t.kind===kind&&t.cat===cat&&!t.inkind);
-    const ink =tx.filter(t=>t.kind===kind&&t.cat===cat&&t.inkind);
+    const src=kind==='expense'? c.catTx : tx;
+    const cash=src.filter(t=>t.kind===kind&&t.cat===cat&&!t.inkind);
+    const ink =src.filter(t=>t.kind===kind&&t.cat===cat&&t.inkind);
     const sub=cash.reduce((a,t)=>a+t.amount,0);
     let extra='';
     if(ink.length) extra=`<h2>Also recorded here — but NOT in that total</h2>
@@ -2151,12 +2199,15 @@ function finDrill(kind,cat){
             <td class="r">${fmt(c.miscAuto)}</td></tr></table></div>`);
   }
   if(kind==='totalexp'){
-    const cats=[...new Set(tx.filter(t=>t.kind==='expense').map(t=>t.cat))];
-    const rows=cats.map(x=>[x, tx.filter(t=>t.kind==='expense'&&t.cat===x&&!t.inkind).reduce((a,t)=>a+t.amount,0)]);
-    const expInk=tx.filter(t=>t.kind==='expense'&&t.inkind).reduce((a,t)=>a+t.amount,0);
+    const ctx=c.catTx;
+    const cats=[...new Set(ctx.filter(t=>t.kind==='expense').map(t=>t.cat))];
+    const rows=cats.map(x=>[x, ctx.filter(t=>t.kind==='expense'&&t.cat===x&&!t.inkind).reduce((a,t)=>a+t.amount,0)]);
+    const expInk=ctx.filter(t=>t.kind==='expense'&&t.inkind).reduce((a,t)=>a+t.amount,0);
     if(expInk>0.005) rows.push(['In-kind expenses recorded (included in the total)',expInk]);
+    if(c.paidAheadAmt>0.005) rows.push(['🧺 Paid ahead for a later picnic — cash out now, counted on that picnic',c.paidAheadAmt]);
+    if(c.paidBeforeAmt>0.005) rows.push(['🧺 Already paid out of an earlier year’s account',-c.paidBeforeAmt]);
     return openModal(_drillTitle('TOTAL EXPENSES',
-      'Every dollar spent in '+finYear+'.', c.expenses,'red')
+      'Every dollar that actually left the club account in '+finYear+'.', c.expenses,'red')
       + _drillSum(rows,'TOTAL EXPENSES',c.expenses,
         'Tap any single line back in the Books screen to see the individual entries behind it.'));
   }
@@ -2179,8 +2230,13 @@ function booksHTML(){
     return '<div class="empty">Opening the club books for the first time…</div>';
   }
   const F=S.finance, nowY=new Date().getFullYear();
+  // Future years appear the moment money is attributed to them. Attribute an
+  // expense to the 2027 picnic and a 2027 button turns up — every category at
+  // zero except the ones you have actually committed money to.
+  const aheadYrs=Object.values(F.txns||{}).map(finCostYear).filter(v=>v>nowY);
   const years=[...new Set(Object.keys(F.history||{}).map(Number)
-    .concat(Array.from({length:nowY-F.opening.year+1},(_,i)=>F.opening.year+i)))].sort();
+    .concat(Array.from({length:nowY-F.opening.year+1},(_,i)=>F.opening.year+i))
+    .concat(aheadYrs))].sort();
   if(!years.includes(finYear)) finYear=nowY;
   const c=finCalc(finYear);
   const yearBtns=`<div class="payrow noprint" style="flex-wrap:wrap">
@@ -2198,10 +2254,13 @@ function booksHTML(){
       <p class="muted">Archived summary from the old Excel sheet. Full detail for this year stays in the workbook.</p>
       ${yoyHTML(years)}`;
   }
-  const catSum=(kind,cat)=>c.tx.filter(t=>t.kind===kind&&t.cat===cat&&!t.inkind).reduce((a,t)=>a+t.amount,0);
+  // Income rows read the cash year. Expense rows read the year the cost belongs
+  // to, so a cost bought early lands on the picnic it was bought for.
+  const catSum=(kind,cat)=>(kind==='expense'?c.catTx:c.tx)
+    .filter(t=>t.kind===kind&&t.cat===cat&&!t.inkind).reduce((a,t)=>a+t.amount,0);
   // The category rows count cash only, but TOTAL EXPENSES counts everything — so if an
   // in-kind expense ever gets recorded, show it on its own line and the table still adds up.
-  const expInk=c.tx.filter(t=>t.kind==='expense'&&t.inkind).reduce((a,t)=>a+t.amount,0);
+  const expInk=c.catTx.filter(t=>t.kind==='expense'&&t.inkind).reduce((a,t)=>a+t.amount,0);
   // like the Budget Report: EVERY category shown, even at $0
   const hidCats=F.catsHidden||{income:[],expense:[]};
   const incCats=[...new Set((F.cats&&F.cats.income||FIN_SEED.cats.income)
@@ -2209,7 +2268,11 @@ function booksHTML(){
     .concat(c.tx.filter(t=>t.kind==='income').map(t=>t.cat)))];
   const expCats=[...new Set((F.cats&&F.cats.expense||FIN_SEED.cats.expense)
     .filter(x=>!(hidCats.expense||[]).includes(x))
-    .concat(c.tx.filter(t=>t.kind==='expense').map(t=>t.cat)))];
+    .concat(c.catTx.filter(t=>t.kind==='expense').map(t=>t.cat)))];
+  // The two lines that keep the expense table adding up to real cash even though
+  // the category rows have been re-homed onto the picnic they belong to.
+  const aheadBy={}; c.paidAhead.forEach(t=>{ const k=finCostYear(t); aheadBy[k]=Math.round(((aheadBy[k]||0)+t.amount)*100)/100; });
+  const beforeBy={}; c.paidBefore.forEach(t=>{ const k=new Date(t.ts).getFullYear(); beforeBy[k]=Math.round(((beforeBy[k]||0)+t.amount)*100)/100; });
   // Sponsor quota board — driven by the member ROSTER (plus anyone credited).
   // It runs on the SPONSOR year, Aug 1 → Jul 31, so it reads the raw txns and
   // not c.tx, which is filtered to the calendar year showing in the books.
@@ -2229,7 +2292,7 @@ function booksHTML(){
     </div>`;
   // entries grouped by category, subtotal per group
   const groups={};
-  c.tx.forEach(t=>{ (groups[t.cat]=groups[t.cat]||[]).push(t); });
+  c.catTx.forEach(t=>{ (groups[t.cat]=groups[t.cat]||[]).push(t); });
   const entriesHTML=Object.entries(groups).map(([cat,list])=>{
     const sub=list.reduce((a,t)=>a+(t.inkind?0:t.amount),0);
     const subInk=list.reduce((a,t)=>a+(t.inkind?t.amount:0),0);
@@ -2241,6 +2304,7 @@ function booksHTML(){
           <span class="muted">${new Date(t.ts).toLocaleDateString('en-CA')}</span>
           ${t.sponsor?' · <b>'+esc(t.sponsor)+'</b>':''}
           ${picForBadge(t)}
+          ${new Date(t.ts).getFullYear()!==finYear?`<span class="picfortag" style="background:#fdf3d8;color:#6b5200;border-color:#e6cf8a">💵 cash left in ${new Date(t.ts).getFullYear()}</span>`:''}
           <div class="muted">${t.member?(t.kind==='income'?'secured by ':'reimbursed to ')+esc(t.member):''}${t.member&&t.note?' · ':''}${t.note?esc(t.note):''}</div></div>
         <span style="flex:0 0 auto" class="noprint">${t.invoice?`<button class="btn small gray" onclick="viewInvoice('${t.id}')">📎</button>`:''}
         <button class="btn small gray" onclick="finEntryModal('${t.id}')">✎</button></span>
@@ -2273,8 +2337,25 @@ function booksHTML(){
       <tr><th>Item</th><th class="r">Amount</th></tr>
       ${expCats.map(cat=>`<tr class="drill" onclick="finDrill('expense','${jsq(cat)}')"><td>${esc(cat)}</td><td class="r ${catSum('expense',cat)>0?'':'dim'}">${fmt(catSum('expense',cat))}</td></tr>`).join('')}
       ${expInk>0.005?`<tr class="drill" onclick="finDrill('totalexp')"><td class="muted">In-kind expenses (included in the total below)</td><td class="r muted">${fmt(expInk)}</td></tr>`:''}
-      <tr class="drill" onclick="finDrill('totalexp')"><td><b>TOTAL EXPENSES</b></td><td class="r"><b>${fmt(c.expenses)}</b></td></tr>
+      ${Object.keys(aheadBy).sort().map(k=>`<tr class="drill" onclick="finDrill('ahead')">
+        <td>🧺 Paid ahead for the ${esc(k)} picnic <span class="muted">— counted on ${esc(k)}'s categories, not ${finYear}'s</span></td>
+        <td class="r">${fmt(aheadBy[k])}</td></tr>`).join('')}
+      ${Object.keys(beforeBy).sort().map(k=>`<tr class="drill" onclick="finDrill('before')">
+        <td class="muted">🧺 Already paid out of the ${esc(k)} account <span class="muted">— above, but the cash left in ${esc(k)}</span></td>
+        <td class="r muted">−${fmt(beforeBy[k])}</td></tr>`).join('')}
+      <tr class="drill" onclick="finDrill('totalexp')"><td><b>TOTAL EXPENSES — cash out in ${finYear}</b></td><td class="r"><b>${fmt(c.expenses)}</b></td></tr>
     </table></div>
+    ${(c.paidAheadAmt>0.005||c.paidBeforeAmt>0.005)?`<div class="card" style="border-color:var(--gold)">
+      <b>🧺 Why ${(c.paidAheadAmt>0.005&&c.paidBeforeAmt>0.005)?'those extra lines are':'that extra line is'} there</b>
+      <p class="muted">The category lines above say <b>what the money was for</b>. The total says
+        <b>what actually left the account in ${finYear}</b>. They are two different questions, and when you buy
+        something a year early they stop being the same number.
+        ${c.paidAheadAmt>0.005?`<b>${fmt(c.paidAheadAmt)}</b> went out in ${finYear} for a later picnic, so it is
+          counted on that picnic's categories instead of this year's — but it is still in the ${finYear} total,
+          because that is when it left the bank. `:''}
+        ${c.paidBeforeAmt>0.005?`<b>${fmt(c.paidBeforeAmt)}</b> of the categories above was already paid for out of an
+          earlier year's account, so it is taken back off here — otherwise the same money would be counted twice. `:''}
+        The balance and the bank statement still agree either way.</p></div>`:''}
     <h2>Summary</h2>
     <div class="statgrid">
       <div class="stat green"><div class="v">${fmt(c.totalIn)}</div><div class="l">Total annual income</div></div>
