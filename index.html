@@ -459,7 +459,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.27';
+const APP_VERSION = 'v3.28';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -565,7 +565,7 @@ function updateBanner(){
 const AUTH_BASE  = (FIREBASE_CONFIG && FIREBASE_CONFIG.authBase)  || 'https://identitytoolkit.googleapis.com/v1';
 const TOKEN_BASE = (FIREBASE_CONFIG && FIREBASE_CONFIG.tokenBase) || 'https://securetoken.googleapis.com/v1';
 const AUTH_STORE = 'threeacesAuth';
-let _tok=null, _tokExp=0, _authState='new', _authMsg='', _authPend=null, _authNext=0;
+let _tok=null, _tokExp=0, _authState='new', _authMsg='', _authPend=null, _authNext=0, _uid=null;
 
 async function _authPost(url, body){
   const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -583,13 +583,13 @@ async function _authFetchToken(){
     try{
       const j=await _authPost(TOKEN_BASE+'/token?key='+key,
         {grant_type:'refresh_token', refresh_token:saved});
-      _tok=j.id_token; _tokExp=Date.now()+((+j.expires_in||3600)*1000);
+      _tok=j.id_token; _tokExp=Date.now()+((+j.expires_in||3600)*1000); _uid=j.user_id||_uid;
       try{ localStorage.setItem(AUTH_STORE,JSON.stringify({r:j.refresh_token||saved})); }catch(e){}
       return _tok;
     }catch(e){ try{ localStorage.removeItem(AUTH_STORE); }catch(e2){} }   // stale — start fresh
   }
   const j=await _authPost(AUTH_BASE+'/accounts:signUp?key='+key,{returnSecureToken:true});
-  _tok=j.idToken; _tokExp=Date.now()+((+j.expiresIn||3600)*1000);
+  _tok=j.idToken; _tokExp=Date.now()+((+j.expiresIn||3600)*1000); _uid=j.localId||_uid;
   try{ localStorage.setItem(AUTH_STORE,JSON.stringify({r:j.refreshToken})); }catch(e){}
   return _tok;
 }
@@ -1108,6 +1108,7 @@ function pinKey(k){
     if(hit){
       me=hit[0]; sessionStorage.setItem('ta_me',me);
       localStorage.setItem('ta_lastname',hit[1].name);
+      registerDevice(hit[1].name);
       _pin=''; $('pinErr').textContent=''; view='sell'; rerender();
     }else{
       $('pinErr').textContent='Wrong name or PIN — try again';
@@ -5095,7 +5096,8 @@ async function saveItem(id){
   closeModal(); toast('Item saved'); rerender();
 }
 function usersHTML(){
-  return `<button class="btn" onclick="editUser(null)">＋ Add Member</button>
+  if(CLOUD && !usersHTML._devLoaded){ usersHTML._devLoaded=true; loadDevices().then(rerender); }
+  return devicesHTML()+`<h2 style="margin-top:18px">👤 Members</h2><button class="btn" onclick="editUser(null)">＋ Add Member</button>
     <div style="height:12px"></div>`+
     Object.entries(S.users||{}).map(([id,u])=>`
      <div class="card" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;${u.active===false?'opacity:.5':''}"
@@ -5678,6 +5680,57 @@ async function siteSponsorSave(id){
   if(id){ const old=siteCfg().sponsors[id]||{}; await DB.set(['site','sponsors',id],{...old,...rec,show:old.show!==false}); }
   else{ rec.order=Object.keys(siteCfg().sponsors||{}).length; await DB.set(['site','sponsors',newId()],rec); }
   closeModal(); rerender(); toast('Saved \u2014 the website updates within seconds');
+}
+
+
+/* ============================ APPROVED PHONES ==============================
+   v3.28 — every phone that signs in gets a device record (its anonymous
+   Firebase id + who last logged in on it). Once the database rules are
+   switched to "approved phones only", a phone that is not approved can still
+   read the store but cannot change anything. Approve phones under Admin →
+   Users → Phones. Until the rules are switched, this list is informational. */
+const DEV_PATH = 'threeacesDevices';
+function _devUrl(id){ return FIREBASE_CONFIG.databaseURL.replace(/\/+$/,'')+'/'+DEV_PATH+(id?'/'+encodeURIComponent(id):'')+'.json'; }
+let _devices={}, _devMe=null;
+async function registerDevice(who){
+  if(!CLOUD || !_uid) return;
+  try{
+    const ua=navigator.userAgent||'';
+    const kind=/iPhone/.test(ua)?'iPhone':/iPad/.test(ua)?'iPad':/Android/.test(ua)?'Android':/Windows/.test(ua)?'Windows PC':/Mac/.test(ua)?'Mac':'Device';
+    const cur=(_devices[_uid])||{};
+    await _fx(_devUrl(_uid),{method:'PATCH',body:JSON.stringify({who:who||'', kind, seen:Date.now(), first:cur.first||Date.now()})});
+    _devices[_uid]=Object.assign({},cur,{who,kind,seen:Date.now(),first:cur.first||Date.now()});
+  }catch(e){}
+}
+async function loadDevices(){
+  if(!CLOUD) return {};
+  try{ const r=await _fx(_devUrl(),{cache:'no-store'}); if(r.ok){ _devices=(await r.json())||{}; } }catch(e){}
+  return _devices;
+}
+function devicesHTML(){
+  const list=Object.entries(_devices).sort((a,b)=>(b[1].seen||0)-(a[1].seen||0));
+  const ago=t=>{ const d=Date.now()-(t||0); if(d<3600e3) return Math.max(1,Math.round(d/60e3))+' min ago'; if(d<86400e3) return Math.round(d/3600e3)+' h ago'; return Math.round(d/86400e3)+' days ago'; };
+  return `<h2 style="margin-top:18px">📱 Phones</h2>
+    <p class="muted">Every phone that has logged in. Approve the club’s phones here; once the database rules are switched to <b>approved phones only</b>, a phone that is not on this list can look at the store but cannot sell, restock or change anything. <b>Approve your own phone first</b> — it is marked “this phone”.</p>
+    <button class="btn small gray" onclick="loadDevices().then(rerender)">↻ Refresh list</button>
+    ${list.map(([id,d])=>`<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <div><b>${esc(d.who||'—')}</b>${id===_uid?' <span class="memberflag">THIS PHONE</span>':''}${d.ok?' <span class="pos">✔ approved</span>':' <span class="voidtag">NOT APPROVED</span>'}
+        <div class="muted">${esc(d.kind||'Device')} · last seen ${ago(d.seen)} · id ${esc(id.slice(0,6))}…</div></div>
+      <div class="rowbtns" style="margin:0">
+        ${d.ok?`<button class="btn small gray" onclick="setDeviceOk('${id}',false)">Revoke</button>`:`<button class="btn small" onclick="setDeviceOk('${id}',true)">Approve</button>`}
+        ${id!==_uid?`<button class="btn small red" onclick="removeDevice('${id}')">🗑</button>`:''}
+      </div></div>`).join('')||'<div class="empty">No phones recorded yet — they appear as people log in.</div>'}
+    <div class="card muted" style="margin-top:8px">Approved: <b>${list.filter(([,d])=>d.ok).length}</b> · waiting: <b>${list.filter(([,d])=>!d.ok).length}</b>.
+    When every club phone shows ✔ approved, ask Claude for the rules to paste into Firebase.</div>`;
+}
+async function setDeviceOk(id,ok){
+  try{ const r=await _fx(_devUrl(id)+'',{method:'PATCH',body:JSON.stringify({ok:!!ok,okBy:meU()?meU().name:'',okTs:Date.now()})});
+    if(!r.ok) throw 0; _devices[id]=Object.assign({},_devices[id],{ok:!!ok}); toast(ok?'Phone approved':'Phone revoked'); rerender(); }
+  catch(e){ toast('Could not save — check connection',1); }
+}
+async function removeDevice(id){
+  if(!confirm('Remove this phone from the list? It will reappear the next time someone logs in on it.')) return;
+  try{ await _fx(_devUrl(id),{method:'DELETE'}); delete _devices[id]; rerender(); }catch(e){ toast('Could not remove',1); }
 }
 
 /* ------------------------------ THEME ------------------------------------- */
@@ -8674,7 +8727,7 @@ async function finMigrate(){
 /* ------------------------------- BOOT -------------------------------------- */
 DB.init(()=>{
   const saved=sessionStorage.getItem('ta_me');
-  if(saved && S.users[saved] && !me) me=saved;
+  if(saved && S.users[saved] && !me){ me=saved; registerDevice(S.users[saved].name); }
   rerender();
   finMigrate();
 });
