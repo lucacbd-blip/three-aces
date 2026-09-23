@@ -459,7 +459,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.26';
+const APP_VERSION = 'v3.27';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -520,7 +520,7 @@ const SEED_SETTINGS = {allowMemberSales:true, eventName:'', sortMode:'custom'};
 
 /* ============================ STORAGE LAYER =============================== */
 const CLOUD = !!FIREBASE_CONFIG;
-let S = {items:{}, users:{}, sales:{}, settings:{}, restocks:{}, payments:{}};   // live state
+let S = {items:{}, users:{}, sales:{}, settings:{}, restocks:{}, payments:{}, site:{}};   // live state
 let _ref=null, _ready=false, _onChange=()=>{};
 
 function newId(){ return 'k'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
@@ -3919,6 +3919,7 @@ function renderAdmin(){
   if(!isAdmin()){ view='sell'; rerender(); return; }
   let tabs=[['report','Report'],['money','Money'],['books','Books'],['claims','Claims'+claimsBadge()],['sponsors','Sponsors'+sponsBadge()],['events','Event P&L'],['attend','Attendance'],['reorder','Reorder'],['restock','Restock'],['items','Items'],['users','Users'],['settings','Settings'],['data','Data']];
   tabs.splice(tabs.findIndex(([t])=>t==='reorder'),0,['picnic','Picnic'+picnicBadge()]);
+  tabs.splice(tabs.findIndex(([t])=>t==='users'),0,['website','Website']);
   if(!clubRecOn()){
     tabs=tabs.filter(([t])=>t!=='books'&&t!=='attend'&&t!=='events'&&t!=='claims'&&t!=='sponsors');
     if(adminTab==='books'||adminTab==='attend'||adminTab==='events'||adminTab==='claims'||adminTab==='sponsors') adminTab='report';
@@ -3938,6 +3939,7 @@ function renderAdmin(){
   if(adminTab==='restock') b.innerHTML=restockHTML();
   if(adminTab==='items') b.innerHTML=itemsHTML();
   if(adminTab==='users') b.innerHTML=usersHTML();
+  if(adminTab==='website') b.innerHTML=websiteHTML();
   if(adminTab==='settings') b.innerHTML=settingsHTML();
   if(adminTab==='data') b.innerHTML=dataHTML();
 }
@@ -4909,7 +4911,7 @@ function itemsHTML(){
           <button class="btn small gray" style="padding:4px 10px" ${idx===arr.length-1?'disabled':''} onclick="moveItem('${id}',1)">▼</button>
         </div>`:''}
         <div style="flex:1;cursor:pointer" onclick="editItem('${id}')">
-          <b>${colorDot(it)}${esc(it.name)}</b>${hidden?' <span class="voidtag">HIDDEN</span>':''}${it.salePct?`<span class="saleflag">${it.salePct}% OFF</span>`:''}
+          <b>${colorDot(it)}${esc(it.name)}</b>${hidden?' <span class="voidtag">HIDDEN</span>':''}${it.salePct?`<span class="saleflag">${it.salePct}% OFF</span>`:''}${!it.adhoc&&it.web!==false&&!hidden?`<span class="memberflag" style="margin-left:4px">WEB${it.weight>0?' '+it.weight+'kg':' — no weight'}</span>`:''}
           <div class="muted">${GRP_LABEL[groupOf(it)]} · ${esc(it.cat||'')} · ${sizes.length} sizes · ${tot} in stock · ${m[id]||0} sold · <span class="goldtxt">edit ›</span></div></div>
         <button class="btn small ${hidden?'':'gray'}" onclick="toggleItemActive('${id}')">${hidden?'Show':'Hide'}</button>
       </div>`;
@@ -4988,6 +4990,19 @@ function editItem(id){
     </div>
     <label>On sale — % off the regular price (0 = not on sale, e.g. 50 = half price at the event)</label>
     <input id="ei_sale" type="text" inputmode="numeric" autocomplete="off" value="${it.salePct||0}">
+    <label>Weight in kg — the website works out shipping from this (a tee is about 0.25, a hoodie about 0.7)</label>
+    <input id="ei_weight" type="text" inputmode="decimal" autocomplete="off" value="${it.weight??''}" placeholder="0.25">
+    <div class="switchrow"><div><div class="t">Show in the online store</div>
+      <div class="s">Off keeps this item for picnic-day selling only. Raffle tickets and bocce entries should be off.</div></div>
+      <button class="toggle ${it.web!==false&&!it.adhoc?'on':''}" id="ei_web" onclick="this.classList.toggle('on')"></button></div>
+    <label>Website photo — shown on the store. Shrunk on upload.</label>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+      <div id="ei_photoBox" style="width:64px;height:80px;border-radius:8px;background:var(--panel2);overflow:hidden;display:flex;align-items:center;justify-content:center" data-id="${esc(it.photoId||'')}">
+        ${it.photoId?`<img id="ei_photoImg" data-file="${esc(it.photoId)}" style="width:100%;height:100%;object-fit:cover" alt="">`:'<span class="muted" style="font-size:11px">none</span>'}</div>
+      <button type="button" class="btn small gray" onclick="$('ei_photoFile').click()">⬆ ${it.photoId?'Replace':'Add'} photo</button>
+      ${it.photoId?`<button type="button" class="btn small red" onclick="$('ei_photoBox').dataset.id='';$('ei_photoBox').innerHTML='<span class=muted style=font-size:11px>removed</span>'">Remove</button>`:''}
+      <input type="file" id="ei_photoFile" accept="image/*" style="display:none" onchange="webPhotoPick(this,'ei_photoBox')">
+    </div>
     <div class="switchrow"><div><div class="t">Ad-hoc item (e.g. raffle tickets)</div>
       <div class="s">Just records the sale — no stock counting, always available on the Sell screen, excluded from the Stock grid, Reorder list and inventory value.</div></div>
       <button class="toggle ${it.adhoc?'on':''}" id="ei_adhoc" onclick="this.classList.toggle('on')"></button></div>
@@ -5068,11 +5083,14 @@ async function saveItem(id){
   const adhoc = $('ei_adhoc').classList.contains('on');
   const salePct = Math.min(90, Math.max(0, Math.round(parseFloat(String($('ei_sale').value).replace(/[^0-9.]/g,''))||0)));
   const grp = SALE_GROUPS.includes($('ei_grp').value) ? $('ei_grp').value : 'Clothing';
+  const weight = Math.max(0, Math.round((parseFloat(String($('ei_weight').value).replace(/[^0-9.]/g,''))||0)*100)/100);
+  const web = $('ei_web').classList.contains('on') && !adhoc;
+  const photoId = $('ei_photoBox').dataset.id || null;
   if(id){ const it=S.items[id];
-    await DB.set(['items',id],{...it,name,cat,sizes,color,adhoc,salePct,grp});
+    await DB.set(['items',id],{...it,name,cat,sizes,color,adhoc,salePct,grp,weight,web,photoId});
   }else{
     const order=Math.max(0,...itemsSorted().map(([,i])=>i.order??0))+1;
-    await DB.set(['items',newId()],{name,cat,sizes,color,adhoc,salePct,grp,order,active:true});
+    await DB.set(['items',newId()],{name,cat,sizes,color,adhoc,salePct,grp,weight,web,photoId,order,active:true});
   }
   closeModal(); toast('Item saved'); rerender();
 }
@@ -5537,6 +5555,131 @@ function uploadLogo(inp){
   rd.readAsDataURL(f); inp.value='';
 }
 
+
+/* ============================== WEBSITE TAB ================================
+   v3.27 — everything the public website shows that is not stock lives under
+   /threeaces/site. The site reads it on load; save here and the site follows
+   within seconds. Photos and logos go to the file store (threeacesFiles) so
+   the 3-second sync never downloads them.                                   */
+const SITE_DEFAULT={
+  picnic:{annual:10, dateText:'Date to be announced', location:'Heart Lake Conservation Area, Brampton (Birchview #1)', year:2027},
+  foodDrive:{annual:6, gofundme:'', lastYearTotal:4517, blurb:'Every December, Three Aces goes to the St. Philip Neri food bank in Toronto and hands out grocery gift cards to families who need them. 100% of what comes in goes back into the community.'},
+  contact:{email:'info@threeaces.ca', instagram:'three_aces_italian'},
+  ticker:['10th Annual Picnic · Summer 2027','6th Annual Christmas Food Drive · December 2026','Every dollar goes back to the club & community','Limited stock · Once it\u2019s gone, it\u2019s gone'],
+  shipping:{stepKg:0.5, zones:{CA:{label:'Canada',base:12,step:4},US:{label:'United States',base:22,step:7},INTL:{label:'International',base:38,step:12}}, pickup:true, pickupText:'Pick up in Toronto \u2014 free'},
+  orders:{defaultMember:''},
+  sponsors:{}
+};
+function siteCfg(){ const s=S.site||{}; const d=JSON.parse(JSON.stringify(SITE_DEFAULT));
+  const merge=(a,b)=>{ for(const k in b){ if(b[k]&&typeof b[k]==='object'&&!Array.isArray(b[k])&&a[k]&&typeof a[k]==='object') merge(a[k],b[k]); else a[k]=b[k]; } return a; };
+  return merge(d,s); }
+let siteSec='picnic';
+function siteSet(path,val){ return DB.set(['site'].concat(path),val).then(()=>toast('Saved \u2014 the website updates within seconds')); }
+function webPhotoPick(inp,boxId,maxPx,cb){
+  const f=inp.files&&inp.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=()=>{ const img=new Image(); img.onload=()=>{
+      const mx=maxPx||900, sc=Math.min(1,mx/Math.max(img.width,img.height));
+      const cv=document.createElement('canvas'); cv.width=Math.max(1,Math.round(img.width*sc)); cv.height=Math.max(1,Math.round(img.height*sc));
+      const cx=cv.getContext('2d'); cx.fillStyle='#fff'; cx.fillRect(0,0,cv.width,cv.height); cx.drawImage(img,0,0,cv.width,cv.height);
+      let q=0.85, data=cv.toDataURL('image/jpeg',q);
+      while(data.length>240000 && q>0.4){ q-=0.1; data=cv.toDataURL('image/jpeg',q); }
+      const id=newId();
+      fileSave(id,{name:f.name,type:'image/jpeg',data}).then(()=>{
+        if(cb) return cb(id,data);
+        const box=$(boxId); if(box){ box.dataset.id=id; box.innerHTML=`<img src="${data}" style="width:100%;height:100%;object-fit:cover" alt="">`; }
+        toast('Photo attached \u2014 press Save');
+      }).catch(()=>toast('Photo upload failed',1));
+    }; img.src=rd.result; };
+  rd.readAsDataURL(f); inp.value='';
+}
+function websiteHTML(){
+  const c=siteCfg();
+  const secs=[['picnic','Picnic'],['fooddrive','Food Drive'],['sponsors','Sponsors'],['shipping','Shipping'],['orders','Web orders'],['ticker','Ticker & contact']];
+  const F=(label,path,val,ph,type)=>`<label>${label}</label><input ${type?`type="${type}"`:''} value="${esc(val??'')}" placeholder="${esc(ph||'')}" onchange="siteSet(${JSON.stringify(path).replace(/"/g,'&quot;')},${type==='number'?'+this.value':'this.value'})">`;
+  let body='';
+  if(siteSec==='picnic') body=`<div class="card">
+    ${F('Which annual picnic is next (a number)',['picnic','annual'],c.picnic.annual,'10','number')}
+    ${F('Year',['picnic','year'],c.picnic.year,'2027','number')}
+    ${F('Date, as the site should show it',['picnic','dateText'],c.picnic.dateText,'Sunday, July 25, 2027 \u2014 or "Date to be announced"')}
+    ${F('Location',['picnic','location'],c.picnic.location,'')}
+    <p class="muted">Picnic photos on the site come from the photo gallery below. Stock, prices and sale % come from Items.</p></div>
+    <div class="card"><label>Picnic photo gallery \u2014 up to 8, the first is the big one</label>
+    <div id="picGal" style="display:flex;gap:8px;flex-wrap:wrap">${(c.picnic.photos||[]).map((id,i)=>`<div style="position:relative;width:72px;height:72px;border-radius:8px;overflow:hidden;background:var(--panel2)"><img data-file="${esc(id)}" style="width:100%;height:100%;object-fit:cover" alt=""><button class="btn small red" style="position:absolute;top:2px;right:2px;padding:2px 6px" onclick="siteGalRemove(${i})">\u2715</button></div>`).join('')}</div>
+    <div class="rowbtns"><button class="btn gray" onclick="$('picGalFile').click()">\u2b06 Add photo</button></div>
+    <input type="file" id="picGalFile" accept="image/*" style="display:none" onchange="webPhotoPick(this,null,1200,(id)=>{const g=(siteCfg().picnic.photos||[]).slice(0,7);g.unshift(id);siteSet(['picnic','photos'],g).then(rerender)})"></div>`;
+  if(siteSec==='fooddrive') body=`<div class="card">
+    ${F('Which annual food drive is next (a number)',['foodDrive','annual'],c.foodDrive.annual,'6','number')}
+    ${F('GoFundMe link \u2014 paste it and the Donate button goes live; blank = "coming soon"',['foodDrive','gofundme'],c.foodDrive.gofundme,'https://gofund.me/\u2026')}
+    ${F('Raised last year ($)',['foodDrive','lastYearTotal'],c.foodDrive.lastYearTotal,'4517','number')}
+    <label>Short description on the site</label><textarea rows="4" onchange="siteSet(['foodDrive','blurb'],this.value)">${esc(c.foodDrive.blurb)}</textarea></div>`;
+  if(siteSec==='sponsors'){
+    const list=Object.entries(c.sponsors||{}).sort((a,b)=>(a[1].order??99)-(b[1].order??99));
+    body=`<p class="muted">These are the logos on the website\u2019s sponsor wall, in this order. Tap a name to edit. This is separate from the member sponsor tracker.</p>
+    <button class="btn" onclick="siteSponsorModal(null)">\uff0b Add sponsor logo</button><div style="height:8px"></div>`+
+    list.map(([id,r],i)=>`<div class="card" style="display:flex;align-items:center;gap:10px;${r.show===false?'opacity:.5':''}">
+      <div style="display:flex;flex-direction:column;gap:4px"><button class="btn small gray" style="padding:4px 10px" ${i===0?'disabled':''} onclick="siteSponsorMove('${id}',-1)">\u25b2</button><button class="btn small gray" style="padding:4px 10px" ${i===list.length-1?'disabled':''} onclick="siteSponsorMove('${id}',1)">\u25bc</button></div>
+      <div style="width:64px;height:44px;background:#fff;border-radius:6px;display:flex;align-items:center;justify-content:center;overflow:hidden">${r.logoId?`<img data-file="${esc(r.logoId)}" style="max-width:100%;max-height:100%;object-fit:contain" alt="">`:'<span class="muted" style="font-size:10px">no logo</span>'}</div>
+      <div style="flex:1;cursor:pointer" onclick="siteSponsorModal('${id}')"><b>${esc(r.name)}</b>${r.show===false?' <span class="voidtag">HIDDEN</span>':''}<div class="muted">${esc(r.url||'')}${r.instagram?' \u00b7 @'+esc(r.instagram):''}</div></div>
+      <button class="btn small ${r.show===false?'':'gray'}" onclick="siteSet(['sponsors','${id}','show'],${r.show===false?'true':'false'}).then(rerender)">${r.show===false?'Show':'Hide'}</button></div>`).join('')||'<div class="empty">No sponsor logos yet.</div>';
+  }
+  if(siteSec==='shipping'){
+    const z=c.shipping.zones;
+    body=`<p class="muted">The site charges the <b>base</b> for an order up to ${c.shipping.stepKg} kg, then adds the <b>step</b> for every extra ${c.shipping.stepKg} kg. Weight comes from each item (Items \u2192 edit \u2192 Weight). Set the base to what Canada Post actually charges you for a small parcel so the club never loses money on postage.</p>
+    <div class="card"><label>Weight step (kg)</label><input type="number" step="0.1" value="${c.shipping.stepKg}" onchange="siteSet(['shipping','stepKg'],+this.value||0.5)">
+    <div class="sehead" style="grid-template-columns:1.4fr 1fr 1fr"><span>Zone</span><span>Base $</span><span>Each extra step $</span></div>
+    ${Object.entries(z).map(([k,v])=>`<div class="sizeedit" style="grid-template-columns:1.4fr 1fr 1fr"><input value="${esc(v.label)}" onchange="siteSet(['shipping','zones','${k}','label'],this.value)"><input type="number" value="${v.base}" onchange="siteSet(['shipping','zones','${k}','base'],+this.value||0)"><input type="number" value="${v.step}" onchange="siteSet(['shipping','zones','${k}','step'],+this.value||0)"></div>`).join('')}
+    <div class="switchrow"><div><div class="t">Offer free local pickup</div><div class="s">${esc(c.shipping.pickupText)}</div></div><button class="toggle ${c.shipping.pickup?'on':''}" onclick="siteSet(['shipping','pickup'],!this.classList.contains('on')).then(rerender)"></button></div>
+    ${F('Pickup wording',['shipping','pickupText'],c.shipping.pickupText,'')}</div>
+    <div class="card"><label>Try it \u2014 what would an order cost to ship?</label>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input id="shipTryKg" type="number" step="0.1" value="1.5" style="max-width:110px" oninput="shipTry()"><span class="muted">kg</span><div id="shipTryOut" class="muted"></div></div>
+</div>
+    <div class="card muted">Items with no weight set: <b>${Object.values(S.items||{}).filter(i=>i.active!==false&&i.web!==false&&!i.adhoc&&!(i.weight>0)).length}</b>. The site guesses 0.3 kg for those \u2014 better to set them.</div>`;
+  }
+  if(siteSec==='orders'){
+    const users=Object.entries(S.users||{}).filter(([,u])=>u.active!==false);
+    body=`<p class="muted">A web order is logged as a sale by this member, so their \u201c% of profit kept\u201d applies exactly like a picnic sale. You can reassign any single order later.</p>
+    <div class="card"><label>Web orders are handled by</label><select onchange="siteSet(['orders','defaultMember'],this.value)"><option value="">\u2014 nobody yet \u2014</option>${users.map(([id,u])=>`<option value="${id}" ${c.orders.defaultMember===id?'selected':''}>${esc(u.name)} (keeps ${u.profitPct||0}% of profit)</option>`).join('')}</select></div>
+    <div class="card muted">Online checkout (Stripe) is the next build step. Until then the website shows a preview checkout and nothing is charged.</div>`;
+  }
+  if(siteSec==='ticker') body=`<div class="card"><label>Ticker lines across the top of the home page \u2014 one per line</label>
+    <textarea rows="5" onchange="siteSet(['ticker'],this.value.split('\\n').map(x=>x.trim()).filter(Boolean))">${esc((c.ticker||[]).join('\\n'))}</textarea></div>
+    <div class="card">${F('Club email',['contact','email'],c.contact.email,'info@threeaces.ca')}${F('Instagram handle (without the @)',['contact','instagram'],c.contact.instagram,'three_aces_italian')}</div>`;
+  const html=`<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div><b>threeaces.ca</b><div class="muted">Everything here shows on the website within seconds of saving.</div></div>
+    <a class="btn small gray" href="https://lucacbd-blip.github.io/three-aces-website/" target="_blank" rel="noopener">Open the site \u2197</a></div>
+    <div class="tabbar">${secs.map(([k,l])=>`<button class="${siteSec===k?'on':''}" onclick="siteSec='${k}';rerender()">${l}</button>`).join('')}</div>`+body;
+  setTimeout(()=>{ shipTry(); document.querySelectorAll('#adminBody img[data-file]').forEach(im=>{ if(im.getAttribute('src')) return; fileLoad(im.dataset.file).then(f=>{ if(f&&f.data) im.src=f.data; }); }); },0);
+  return html;
+}
+function shipTry(){ const kg=+($('shipTryKg')&&$('shipTryKg').value)||0; const c=siteCfg(); const out=$('shipTryOut'); if(!out) return;
+  out.innerHTML=Object.entries(c.shipping.zones).map(([k,z])=>`${esc(z.label)} <b>${fmt(z.base+Math.max(0,Math.ceil((kg-c.shipping.stepKg)/c.shipping.stepKg))*z.step)}</b>`).join(' \u00b7 '); }
+function siteGalRemove(i){ const g=(siteCfg().picnic.photos||[]).slice(); g.splice(i,1); siteSet(['picnic','photos'],g).then(rerender); }
+function siteSponsorMove(id,d){ const list=Object.entries(siteCfg().sponsors||{}).sort((a,b)=>(a[1].order??99)-(b[1].order??99)).map(([k])=>k);
+  const i=list.indexOf(id), j=i+d; if(i<0||j<0||j>=list.length) return; list.splice(i,1); list.splice(j,0,id);
+  Promise.all(list.map((k,n)=>DB.set(['site','sponsors',k,'order'],n))).then(rerender); }
+function siteSponsorModal(id){
+  const r=id?(siteCfg().sponsors[id]||{}):{};
+  openModal(`<h3><button class="x" onclick="closeModal()">\u2715</button>${id?'Edit':'Add'} sponsor logo</h3>
+    <label>Business name</label><input id="ss_name" value="${esc(r.name||'')}">
+    <label>Website (opens when the logo is tapped)</label><input id="ss_url" value="${esc(r.url||'')}" placeholder="https://\u2026">
+    <label>Instagram (without the @)</label><input id="ss_ig" value="${esc(r.instagram||'')}">
+    <label>Logo \u2014 PNG or JPG, shrunk on upload</label>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><div id="ss_logoBox" data-id="${esc(r.logoId||'')}" style="width:96px;height:60px;background:#fff;border-radius:8px;display:flex;align-items:center;justify-content:center;overflow:hidden">${r.logoId?`<img data-file="${esc(r.logoId)}" style="max-width:100%;max-height:100%;object-fit:contain" alt="">`:'<span class="muted" style="font-size:11px">none</span>'}</div>
+      <button type="button" class="btn small gray" onclick="$('ss_logoFile').click()">\u2b06 ${r.logoId?'Replace':'Upload'} logo</button>
+      <input type="file" id="ss_logoFile" accept="image/*" style="display:none" onchange="webPhotoPick(this,'ss_logoBox',800)"></div>
+    <button class="btn" onclick="siteSponsorSave(${id?`'${id}'`:'null'})">Save</button>
+    ${id?`<div style="height:8px"></div><button class="btn red" onclick="DB.set(['site','sponsors','${id}'],null).then(()=>{closeModal();rerender()})">Delete</button>`:''}`);
+  setTimeout(()=>{ document.querySelectorAll('#modalBox img[data-file]').forEach(im=>fileLoad(im.dataset.file).then(f=>{ if(f&&f.data) im.src=f.data; })); },0);
+}
+async function siteSponsorSave(id){
+  const name=$('ss_name').value.trim(); if(!name){ toast('Name is required',1); return; }
+  let url=$('ss_url').value.trim(); if(url&&!/^https?:\/\//i.test(url)) url='https://'+url;
+  const rec={name,url,instagram:$('ss_ig').value.trim().replace(/^@/,''),logoId:$('ss_logoBox').dataset.id||null,show:true};
+  if(id){ const old=siteCfg().sponsors[id]||{}; await DB.set(['site','sponsors',id],{...old,...rec,show:old.show!==false}); }
+  else{ rec.order=Object.keys(siteCfg().sponsors||{}).length; await DB.set(['site','sponsors',newId()],rec); }
+  closeModal(); rerender(); toast('Saved \u2014 the website updates within seconds');
+}
+
 /* ------------------------------ THEME ------------------------------------- */
 function applyTheme(){
   const t=localStorage.getItem('ta_theme')||'light';
@@ -5555,7 +5698,8 @@ applyTheme();
 $('verTag').textContent='Three Aces Club Manager · '+APP_VERSION;
 
 /* ------------------------------ MODAL ------------------------------------- */
-function openModal(html){ $('modalBox').innerHTML=html; $('modalBg').classList.add('open'); }
+function openModal(html){ $('modalBox').innerHTML=html; $('modalBg').classList.add('open');
+  setTimeout(()=>{ document.querySelectorAll('#modalBox img[data-file]').forEach(im=>{ if(im.getAttribute('src')) return; fileLoad(im.dataset.file).then(f=>{ if(f&&f.data) im.src=f.data; }); }); },0); }
 function closeModal(){ $('modalBg').classList.remove('open'); }
 
 
