@@ -459,7 +459,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.29';
+const APP_VERSION = 'v3.30';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -1066,6 +1066,7 @@ function rerender(){
   $('appHeader').style.display='flex';
   $('nav').style.display='flex';
   $('chipName').textContent=meU().name;
+  if(isAdmin() && !_ordTimer) ordersStart();
   renderNav();
   if(view==='mymoney' && !((meU().profitPct||0)>0) && !(tabDetail(meU().name).charged>0.005)) view='sell';
   if(view==='myclub' && !clubRecOn() && !picOn()) view='sell';
@@ -1139,7 +1140,7 @@ function renderNav(){
   // An admin is a member of the club as well: their own attendance and their own
   // sponsor are theirs to see, the same as everybody else's.
   if(clubRecOn()||picOn()) tabs.push(['myclub','🎟','Club']);
-  if(isAdmin()) tabs.push(['admin','⚙️','Admin']);
+  if(isAdmin()) tabs.push(['admin','⚙️','Admin'+(ordersBadge()?' <b style="color:var(--gold)">'+ordersBadge().trim()+'</b>':'')]);
   $('nav').innerHTML=tabs.map(([v,ic,l])=>
     `<button class="${view===v?'on':''}" onclick="go('${v}')"><span class="ic">${ic}</span>${l}</button>`).join('');
 }
@@ -3921,6 +3922,7 @@ function renderAdmin(){
   let tabs=[['report','Report'],['money','Money'],['books','Books'],['claims','Claims'+claimsBadge()],['sponsors','Sponsors'+sponsBadge()],['events','Event P&L'],['attend','Attendance'],['reorder','Reorder'],['restock','Restock'],['items','Items'],['users','Users'],['settings','Settings'],['data','Data']];
   tabs.splice(tabs.findIndex(([t])=>t==='reorder'),0,['picnic','Picnic'+picnicBadge()]);
   tabs.splice(tabs.findIndex(([t])=>t==='users'),0,['website','Website']);
+  tabs.splice(1,0,['orders','Orders'+ordersBadge()]);
   if(!clubRecOn()){
     tabs=tabs.filter(([t])=>t!=='books'&&t!=='attend'&&t!=='events'&&t!=='claims'&&t!=='sponsors');
     if(adminTab==='books'||adminTab==='attend'||adminTab==='events'||adminTab==='claims'||adminTab==='sponsors') adminTab='report';
@@ -3941,6 +3943,7 @@ function renderAdmin(){
   if(adminTab==='items') b.innerHTML=itemsHTML();
   if(adminTab==='users') b.innerHTML=usersHTML();
   if(adminTab==='website') b.innerHTML=websiteHTML();
+  if(adminTab==='orders') b.innerHTML=ordersHTML();
   if(adminTab==='settings') b.innerHTML=settingsHTML();
   if(adminTab==='data') b.innerHTML=dataHTML();
 }
@@ -5568,7 +5571,7 @@ const SITE_DEFAULT={
   contact:{email:'info@threeaces.ca', instagram:'three_aces_italian'},
   ticker:['10th Annual Picnic · Summer 2027','6th Annual Christmas Food Drive · December 2026','Every dollar goes back to the club & community','Limited stock · Once it\u2019s gone, it\u2019s gone'],
   shipping:{stepKg:0.5, zones:{CA:{label:'Canada',base:12,step:4},US:{label:'United States',base:22,step:7},INTL:{label:'International',base:38,step:12}}, pickup:true, pickupText:'Pick up in Toronto \u2014 free'},
-  orders:{defaultMember:''},
+  orders:{defaultMember:'', etransferEmail:''},
   sponsors:{}
 };
 function siteCfg(){ const s=S.site||{}; const d=JSON.parse(JSON.stringify(SITE_DEFAULT));
@@ -5641,7 +5644,7 @@ function websiteHTML(){
     const users=Object.entries(S.users||{}).filter(([,u])=>u.active!==false);
     body=`<p class="muted">A web order is logged as a sale by this member, so their \u201c% of profit kept\u201d applies exactly like a picnic sale. You can reassign any single order later.</p>
     <div class="card"><label>Web orders are handled by</label><select onchange="siteSet(['orders','defaultMember'],this.value)"><option value="">\u2014 nobody yet \u2014</option>${users.map(([id,u])=>`<option value="${id}" ${c.orders.defaultMember===id?'selected':''}>${esc(u.name)} (keeps ${u.profitPct||0}% of profit)</option>`).join('')}</select></div>
-    <div class="card muted">Online checkout (Stripe) is the next build step. Until then the website shows a preview checkout and nothing is charged.</div>`;
+    <div class="card">${F('e-Transfer address customers pay to (blank = club email)',['orders','etransferEmail'],c.orders.etransferEmail,'info@threeaces.ca')}<div class="muted">Customers pay by Interac e-Transfer today. Orders come into <b>Admin → Orders</b>; the person above taps “Payment received” when the money lands. Card checkout (Stripe) can be added once the club bank account is open.</div></div>`;
   }
   if(siteSec==='ticker') body=`<div class="card"><label>Ticker lines across the top of the home page \u2014 one per line</label>
     <textarea rows="5" onchange="siteSet(['ticker'],this.value.split('\\n').map(x=>x.trim()).filter(Boolean))">${esc((c.ticker||[]).join('\\n'))}</textarea></div>
@@ -5712,6 +5715,201 @@ function publicMirror(){
 async function publicFileSave(id,obj){
   if(!CLOUD) return;
   try{ await _fx(FIREBASE_CONFIG.databaseURL.replace(/\/+$/,'')+'/'+PUBF_PATH+'/'+encodeURIComponent(id)+'.json',{method:'PUT',body:JSON.stringify({data:obj.data})}); }catch(e){}
+}
+
+
+/* ============================ WEB ORDERS (v3.30) ============================
+   The website files each order, unsigned, into /threeacesOrders/<id> (the
+   database only lets the public CREATE there, never read or change). Admin
+   phones poll that node every 10 s; the Orders tab shows what came in and walks
+   each order through: new → paid → shipped / ready → done. "Payment received"
+   is the moment stock is reserved and a sale is logged to whoever handles web
+   orders, so the money screens and profit shares work exactly like a picnic
+   sale. Every step has a one-tap email to the customer, pre-written.
+   The customer's order page reads /threeacesOrderStatus/<id> (public, by id
+   only) for status + tracking.                                                */
+const ORD_PATH='threeacesOrders', ORDS_PATH='threeacesOrderStatus';
+let ORD={}, _ordSeen=null, _ordTimer=null, _ordLast='', ordFilter='open', _ordFirst=true;
+function _ordUrl(id,sub){ return FIREBASE_CONFIG.databaseURL.replace(/\/+$/,'')+'/'+ORD_PATH+(id?'/'+encodeURIComponent(id):'')+(sub?'/'+sub:'')+'.json'; }
+function _ordsUrl(id){ return FIREBASE_CONFIG.databaseURL.replace(/\/+$/,'')+'/'+ORDS_PATH+'/'+encodeURIComponent(id)+'.json'; }
+const ORD_OPEN=['new','paid','shipped','ready'];
+function ordOpen(){ return Object.values(ORD).filter(o=>o && ORD_OPEN.includes(o.status||'new')); }
+function ordersBadge(){ const n=Object.values(ORD).filter(o=>o && ['new','paid'].includes(o.status||'new')).length; return n? ' ('+n+')' : ''; }
+async function ordersPoll(){
+  if(!CLOUD || !_ready || !me || !isAdmin()) return;
+  try{
+    const r=await _fx(_ordUrl(),{cache:'no-store'});
+    if(!r.ok) return;
+    const txt=await r.text();
+    if(txt===_ordLast) return;
+    _ordLast=txt; ORD=JSON.parse(txt)||{};
+    const ids=Object.keys(ORD);
+    if(_ordSeen){
+      const fresh=ids.filter(id=>!_ordSeen.has(id) && (ORD[id].status||'new')==='new');
+      if(fresh.length){ const o=ORD[fresh[0]]; toast('🛍 New web order — '+fmt(o.total||0)+' from '+(o.customer&&o.customer.name||'someone')+(fresh.length>1?' (+'+(fresh.length-1)+' more)':'')); }
+    }
+    _ordSeen=new Set(ids);
+    if(view==='admin') rerender();
+  }catch(e){}
+}
+function ordersStart(){ clearInterval(_ordTimer); _ordTimer=setInterval(ordersPoll,10000); ordersPoll(); }
+function ordWhen(ts){ const d=new Date(ts||0); return d.toLocaleDateString('en-CA',{month:'short',day:'numeric'})+' '+d.toLocaleTimeString('en-CA',{hour:'numeric',minute:'2-digit'}); }
+const ORD_LABEL={new:'Waiting for e-Transfer',paid:'Paid — pack it',shipped:'Shipped',ready:'Ready for pickup',done:'Done',cancelled:'Cancelled'};
+const ORD_COLOR={new:'var(--gold)',paid:'#2e9e5b',shipped:'#3b82f6',ready:'#3b82f6',done:'var(--muted)',cancelled:'var(--red)'};
+function ordAddr(o){ const s=o.ship||{}; if(s.method==='pickup') return 'Pickup in Toronto'; return [s.address,s.city,[s.region,s.postal].filter(Boolean).join(' '),s.country].filter(Boolean).join(', '); }
+function ordMember(o){ const id=o.member||siteCfg().orders.defaultMember; const u=id&&S.users&&S.users[id]; return u? {id,u} : null; }
+/* ---- the emails. Each opens the phone's mail app with everything written;
+        the person just presses Send.                                         */
+function ordMail(id,kind){
+  const o=ORD[id]; if(!o) return '#';
+  const c=siteCfg(), from=c.contact.email||'info@threeaces.ca', et=c.orders.etransferEmail||from;
+  const first=(o.customer.name||'').split(' ')[0]||'there';
+  const items=(o.lines||[]).map(l=>'  '+l.qty+' x '+l.product+' ('+[l.colour,l.size].filter(Boolean).join(', ')+') — '+fmt(l.price*l.qty)).join('\n');
+  const link='https://lucacbd-blip.github.io/three-aces-website/#order-'+o.id;
+  let subj='', body='';
+  if(kind==='received'){
+    subj='Three Aces — we received your order '+o.id;
+    body='Hi '+first+',\n\nThanks for your order! Here is what we have:\n\n'+items+'\n  Shipping: '+(o.shipping?fmt(o.shipping):'Free')+'\n  Total: '+fmt(o.total)+' CAD\n\n'+(o.ship.method==='pickup'?'Pickup in Toronto — we will message you to arrange a time.':'Ship to: '+ordAddr(o))+
+      '\n\nTo complete it, please send an Interac e-Transfer of '+fmt(o.total)+' to '+et+' and put your order number '+o.id+' in the message. If your bank asks for a security question, use "Club name?" and the answer "threeaces".\n\nWe reserve your items the moment the transfer lands and will email you again when it ships.\n\nGrazie,\nThree Aces Italian Canadian Cultural Club';
+  }
+  if(kind==='paid'){
+    subj='Three Aces — payment received for order '+o.id;
+    body='Hi '+first+',\n\nGot it — your e-Transfer of '+fmt(o.total)+' came through and your order is being packed.\n\n'+items+'\n\n'+(o.ship.method==='pickup'?'We will email you as soon as it is ready for pickup in Toronto.':'We will email you with the tracking number as soon as it ships to:\n'+ordAddr(o))+'\n\nGrazie,\nThree Aces Italian Canadian Cultural Club';
+  }
+  if(kind==='shipped'){
+    subj='Three Aces — your order '+o.id+' has shipped';
+    body='Hi '+first+',\n\nYour order is on its way!\n\n'+items+'\n\nShipped by '+(o.carrier||'')+'\nTracking number: '+(o.tracking||'')+(o.trackUrl?'\nTrack it: '+o.trackUrl:'')+'\n\nShipping to: '+ordAddr(o)+'\n\nYou can also check your order any time at '+link+'\n\nGrazie for supporting the club,\nThree Aces Italian Canadian Cultural Club';
+  }
+  if(kind==='ready'){
+    subj='Three Aces — order '+o.id+' is ready for pickup';
+    body='Hi '+first+',\n\nYour order is packed and ready for pickup in Toronto:\n\n'+items+'\n\nReply to this email or call us to arrange a time.\n\nGrazie,\nThree Aces Italian Canadian Cultural Club';
+  }
+  if(kind==='cancelled'){
+    subj='Three Aces — order '+o.id+' cancelled';
+    body='Hi '+first+',\n\nYour order '+o.id+' has been cancelled'+(o.cancelReason?': '+o.cancelReason:'.')+'\n\nIf a payment was already sent we will return it in full. Sorry about that — and thank you for supporting the club.\n\nThree Aces Italian Canadian Cultural Club';
+  }
+  return 'mailto:'+encodeURIComponent(o.customer.email||'')+'?subject='+encodeURIComponent(subj)+'&body='+encodeURIComponent(body);
+}
+async function ordSet(id,patch){
+  patch.updated=Date.now(); patch.updatedBy=meU().name;
+  const r=await _fx(_ordUrl(id),{method:'PATCH',body:JSON.stringify(patch)});
+  if(!r.ok){ toast('Could not save the order — check the connection',1); throw new Error('order save'); }
+  ORD[id]=Object.assign(ORD[id]||{},patch); _ordLast='';
+}
+async function ordPublic(id,patch){
+  patch.updated=Date.now();
+  try{ await _fx(_ordsUrl(id),{method:'PATCH',body:JSON.stringify(patch)}); }catch(e){}
+}
+function ordEmailed(id,kind){ ordSet(id,{['email_'+kind]:Date.now()}).then(rerender).catch(()=>{}); }
+/* "Payment received" — reserve the stock and log the sale. The e-Transfer went
+   straight into the club account, so it is recorded as Interac: nobody is
+   holding the cash, and the handler's profit share is owed by the club.     */
+async function ordPaid(id){
+  const o=ORD[id]; if(!o || (o.status||'new')!=='new') return;
+  const m=ordMember(o); if(!m){ toast('First pick who handles web orders (Website → Web orders)',1); return; }
+  const done=[];
+  for(const l of (o.lines||[])){
+    const it=S.items[l.itemId]; const sz=it&&it.sizes&&it.sizes[l.sizeKey||l.size];
+    if(!it||!sz){ for(const d of done) await DB.txnStock(d.itemId,d.size,d.qty); toast('Cannot find '+l.product+' '+l.size+' in Items — fix the item, then try again',1); return; }
+    const ok=await DB.txnStock(l.itemId,l.sizeKey||l.size,-l.qty);
+    if(!ok){ for(const d of done) await DB.txnStock(d.itemId,d.size,d.qty); toast('Not enough stock for '+l.product+' '+l.size+' — nothing was changed',1); return; }
+    done.push({itemId:l.itemId,size:l.sizeKey||l.size,qty:l.qty});
+  }
+  const sale={ts:Date.now(), sellerId:m.id, sellerName:m.u.name, sellerPct:m.u.profitPct||0,
+    payment:'Interac', buyer:o.customer.name||'', voided:false, eventName:'Web order',
+    web:true, orderId:o.id, comp:null, discount:null,
+    lines:(o.lines||[]).map(l=>{ const it=S.items[l.itemId]||{}, sz=(it.sizes||{})[l.sizeKey||l.size]||{}; return {itemId:l.itemId,item:it.name||l.product,size:l.sizeKey||l.size,qty:l.qty,price:l.price,orig:null,salePct:0,grp:groupOf(it),cost:sz.cost||0,member:false,adhoc:false}; }),
+    shipping:o.shipping||0, total:o.total};
+  // postage is money in that is not profit: it shows as its own line, at cost,
+  // so the total matches what landed in the account and nobody's share grows
+  if(o.shipping>0) sale.lines.push({itemId:'',item:'Shipping ('+(o.ship&&o.ship.zone||'CA')+')',size:'',qty:1,price:o.shipping,orig:null,salePct:0,grp:'Shipping',cost:o.shipping,member:false,adhoc:true});
+  const saleId=await DB.push(['sales'],sale);
+  await ordSet(id,{status:'paid',paidAt:Date.now(),saleId,member:m.id});
+  await ordPublic(id,{status:'paid'});
+  toast('Payment recorded — '+fmt(o.total)+' logged as a sale by '+m.u.name);
+  rerender();
+}
+const CARRIERS={'Canada Post':'https://www.canadapost-postescanada.ca/track-reperage/en#/search?searchFor=',
+  'Purolator':'https://www.purolator.com/en/shipping/tracker?pin=', 'UPS':'https://www.ups.com/track?tracknum=',
+  'FedEx':'https://www.fedex.com/fedextrack/?trknbr=', 'USPS':'https://tools.usps.com/go/TrackConfirmAction?tLabels=',
+  'DHL':'https://www.dhl.com/ca-en/home/tracking.html?tracking-id=', 'Other':''};
+function ordShipModal(id){
+  const o=ORD[id]; if(!o) return;
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>📦 Mark as shipped</h3>
+    <p class="muted">${esc(o.customer.name)} · ${esc(ordAddr(o))}</p>
+    <label>Carrier</label><select id="os_car">${Object.keys(CARRIERS).map(c=>`<option ${c===(o.carrier||'Canada Post')?'selected':''}>${c}</option>`).join('')}</select>
+    <label>Tracking number</label><input id="os_trk" value="${esc(o.tracking||'')}" placeholder="e.g. 7101 2345 6789 0123" autocomplete="off">
+    <label>Tracking link (filled in for you)</label><input id="os_url" value="${esc(o.trackUrl||'')}" placeholder="optional">
+    <div style="height:12px"></div>
+    <button class="btn" onclick="ordShipGo('${id}')">Save — then email the customer</button>`);
+  const fill=()=>{ const c=$('os_car').value, t=$('os_trk').value.replace(/\s+/g,''); if(CARRIERS[c]&&t) $('os_url').value=CARRIERS[c]+encodeURIComponent(t); };
+  $('os_car').onchange=fill; $('os_trk').oninput=fill;
+}
+async function ordShipGo(id){
+  const carrier=$('os_car').value, tracking=$('os_trk').value.trim(), trackUrl=$('os_url').value.trim();
+  if(!tracking){ toast('Type the tracking number',1); return; }
+  closeModal();
+  await ordSet(id,{status:'shipped',shippedAt:Date.now(),carrier,tracking,trackUrl});
+  await ordPublic(id,{status:'shipped',carrier,tracking,trackUrl});
+  toast('Marked shipped — now tap "Email: shipped"'); rerender();
+}
+async function ordReady(id){ await ordSet(id,{status:'ready',readyAt:Date.now()}); await ordPublic(id,{status:'ready'}); toast('Marked ready — now tap "Email: ready"'); rerender(); }
+async function ordDone(id){ await ordSet(id,{status:'done',doneAt:Date.now()}); await ordPublic(id,{status:'done'}); rerender(); }
+function ordCancelAsk(id){
+  const o=ORD[id]; if(!o) return;
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>Cancel order ${esc(o.id)}</h3>
+    <p class="muted">${o.status==='paid'||o.status==='shipped'||o.status==='ready'?'This order was already paid: the sale will be voided, the stock goes back, and you will need to refund '+fmt(o.total)+' yourself.':'Nothing was charged. The customer just never sent the e-Transfer, or asked to cancel.'}</p>
+    <label>Reason (goes in the email)</label><input id="oc_why" placeholder="e.g. sold out before payment arrived">
+    <div style="height:12px"></div>
+    <button class="btn red" onclick="ordCancelGo('${id}')">Cancel this order</button>`);
+}
+async function ordCancelGo(id){
+  const o=ORD[id]; const why=$('oc_why').value.trim(); closeModal();
+  if(o.saleId && S.sales && S.sales[o.saleId] && !S.sales[o.saleId].voided){
+    for(const l of (S.sales[o.saleId].lines||[])){ if(S.items[l.itemId]) await DB.txnStock(l.itemId,l.size,l.qty); }
+    await DB.set(['sales',o.saleId,'voided'],true);
+  }
+  await ordSet(id,{status:'cancelled',cancelledAt:Date.now(),cancelReason:why});
+  await ordPublic(id,{status:'cancelled'});
+  toast('Order cancelled'+(o.saleId?' — stock restored, sale voided':'')); rerender();
+}
+async function ordReassign(id,uid){
+  const o=ORD[id], u=S.users[uid]; if(!o||!u) return;
+  await ordSet(id,{member:uid});
+  if(o.saleId && S.sales && S.sales[o.saleId]){ await DB.set(['sales',o.saleId,'sellerId'],uid); await DB.set(['sales',o.saleId,'sellerName'],u.name); await DB.set(['sales',o.saleId,'sellerPct'],u.profitPct||0); }
+  toast('Now handled by '+u.name); rerender();
+}
+function ordersHTML(){
+  const all=Object.values(ORD).filter(Boolean).sort((a,b)=>(b.ts||0)-(a.ts||0));
+  const list=all.filter(o=>ordFilter==='open'? ORD_OPEN.includes(o.status||'new') : ordFilter==='all'? true : (o.status||'new')===ordFilter);
+  const users=Object.entries(S.users||{}).filter(([,u])=>u.active!==false);
+  const handler=ordMember({});
+  const filters=[['open','Open'],['new','Waiting'],['paid','Paid'],['shipped','Shipped'],['done','Done'],['cancelled','Cancelled'],['all','All']];
+  const cards=list.map(o=>{
+    const st=o.status||'new', m=ordMember(o);
+    const mailBtn=(kind,label)=>`<a class="btn small ${o['email_'+kind]?'gray':''}" href="${ordMail(o.id,kind)}" onclick="ordEmailed('${o.id}','${kind}')">${o['email_'+kind]?'✓ ':'✉ '}${label}</a>`;
+    let actions='';
+    if(st==='new') actions=mailBtn('received','Email: order received')+`<button class="btn small" style="background:#2e9e5b;color:#fff" onclick="ordPaid('${o.id}')">💵 Payment received</button><button class="btn small gray" onclick="ordCancelAsk('${o.id}')">Cancel</button>`;
+    if(st==='paid') actions=mailBtn('paid','Email: paid')+(o.ship&&o.ship.method==='pickup'?`<button class="btn small" onclick="ordReady('${o.id}')">🛍 Ready for pickup</button>`:`<button class="btn small" onclick="ordShipModal('${o.id}')">📦 Mark shipped</button>`)+`<button class="btn small gray" onclick="ordCancelAsk('${o.id}')">Cancel</button>`;
+    if(st==='shipped') actions=mailBtn('shipped','Email: shipped + tracking')+`<button class="btn small gray" onclick="ordShipModal('${o.id}')">Edit tracking</button><button class="btn small gray" onclick="ordDone('${o.id}')">✓ Done</button>`;
+    if(st==='ready') actions=mailBtn('ready','Email: ready for pickup')+`<button class="btn small gray" onclick="ordDone('${o.id}')">✓ Picked up</button>`;
+    if(st==='cancelled') actions=mailBtn('cancelled','Email: cancelled');
+    return `<div class="card" style="border-left:4px solid ${ORD_COLOR[st]||'var(--line)'}">
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline">
+        <div><b>${esc(o.customer&&o.customer.name||'—')}</b> <span class="muted">· ${esc(o.id)} · ${ordWhen(o.ts)}</span></div>
+        <div><b style="color:${ORD_COLOR[st]}">${ORD_LABEL[st]||st}</b> · <b>${fmt(o.total||0)}</b></div></div>
+      <div class="muted" style="margin:6px 0">${(o.lines||[]).map(l=>`${l.qty} × <b>${esc(l.product)}</b> ${esc([l.colour,l.size].filter(Boolean).join(' / '))}`).join(' &nbsp;·&nbsp; ')}</div>
+      <div class="muted">${o.ship&&o.ship.method==='pickup'?'🏠 Pickup in Toronto':'🚚 '+esc(ordAddr(o))+' · '+(o.weight||0)+' kg · shipping '+fmt(o.shipping||0)}</div>
+      <div class="muted">📧 ${esc(o.customer&&o.customer.email||'')}${o.customer&&o.customer.phone?' · 📱 '+esc(o.customer.phone):''}${o.note?'<br>📝 '+esc(o.note):''}</div>
+      ${st==='shipped'?`<div class="muted">📦 ${esc(o.carrier||'')} ${esc(o.tracking||'')}${o.trackUrl?` · <a href="${esc(o.trackUrl)}" target="_blank" rel="noopener" style="text-decoration:underline">track</a>`:''}</div>`:''}
+      ${st==='cancelled'&&o.cancelReason?`<div class="muted">Reason: ${esc(o.cancelReason)}</div>`:''}
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center">${actions}
+        ${st!=='new'&&st!=='cancelled'?`<select style="width:auto;margin:0;padding:6px 8px;font-size:13px" onchange="ordReassign('${o.id}',this.value)" title="Who gets the profit share">${users.map(([id,u])=>`<option value="${id}" ${(m&&m.id)===id?'selected':''}>${esc(u.name)}</option>`).join('')}</select>`:''}
+      </div></div>`;
+  }).join('');
+  return `<div class="card muted">Orders placed on the website land here within 10 seconds. <b>How it works:</b> a customer orders and gets an order number + the e-Transfer address. When the transfer shows up in the club account, tap <b>Payment received</b> — that reserves the stock and logs the sale to ${handler?'<b>'+esc(handler.u.name)+'</b>':'<b>whoever handles web orders</b> (set it under Website → Web orders)'}. Pack it, tap <b>Mark shipped</b>, type the tracking number, then tap the email button — the message is already written, you just press Send. The customer's order page updates by itself.</div>
+    <div class="tabbar">${filters.map(([k,l])=>`<button class="${ordFilter===k?'on':''}" onclick="ordFilter='${k}';rerender()">${l}${k==='open'&&ordOpen().length?' ('+ordOpen().length+')':''}</button>`).join('')}</div>
+    ${cards || '<div class="card muted">No orders here'+(ordFilter==='open'?' — nothing waiting on you.':'.')+'</div>'}`;
 }
 
 /* ------------------------------ THEME ------------------------------------- */
