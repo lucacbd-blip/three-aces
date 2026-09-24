@@ -459,7 +459,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.31';
+const APP_VERSION = 'v3.32';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -5572,7 +5572,7 @@ const SITE_DEFAULT={
   ticker:['10th Annual Picnic · Summer 2027','6th Annual Christmas Food Drive · December 2026','Every dollar goes back to the club & community','Limited stock · Once it\u2019s gone, it\u2019s gone'],
   shipping:{stepKg:0.5, zones:{CA:{label:'Canada',base:12,step:4},US:{label:'United States',base:22,step:7},INTL:{label:'International',base:38,step:12}}, pickup:true, pickupText:'Pick up in Toronto \u2014 free'},
   orders:{defaultMember:'', etransferEmail:''},
-  sponsors:{}
+  sponsors:{}, sponsorsYear:2026
 };
 function siteCfg(){ const s=S.site||{}; const d=JSON.parse(JSON.stringify(SITE_DEFAULT));
   const merge=(a,b)=>{ for(const k in b){ if(b[k]&&typeof b[k]==='object'&&!Array.isArray(b[k])&&a[k]&&typeof a[k]==='object') merge(a[k],b[k]); else a[k]=b[k]; } return a; };
@@ -5629,8 +5629,18 @@ function websiteHTML(){
     <label>Short description on the site</label><textarea rows="4" onchange="siteSet(['foodDrive','blurb'],this.value)">${esc(c.foodDrive.blurb)}</textarea></div>`;
   if(siteSec==='sponsors'){
     const list=Object.entries(c.sponsors||{}).sort((a,b)=>(a[1].order??99)-(b[1].order??99));
-    body=`<p class="muted">These are the logos on the website\u2019s sponsor wall, in this order. Tap a name to edit. This is separate from the member sponsor tracker.</p>
-    <button class="btn" onclick="siteSponsorModal(null)">\uff0b Add sponsor logo</button><div style="height:8px"></div>`+
+    const onWall=list.map(([,r])=>(r.name||'').trim().toLowerCase());
+    const matches=n=>{ n=(n||'').trim().toLowerCase(); return !!n && onWall.some(w=>w===n||w.includes(n)||n.includes(w)); };
+    const seasonY=sponsorYearOf(Date.now());
+    const confirmed=sponsIn(seasonY).filter(([,r])=>r.status==='done');
+    const todo=confirmed.filter(([,r])=>!r.anonymous && !matches(r.sponsor));
+    const anon=confirmed.filter(([,r])=>r.anonymous);
+    body=`<p class="muted">These are the logos on the website\u2019s sponsor wall, in this order. Tap a name to edit it. <b>Hide</b> takes a logo off the site without deleting it, for a sponsor who wants to stay anonymous or one who didn\u2019t come back this year.</p>
+    <div class="card">${F('Year in the heading (\u201cThank you to our ____ picnic sponsors\u201d)',['sponsorsYear'],c.sponsorsYear,'2026','number')}</div>
+    ${!list.length?`<div class="card" style="border-color:var(--gold)"><b>Start with the sponsors already on the website</b><p class="muted" style="margin:6px 0 10px">Loads the ${SITE_SPONSORS_START.length} sponsors and logos that are on the site today, so from now on you manage them all from here.</p><button class="btn" id="spImportBtn" onclick="siteSponsorImport()">Load the current sponsors</button></div>`:''}
+    ${todo.length?`<div class="card"><b>Confirmed this season, not on the website yet</b><p class="muted" style="margin:4px 0 8px">From Admin \u2192 Sponsors. Add them to the wall, or keep them anonymous so they never show up here again.</p>${todo.map(([id,r])=>`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--line)"><div style="flex:1;min-width:140px"><b>${esc(r.sponsor||'')}</b> <span class="muted">\u00b7 ${esc(r.member||'')}</span></div><button class="btn small" onclick="siteSponsorModal(null,${JSON.stringify(r.sponsor||'').replace(/"/g,'&quot;')})">\uff0b Add to the website</button><button class="btn small gray" onclick="DB.set(['sponsors','${id}','anonymous'],true).then(rerender)">Keep anonymous</button></div>`).join('')}</div>`:''}
+    ${anon.length?`<div class="card muted">Kept anonymous: ${anon.map(([id,r])=>`${esc(r.sponsor||'')} <a href="#" style="text-decoration:underline" onclick="DB.set(['sponsors','${id}','anonymous'],null).then(rerender);return false">undo</a>`).join(', ')}</div>`:''}
+    <div class="rowbtns"><button class="btn" onclick="siteSponsorModal(null)">\uff0b Add sponsor logo</button>${list.length?`<button class="btn gray" onclick="siteSponsorNewSeason()">New season: hide all</button>`:''}</div><div style="height:8px"></div>`+
     list.map(([id,r],i)=>`<div class="card" style="display:flex;align-items:center;gap:10px;${r.show===false?'opacity:.5':''}">
       <div style="display:flex;flex-direction:column;gap:4px"><button class="btn small gray" style="padding:4px 10px" ${i===0?'disabled':''} onclick="siteSponsorMove('${id}',-1)">\u25b2</button><button class="btn small gray" style="padding:4px 10px" ${i===list.length-1?'disabled':''} onclick="siteSponsorMove('${id}',1)">\u25bc</button></div>
       <div style="width:64px;height:44px;background:#fff;border-radius:6px;display:flex;align-items:center;justify-content:center;overflow:hidden">${r.logoId?`<img data-file="${esc(r.logoId)}" style="max-width:100%;max-height:100%;object-fit:contain" alt="">`:'<span class="muted" style="font-size:10px">no logo</span>'}</div>
@@ -5671,8 +5681,8 @@ function siteGalRemove(i){ const g=(siteCfg().picnic.photos||[]).slice(); g.spli
 function siteSponsorMove(id,d){ const list=Object.entries(siteCfg().sponsors||{}).sort((a,b)=>(a[1].order??99)-(b[1].order??99)).map(([k])=>k);
   const i=list.indexOf(id), j=i+d; if(i<0||j<0||j>=list.length) return; list.splice(i,1); list.splice(j,0,id);
   Promise.all(list.map((k,n)=>DB.set(['site','sponsors',k,'order'],n))).then(rerender); }
-function siteSponsorModal(id){
-  const r=id?(siteCfg().sponsors[id]||{}):{};
+function siteSponsorModal(id,prefill){
+  const r=id?(siteCfg().sponsors[id]||{}):{name:prefill||''};
   openModal(`<h3><button class="x" onclick="closeModal()">\u2715</button>${id?'Edit':'Add'} sponsor logo</h3>
     <label>Business name</label><input id="ss_name" value="${esc(r.name||'')}">
     <label>Website (opens when the logo is tapped)</label><input id="ss_url" value="${esc(r.url||'')}" placeholder="https://\u2026">
@@ -5693,6 +5703,49 @@ async function siteSponsorSave(id){
   else{ rec.order=Object.keys(siteCfg().sponsors||{}).length; await DB.set(['site','sponsors',newId()],rec); }
   closeModal(); rerender(); toast('Saved \u2014 the website updates within seconds');
 }
+/* v3.32 — the 13 sponsors that were typed into the website by hand, so the
+   club can take them over here in one tap (logos are fetched from the site). */
+const SITE_SPONSORS_START=[
+  ['Bolton Pizza Panini','https://www.boltonpizzapanini.ca','boltonpizzapanini','bolton'],
+  ['Multi Pasta','https://www.multipasta.com','multi_pasta','multipasta'],
+  ['Popular Supermarket','https://www.instagram.com/popular_supermarket1990/','popular_supermarket1990','popular'],
+  ['Egnatia Paving','https://www.egnatia.ca','egnatiapaving','egnatia'],
+  ['Bar Amaro','https://www.baramaro.ca','baramaro.ca','baramaro'],
+  ['Burn Media Corp','https://www.burnmediacorp.com','burnmediacorp','burn'],
+  ['GOBRO CON Inc.','https://www.gobrocon.com','','gobro'],
+  ['MTF Group Ltd.','https://www.mtfgroup.ca','mtf_group','mtf'],
+  ['Liquidation Event Auctions','https://www.liquidationevent.com','liquidationevent','liquidation'],
+  ['Funtimes Event Rentals','https://www.funtimeseventrentals.ca','funtimeseventrentals','funtimes'],
+  ['Belvedere Property Management & Inspections','https://www.na-ahi.org','belvedere_properties','belvedere'],
+  ['Joseph & Mike\u2019s Barber Shop','https://www.josephandmikesbarbershop.com','josephandmikes_.barbershop1966','josephmike'],
+  ['Tony & Adriana Puzzo','https://www.teampuzzo.ca','','puzzo']];
+let _spImporting=false;
+async function siteSponsorImport(){
+  if(_spImporting) return; if(Object.keys((S.site&&S.site.sponsors)||{}).length){ toast('Sponsors are already loaded'); return; }
+  _spImporting=true; const btn=$('spImportBtn');
+  const toData=blob=>new Promise(res=>{ const rd=new FileReader(); rd.onload=()=>res(rd.result); rd.onerror=()=>res(null); rd.readAsDataURL(blob); });
+  try{
+    for(let i=0;i<SITE_SPONSORS_START.length;i++){
+      const [name,url,ig,file]=SITE_SPONSORS_START[i];
+      if(btn) btn.textContent='Loading '+(i+1)+' of '+SITE_SPONSORS_START.length+'\u2026';
+      let logoId=null;
+      try{ const r=await fetch('https://lucacbd-blip.github.io/three-aces-website/sp-'+file+'.jpg',{cache:'no-store'});
+        if(r.ok){ const data=await toData(await r.blob()); if(data){ logoId=newId(); await fileSave(logoId,{name:file+'.jpg',type:'image/jpeg',data}); await publicFileSave(logoId,{data}); } } }catch(e){}
+      await DB.set(['site','sponsors',newId()+i],{name,url,instagram:ig,logoId,show:true,order:i});
+    }
+    toast('All '+SITE_SPONSORS_START.length+' sponsors loaded \u2014 manage them here from now on');
+  }catch(e){ toast('Stopped partway \u2014 check the connection and try again',1); }
+  finally{ _spImporting=false; rerender(); }
+}
+function siteSponsorNewSeason(){
+  openModal(`<h3><button class="x" onclick="closeModal()">\u2715</button>New sponsor season</h3>
+    <p class="muted">Hides every logo on the website\u2019s sponsor wall. Nothing is deleted. Then tap <b>Show</b> on each sponsor who is back this year, and add the new ones.</p>
+    <button class="btn" onclick="siteSponsorNewSeasonGo()">Hide all logos</button>`);
+}
+async function siteSponsorNewSeasonGo(){ closeModal();
+  const ids=Object.keys((S.site&&S.site.sponsors)||{});
+  for(const id of ids) await DB.set(['site','sponsors',id,'show'],false);
+  toast('All logos hidden \u2014 tap Show on the ones coming back'); rerender(); }
 
 
 
