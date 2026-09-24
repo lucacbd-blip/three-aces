@@ -5764,29 +5764,29 @@ function ordMail(id,kind){
   const o=ORD[id]; if(!o) return '#';
   const c=siteCfg(), from=c.contact.email||'info@threeaces.ca', et=c.orders.etransferEmail||from;
   const first=(o.customer.name||'').split(' ')[0]||'there';
-  const items=(o.lines||[]).map(l=>'  '+l.qty+' x '+l.product+' ('+[l.colour,l.size].filter(Boolean).join(', ')+') — '+fmt(l.price*l.qty)).join('\n');
+  const items=(o.lines||[]).map(l=>'  '+l.qty+' x '+l.product+' ('+[l.colour,l.size].filter(Boolean).join(', ')+'): '+fmt(l.price*l.qty)).join('\n');
   const link='https://lucacbd-blip.github.io/three-aces-website/#order-'+o.id;
   let subj='', body='';
   if(kind==='received'){
-    subj='Three Aces — we received your order '+o.id;
-    body='Hi '+first+',\n\nThanks for your order! Here is what we have:\n\n'+items+'\n  Shipping: '+(o.shipping?fmt(o.shipping):'Free')+'\n  Total: '+fmt(o.total)+' CAD\n\n'+(o.ship.method==='pickup'?'Pickup in Toronto — we will message you to arrange a time.':'Ship to: '+ordAddr(o))+
+    subj='Three Aces: we received your order '+o.id;
+    body='Hi '+first+',\n\nThanks for your order! Here is what we have:\n\n'+items+'\n  Shipping: '+(o.shipping?fmt(o.shipping):'Free')+'\n  Total: '+fmt(o.total)+' CAD\n\n'+(o.ship.method==='pickup'?'Pickup in Toronto. We will message you to set up a time.':'Ship to: '+ordAddr(o))+
       '\n\nTo complete it, please send an Interac e-Transfer of '+fmt(o.total)+' to '+et+' and put your order number '+o.id+' in the message. If your bank asks for a security question, use "Club name?" and the answer "threeaces".\n\nWe reserve your items the moment the transfer lands and will email you again when it ships.\n\nGrazie,\nThree Aces Italian Canadian Cultural Club';
   }
   if(kind==='paid'){
-    subj='Three Aces — payment received for order '+o.id;
-    body='Hi '+first+',\n\nGot it — your e-Transfer of '+fmt(o.total)+' came through and your order is being packed.\n\n'+items+'\n\n'+(o.ship.method==='pickup'?'We will email you as soon as it is ready for pickup in Toronto.':'We will email you with the tracking number as soon as it ships to:\n'+ordAddr(o))+'\n\nGrazie,\nThree Aces Italian Canadian Cultural Club';
+    subj='Three Aces: payment received for order '+o.id;
+    body='Hi '+first+',\n\nGot it! Your e-Transfer of '+fmt(o.total)+' came through and your order is being packed.\n\n'+items+'\n\n'+(o.ship.method==='pickup'?'We will email you as soon as it is ready for pickup in Toronto.':'We will email you with the tracking number as soon as it ships to:\n'+ordAddr(o))+'\n\nGrazie,\nThree Aces Italian Canadian Cultural Club';
   }
   if(kind==='shipped'){
-    subj='Three Aces — your order '+o.id+' has shipped';
+    subj='Three Aces: your order '+o.id+' has shipped';
     body='Hi '+first+',\n\nYour order is on its way!\n\n'+items+'\n\nShipped by '+(o.carrier||'')+'\nTracking number: '+(o.tracking||'')+(o.trackUrl?'\nTrack it: '+o.trackUrl:'')+'\n\nShipping to: '+ordAddr(o)+'\n\nYou can also check your order any time at '+link+'\n\nGrazie for supporting the club,\nThree Aces Italian Canadian Cultural Club';
   }
   if(kind==='ready'){
-    subj='Three Aces — order '+o.id+' is ready for pickup';
+    subj='Three Aces: order '+o.id+' is ready for pickup';
     body='Hi '+first+',\n\nYour order is packed and ready for pickup in Toronto:\n\n'+items+'\n\nReply to this email or call us to arrange a time.\n\nGrazie,\nThree Aces Italian Canadian Cultural Club';
   }
   if(kind==='cancelled'){
-    subj='Three Aces — order '+o.id+' cancelled';
-    body='Hi '+first+',\n\nYour order '+o.id+' has been cancelled'+(o.cancelReason?': '+o.cancelReason:'.')+'\n\nIf a payment was already sent we will return it in full. Sorry about that — and thank you for supporting the club.\n\nThree Aces Italian Canadian Cultural Club';
+    subj='Three Aces: order '+o.id+' cancelled';
+    body='Hi '+first+',\n\nYour order '+o.id+' has been cancelled'+(o.cancelReason?': '+o.cancelReason:'.')+'\n\nIf a payment was already sent we will return it in full. Sorry about that, and thank you for supporting the club.\n\nThree Aces Italian Canadian Cultural Club';
   }
   return 'mailto:'+encodeURIComponent(o.customer.email||'')+'?subject='+encodeURIComponent(subj)+'&body='+encodeURIComponent(body);
 }
