@@ -5567,7 +5567,7 @@ function uploadLogo(inp){
    the 3-second sync never downloads them.                                   */
 const SITE_DEFAULT={
   picnic:{annual:10, dateText:'Date to be announced', location:'Heart Lake Conservation Area, Brampton (Birchview #1)', year:2027},
-  foodDrive:{annual:6, gofundme:'', lastYearTotal:4517, blurb:'Every December, Three Aces goes to the St. Philip Neri food bank in Toronto and hands out grocery gift cards to families who need them. 100% of what comes in goes back into the community.'},
+  foodDrive:{annual:6, gofundme:'', lastYearTotal:4517, lastYear:2025, blurb:'Every December, Three Aces goes to the St. Philip Neri food bank in Toronto and hands out grocery gift cards to families who need them. 100% of what comes in goes back into the community.'},
   contact:{email:'info@threeaces.ca', instagram:'three_aces_italian'},
   ticker:['10th Annual Picnic · Summer 2027','6th Annual Christmas Food Drive · December 2026','Every dollar goes back to the club & community','Limited stock · Once it\u2019s gone, it\u2019s gone'],
   shipping:{stepKg:0.5, zones:{CA:{label:'Canada',base:12,step:4},US:{label:'United States',base:22,step:7},INTL:{label:'International',base:38,step:12}}, pickup:true, pickupText:'Pick up in Toronto \u2014 free'},
@@ -5624,7 +5624,8 @@ function websiteHTML(){
   if(siteSec==='fooddrive') body=`<div class="card">
     ${F('Which annual food drive is next (a number)',['foodDrive','annual'],c.foodDrive.annual,'6','number')}
     ${F('GoFundMe link \u2014 paste it and the Donate button goes live; blank = "coming soon"',['foodDrive','gofundme'],c.foodDrive.gofundme,'https://gofund.me/\u2026')}
-    ${F('Raised last year ($)',['foodDrive','lastYearTotal'],c.foodDrive.lastYearTotal,'4517','number')}
+    ${F('Raised at the last food drive ($)',['foodDrive','lastYearTotal'],c.foodDrive.lastYearTotal,'4517','number')}
+    ${F('Which year was that food drive',['foodDrive','lastYear'],c.foodDrive.lastYear,'2025','number')}
     <label>Short description on the site</label><textarea rows="4" onchange="siteSet(['foodDrive','blurb'],this.value)">${esc(c.foodDrive.blurb)}</textarea></div>`;
   if(siteSec==='sponsors'){
     const list=Object.entries(c.sponsors||{}).sort((a,b)=>(a[1].order??99)-(b[1].order??99));
