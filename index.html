@@ -459,7 +459,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.30';
+const APP_VERSION = 'v3.31';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -5577,7 +5577,7 @@ const SITE_DEFAULT={
 function siteCfg(){ const s=S.site||{}; const d=JSON.parse(JSON.stringify(SITE_DEFAULT));
   const merge=(a,b)=>{ for(const k in b){ if(b[k]&&typeof b[k]==='object'&&!Array.isArray(b[k])&&a[k]&&typeof a[k]==='object') merge(a[k],b[k]); else a[k]=b[k]; } return a; };
   return merge(d,s); }
-let siteSec='picnic';
+let siteSec='pages';
 function siteSet(path,val){ return DB.set(['site'].concat(path),val).then(()=>toast('Saved \u2014 the website updates within seconds')); }
 function webPhotoPick(inp,boxId,maxPx,cb){
   const f=inp.files&&inp.files[0]; if(!f) return;
@@ -5599,9 +5599,18 @@ function webPhotoPick(inp,boxId,maxPx,cb){
 }
 function websiteHTML(){
   const c=siteCfg();
-  const secs=[['picnic','Picnic'],['fooddrive','Food Drive'],['sponsors','Sponsors'],['shipping','Shipping'],['orders','Web orders'],['ticker','Ticker & contact']];
+  const secs=[['pages','Pages'],['picnic','Picnic'],['fooddrive','Food Drive'],['sponsors','Sponsors'],['shipping','Shipping'],['orders','Web orders'],['ticker','Ticker & contact']];
   const F=(label,path,val,ph,type)=>`<label>${label}</label><input ${type?`type="${type}"`:''} value="${esc(val??'')}" placeholder="${esc(ph||'')}" onchange="siteSet(${JSON.stringify(path).replace(/"/g,'&quot;')},${type==='number'?'+this.value':'this.value'})">`;
   let body='';
+  if(siteSec==='pages'){
+    const pg=(S.site&&S.site.pages)||{};
+    const PG=[['shop','Shop','The store, the cart and checkout. Turn on when the photos are ready.'],['story','Who We Are','The club\u2019s story.'],['picnic','Picnic','The Annual Picnic page.'],['fooddrive','Food Drive','The Christmas Food Drive page.'],['sponsors','Sponsors','Sponsor logos and the Become a Sponsor form.'],['contact','Contact','The Contact Us form.']];
+    body=`<p class="muted">Turn a page off and it disappears from the website menu, the home page and the footer. Turn it back on any time. Nothing is deleted. To look at hidden pages yourself, open the site with <b>?preview</b> on the end of the address.</p>
+    <div class="card">${PG.map(([k,l,d])=>{ const on=(k==='shop')? pg.shop===true : pg[k]!==false;
+      return `<div class="switchrow"><div><div class="t">${l} <span class="muted">\u00b7 ${on?'showing':'hidden'}</span></div><div class="s">${d}</div></div>
+      <button class="toggle ${on?'on':''}" onclick="siteSet(['pages','${k}'],${on?'false':'true'}).then(rerender)"></button></div>`; }).join('')}</div>
+    <div class="card muted">Preview link: <b>lucacbd-blip.github.io/three-aces-website/?preview</b></div>`;
+  }
   if(siteSec==='picnic') body=`<div class="card">
     ${F('Which annual picnic is next (a number)',['picnic','annual'],c.picnic.annual,'10','number')}
     ${F('Year',['picnic','year'],c.picnic.year,'2027','number')}
