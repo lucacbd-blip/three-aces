@@ -459,7 +459,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.32';
+const APP_VERSION = 'v3.33';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -5571,7 +5571,7 @@ const SITE_DEFAULT={
   contact:{email:'info@threeaces.ca', instagram:'three_aces_italian'},
   ticker:['10th Annual Picnic · Summer 2027','6th Annual Christmas Food Drive · December 2026','Every dollar goes back to the club & community','Limited stock · Once it\u2019s gone, it\u2019s gone'],
   shipping:{stepKg:0.5, zones:{CA:{label:'Canada',base:12,step:4},US:{label:'United States',base:22,step:7},INTL:{label:'International',base:38,step:12}}, pickup:true, pickupText:'Pick up in Toronto \u2014 free'},
-  orders:{defaultMember:'', etransferEmail:''},
+  orders:{defaultMember:'', etransferEmail:'', copyTo:'luca@curalli.com'},
   sponsors:{}, sponsorsYear:2026
 };
 function siteCfg(){ const s=S.site||{}; const d=JSON.parse(JSON.stringify(SITE_DEFAULT));
@@ -5664,6 +5664,7 @@ function websiteHTML(){
     const users=Object.entries(S.users||{}).filter(([,u])=>u.active!==false);
     body=`<p class="muted">A web order is logged as a sale by this member, so their \u201c% of profit kept\u201d applies exactly like a picnic sale. You can reassign any single order later.</p>
     <div class="card"><label>Web orders are handled by</label><select onchange="siteSet(['orders','defaultMember'],this.value)"><option value="">\u2014 nobody yet \u2014</option>${users.map(([id,u])=>`<option value="${id}" ${c.orders.defaultMember===id?'selected':''}>${esc(u.name)} (keeps ${u.profitPct||0}% of profit)</option>`).join('')}</select></div>
+    <div class="card">${F('Copy every customer email to (comma separated)',['orders','copyTo'],c.orders.copyTo,'luca@curalli.com')}<div class="muted">The order emails the app writes to customers go out with these addresses and the club email in CC.</div></div>
     <div class="card">${F('e-Transfer address customers pay to (blank = club email)',['orders','etransferEmail'],c.orders.etransferEmail,'info@threeaces.ca')}<div class="muted">Customers pay by Interac e-Transfer today. Orders come into <b>Admin → Orders</b>; the person above taps “Payment received” when the money lands. Card checkout (Stripe) can be added once the club bank account is open.</div></div>`;
   }
   if(siteSec==='ticker') body=`<div class="card"><label>Ticker lines across the top of the home page \u2014 one per line</label>
@@ -5851,7 +5852,8 @@ function ordMail(id,kind){
     subj='Three Aces: order '+o.id+' cancelled';
     body='Hi '+first+',\n\nYour order '+o.id+' has been cancelled'+(o.cancelReason?': '+o.cancelReason:'.')+'\n\nIf a payment was already sent we will return it in full. Sorry about that, and thank you for supporting the club.\n\nThree Aces Italian Canadian Cultural Club';
   }
-  return 'mailto:'+encodeURIComponent(o.customer.email||'')+'?subject='+encodeURIComponent(subj)+'&body='+encodeURIComponent(body);
+  const cc=[c.orders.copyTo, c.contact.email].map(x=>(x||'').trim()).filter(Boolean).filter((x,i,a)=>a.indexOf(x)===i).join(',');
+  return 'mailto:'+encodeURIComponent(o.customer.email||'')+'?'+(cc?'cc='+encodeURIComponent(cc)+'&':'')+'subject='+encodeURIComponent(subj)+'&body='+encodeURIComponent(body);
 }
 async function ordSet(id,patch){
   patch.updated=Date.now(); patch.updatedBy=meU().name;
