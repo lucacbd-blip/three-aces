@@ -5688,7 +5688,7 @@ function siteSponsorModal(id,prefill){
   const r=id?(siteCfg().sponsors[id]||{}):{name:prefill||''};
   openModal(`<h3><button class="x" onclick="closeModal()">\u2715</button>${id?'Edit':'Add'} sponsor logo</h3>
     <label>Business name</label><input id="ss_name" value="${esc(r.name||'')}">
-    <label>Website (opens when the logo is tapped)</label><input id="ss_url" value="${esc(r.url||'')}" placeholder="https://\u2026">
+    <label>Website (opens when the logo is tapped; leave blank if they don\u2019t have one)</label><input id="ss_url" value="${esc(r.url||'')}" placeholder="https://\u2026">
     <label>Instagram (without the @)</label><input id="ss_ig" value="${esc(r.instagram||'')}">
     <label>Logo \u2014 PNG or JPG, shrunk on upload</label>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><div id="ss_logoBox" data-id="${esc(r.logoId||'')}" style="width:96px;height:60px;background:#fff;border-radius:8px;display:flex;align-items:center;justify-content:center;overflow:hidden">${r.logoId?`<img data-file="${esc(r.logoId)}" style="max-width:100%;max-height:100%;object-fit:contain" alt="">`:'<span class="muted" style="font-size:11px">none</span>'}</div>
@@ -5721,7 +5721,7 @@ const SITE_SPONSORS_START=[
   ['Funtimes Event Rentals','https://www.funtimeseventrentals.ca','funtimeseventrentals','funtimes'],
   ['Belvedere Property Management & Inspections','https://www.na-ahi.org','belvedere_properties','belvedere'],
   ['Joseph & Mike\u2019s Barber Shop','https://www.josephandmikesbarbershop.com','josephandmikes_.barbershop1966','josephmike'],
-  ['Tony & Adriana Puzzo','https://www.teampuzzo.ca','','puzzo']];
+  ['Tony & Adriana Puzzo','','','puzzo']];
 let _spImporting=false;
 async function siteSponsorImport(){
   if(_spImporting) return; if(Object.keys((S.site&&S.site.sponsors)||{}).length){ toast('Sponsors are already loaded'); return; }
