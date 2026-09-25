@@ -5572,6 +5572,7 @@ const SITE_DEFAULT={
   ticker:['10th Annual Picnic · Summer 2027','6th Annual Christmas Food Drive · December 2026','Every dollar goes back to the club & community','Limited stock · Once it\u2019s gone, it\u2019s gone'],
   shipping:{stepKg:0.5, zones:{CA:{label:'Canada',base:12,step:4},US:{label:'United States',base:22,step:7},INTL:{label:'International',base:38,step:12}}, pickup:true, pickupText:'Pick up in Toronto \u2014 free'},
   orders:{defaultMember:'', etransferEmail:'', copyTo:'luca@curalli.com'},
+  forms:{to:'info@threeaces.ca', cc:'luca@curalli.com'},
   sponsors:{}, sponsorsYear:2026
 };
 function siteCfg(){ const s=S.site||{}; const d=JSON.parse(JSON.stringify(SITE_DEFAULT));
@@ -5669,6 +5670,7 @@ function websiteHTML(){
   }
   if(siteSec==='ticker') body=`<div class="card"><label>Ticker lines across the top of the home page \u2014 one per line</label>
     <textarea rows="5" onchange="siteSet(['ticker'],this.value.split('\\n').map(x=>x.trim()).filter(Boolean))">${esc((c.ticker||[]).join('\\n'))}</textarea></div>
+    <div class="card">${F('Website forms and new web orders email to',['forms','to'],c.forms.to,'info@threeaces.ca')}${F('And send a copy to (comma separated)',['forms','cc'],c.forms.cc,'luca@curalli.com')}<div class="muted">Contact Us, Become a Sponsor and every new web order are emailed here. The first time a new address gets one, it receives a one-time \u201cActivate\u201d email from FormSubmit. Click it once.</div></div>
     <div class="card">${F('Club email',['contact','email'],c.contact.email,'info@threeaces.ca')}${F('Instagram handle (without the @)',['contact','instagram'],c.contact.instagram,'three_aces_italian')}</div>`;
   const html=`<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div><b>threeaces.ca</b><div class="muted">Everything here shows on the website within seconds of saving.</div></div>
     <a class="btn small gray" href="https://lucacbd-blip.github.io/three-aces-website/" target="_blank" rel="noopener">Open the site \u2197</a></div>
