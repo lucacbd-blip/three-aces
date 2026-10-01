@@ -459,7 +459,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.33';
+const APP_VERSION = 'v3.34';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -5567,7 +5567,7 @@ function uploadLogo(inp){
    the 3-second sync never downloads them.                                   */
 const SITE_DEFAULT={
   picnic:{annual:10, dateText:'Date to be announced', location:'Heart Lake Conservation Area, Brampton (Birchview #1)', year:2027},
-  foodDrive:{annual:6, gofundme:'', lastYearTotal:4517, lastYear:2025, blurb:'Every December, Three Aces goes to the St. Philip Neri food bank in Toronto and hands out grocery gift cards to families who need them. 100% of what comes in goes back into the community.'},
+  foodDrive:{annual:6, gofundme:'', lastYearTotal:4517, lastYear:2025, blurb:'Every December, Three Aces supports St. Philip Neri\u2019s Table in Toronto, a partner agency of North York Harvest Food Bank, and the families it feeds through the holidays. Everything we raise goes back into the community.'},
   contact:{email:'info@threeaces.ca', instagram:'three_aces_italian'},
   ticker:['10th Annual Picnic · Summer 2027','6th Annual Christmas Food Drive · December 2026','Every dollar goes back to the club & community','Limited stock · Once it\u2019s gone, it\u2019s gone'],
   shipping:{stepKg:0.5, zones:{CA:{label:'Canada',base:12,step:4},US:{label:'United States',base:22,step:7},INTL:{label:'International',base:38,step:12}}, pickup:true, pickupText:'Pick up in Toronto \u2014 free'},
@@ -5616,7 +5616,7 @@ function websiteHTML(){
     ${F('Which annual picnic is next (a number)',['picnic','annual'],c.picnic.annual,'10','number')}
     ${F('Year',['picnic','year'],c.picnic.year,'2027','number')}
     ${F('Date, as the site should show it',['picnic','dateText'],c.picnic.dateText,'Sunday, July 25, 2027 \u2014 or "Date to be announced"')}
-    ${F('Location',['picnic','location'],c.picnic.location,'')}
+    ${F('Location (for the club only; the website never shows it, the picnic is invite only)',['picnic','location'],c.picnic.location,'')}
     <p class="muted">Picnic photos on the site come from the photo gallery below. Stock, prices and sale % come from Items.</p></div>
     <div class="card"><label>Picnic photo gallery \u2014 up to 8, the first is the big one</label>
     <div id="picGal" style="display:flex;gap:8px;flex-wrap:wrap">${(c.picnic.photos||[]).map((id,i)=>`<div style="position:relative;width:72px;height:72px;border-radius:8px;overflow:hidden;background:var(--panel2)"><img data-file="${esc(id)}" style="width:100%;height:100%;object-fit:cover" alt=""><button class="btn small red" style="position:absolute;top:2px;right:2px;padding:2px 6px" onclick="siteGalRemove(${i})">\u2715</button></div>`).join('')}</div>
@@ -5688,8 +5688,10 @@ function siteSponsorModal(id,prefill){
   const r=id?(siteCfg().sponsors[id]||{}):{name:prefill||''};
   openModal(`<h3><button class="x" onclick="closeModal()">\u2715</button>${id?'Edit':'Add'} sponsor logo</h3>
     <label>Business name</label><input id="ss_name" value="${esc(r.name||'')}">
-    <label>Website (opens when the logo is tapped; leave blank if they don\u2019t have one)</label><input id="ss_url" value="${esc(r.url||'')}" placeholder="https://\u2026">
+    <label>Website (leave blank if they don\u2019t have one). Tapping a logo on the site shows all of their links.</label><input id="ss_url" value="${esc(r.url||'')}" placeholder="https://\u2026">
     <label>Instagram (without the @)</label><input id="ss_ig" value="${esc(r.instagram||'')}">
+    <label>Facebook page link (leave blank if none)</label><input id="ss_fb" value="${esc(r.facebook||'')}" placeholder="https://www.facebook.com/\u2026">
+    <label>Google listing link (their Google Maps page; leave blank if none)</label><input id="ss_g" value="${esc(r.google||'')}" placeholder="https://www.google.com/maps/\u2026">
     <label>Logo \u2014 PNG or JPG, shrunk on upload</label>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><div id="ss_logoBox" data-id="${esc(r.logoId||'')}" style="width:96px;height:60px;background:#fff;border-radius:8px;display:flex;align-items:center;justify-content:center;overflow:hidden">${r.logoId?`<img data-file="${esc(r.logoId)}" style="max-width:100%;max-height:100%;object-fit:contain" alt="">`:'<span class="muted" style="font-size:11px">none</span>'}</div>
       <button type="button" class="btn small gray" onclick="$('ss_logoFile').click()">\u2b06 ${r.logoId?'Replace':'Upload'} logo</button>
@@ -5701,7 +5703,9 @@ function siteSponsorModal(id,prefill){
 async function siteSponsorSave(id){
   const name=$('ss_name').value.trim(); if(!name){ toast('Name is required',1); return; }
   let url=$('ss_url').value.trim(); if(url&&!/^https?:\/\//i.test(url)) url='https://'+url;
-  const rec={name,url,instagram:$('ss_ig').value.trim().replace(/^@/,''),logoId:$('ss_logoBox').dataset.id||null,show:true};
+  let fb=$('ss_fb').value.trim(); if(fb&&!/^https?:\/\//i.test(fb)) fb='https://'+fb;
+  let g=$('ss_g').value.trim(); if(g&&!/^https?:\/\//i.test(g)) g='https://'+g;
+  const rec={name,url,instagram:$('ss_ig').value.trim().replace(/^@/,''),facebook:fb,google:g,logoId:$('ss_logoBox').dataset.id||null,show:true};
   if(id){ const old=siteCfg().sponsors[id]||{}; await DB.set(['site','sponsors',id],{...old,...rec,show:old.show!==false}); }
   else{ rec.order=Object.keys(siteCfg().sponsors||{}).length; await DB.set(['site','sponsors',newId()],rec); }
   closeModal(); rerender(); toast('Saved \u2014 the website updates within seconds');
@@ -5709,19 +5713,19 @@ async function siteSponsorSave(id){
 /* v3.32 — the 13 sponsors that were typed into the website by hand, so the
    club can take them over here in one tap (logos are fetched from the site). */
 const SITE_SPONSORS_START=[
-  ['Bolton Pizza Panini','https://www.boltonpizzapanini.ca','boltonpizzapanini','bolton'],
-  ['Multi Pasta','https://www.multipasta.com','multi_pasta','multipasta'],
-  ['Popular Supermarket','https://www.instagram.com/popular_supermarket1990/','popular_supermarket1990','popular'],
-  ['Egnatia Paving','https://www.egnatia.ca','egnatiapaving','egnatia'],
-  ['Bar Amaro','https://www.baramaro.ca','baramaro.ca','baramaro'],
-  ['Burn Media Corp','https://www.burnmediacorp.com','burnmediacorp','burn'],
-  ['GOBRO CON Inc.','https://www.gobrocon.com','','gobro'],
-  ['MTF Group Ltd.','https://www.mtfgroup.ca','mtf_group','mtf'],
-  ['Liquidation Event Auctions','https://www.liquidationevent.com','liquidationevent','liquidation'],
-  ['Funtimes Event Rentals','https://www.funtimeseventrentals.ca','funtimeseventrentals','funtimes'],
-  ['Belvedere Property Management & Inspections','https://www.na-ahi.org','belvedere_properties','belvedere'],
-  ['Joseph & Mike\u2019s Barber Shop','https://www.josephandmikesbarbershop.com','josephandmikes_.barbershop1966','josephmike'],
-  ['Tony & Adriana Puzzo','','','puzzo']];
+  ['Bolton Pizza Panini','https://www.boltonpizzapanini.ca','boltonpizzapanini','bolton','https://www.facebook.com/boltonpizzapanini/','https://www.google.com/maps/search/?api=1&query=Bolton+Pizza+Panini,+12599+Hwy+50+%231,+Bolton,+ON'],
+  ['Multi Pasta','https://multipasta.com','multi_pasta','multipasta','https://www.facebook.com/multipastaa/','https://www.google.com/maps/search/?api=1&query=Multi+Pasta,+14+Oxford+St+Unit+8,+Richmond+Hill,+ON'],
+  ['Popular Supermarket','','popular_supermarket1990','popular','','https://www.google.com/maps/search/?api=1&query=Popular+Supermarket,+216+Chambers+Ave,+Toronto,+ON'],
+  ['Egnatia Paving','https://www.egnatia.ca','egnatiapaving','egnatia','','https://www.google.com/maps/search/?api=1&query=Egnatia+Paving,+36+Stoffel+Dr,+Etobicoke,+ON'],
+  ['Bar Amaro','https://www.baramaro.ca','baramaro.ca','baramaro','',''],
+  ['Burn Media Corp','https://www.burnmediacorp.com','burnmediacorp','burn','','https://www.google.com/maps/search/?api=1&query=Burn+Media+Corp,+4+Automatic+Rd,+Brampton,+ON'],
+  ['GOBRO CON Inc.','https://www.gobrocon.com','','gobro','','https://www.google.com/maps/search/?api=1&query=Gobro+Con+Inc,+25+Hansen+Rd+S,+Brampton,+ON'],
+  ['MTF Group Ltd.','https://www.mtfgroup.ca','mtf_group','mtf','','https://www.google.com/maps/place/?q=place_id:ChIJG5h2Xaw2K4gRCot3B8mYaWs'],
+  ['Liquidation Event Auctions','https://www.liquidationevent.com','liquidationevent','liquidation','https://www.facebook.com/p/Liquidation-Event-Mississauga-100063695060487/','https://www.google.com/maps/search/?api=1&query=Liquidation+Event,+1725+Matheson+Blvd+Unit+2,+Mississauga,+ON'],
+  ['Funtimes Event Rentals','https://www.funtimeseventrentals.ca','funtimeseventrentals','funtimes','https://www.facebook.com/people/Fun-Times-Event-Rentals/61558354257991/','https://www.google.com/maps/search/?api=1&query=Fun+Times+Event+Rentals,+471+Jevlan+Dr+%237,+Woodbridge,+ON'],
+  ['Belvedere Property Management & Inspections','','belvedere_properties','belvedere','',''],
+  ['Joseph & Mike\u2019s Barber Shop','https://www.josephandmikesbarbershop.com','josephandmikes_.barbershop1966','josephmike','https://www.facebook.com/people/Joseph-Mikes-Barber-Shop/61551053120696/','https://www.google.com/maps/search/?api=1&query=Joseph+%26+Mike%27s+Barber+Shop,+148+Main+St+E,+Milton,+ON'],
+  ['Tony & Adriana Puzzo','https://www.teampuzzo.ca','','puzzo','','']];
 let _spImporting=false;
 async function siteSponsorImport(){
   if(_spImporting) return; if(Object.keys((S.site&&S.site.sponsors)||{}).length){ toast('Sponsors are already loaded'); return; }
@@ -5729,12 +5733,12 @@ async function siteSponsorImport(){
   const toData=blob=>new Promise(res=>{ const rd=new FileReader(); rd.onload=()=>res(rd.result); rd.onerror=()=>res(null); rd.readAsDataURL(blob); });
   try{
     for(let i=0;i<SITE_SPONSORS_START.length;i++){
-      const [name,url,ig,file]=SITE_SPONSORS_START[i];
+      const [name,url,ig,file,fb,g]=SITE_SPONSORS_START[i];
       if(btn) btn.textContent='Loading '+(i+1)+' of '+SITE_SPONSORS_START.length+'\u2026';
       let logoId=null;
       try{ const r=await fetch('https://lucacbd-blip.github.io/three-aces-website/sp-'+file+'.jpg',{cache:'no-store'});
         if(r.ok){ const data=await toData(await r.blob()); if(data){ logoId=newId(); await fileSave(logoId,{name:file+'.jpg',type:'image/jpeg',data}); await publicFileSave(logoId,{data}); } } }catch(e){}
-      await DB.set(['site','sponsors',newId()+i],{name,url,instagram:ig,logoId,show:true,order:i});
+      await DB.set(['site','sponsors',newId()+i],{name,url,instagram:ig,facebook:fb||'',google:g||'',logoId,show:true,order:i});
     }
     toast('All '+SITE_SPONSORS_START.length+' sponsors loaded \u2014 manage them here from now on');
   }catch(e){ toast('Stopped partway \u2014 check the connection and try again',1); }
