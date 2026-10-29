@@ -3496,7 +3496,7 @@ function attendHTML(){
     <h2>Manage the register</h2>
     <div class="card">
       <p class="muted" style="margin-top:0">Active members — they take attendance and each secures a sponsor</p>
-      ${mem.map(r=>`<span class="sizebtn" style="cursor:default;margin:3px">${esc(r.name)}
+      ${mem.map(r=>`<span class="sizebtn" style="cursor:default;margin:3px">${esc(r.name)}${r.since?` <span class="muted" style="font-size:11px">since ${esc(r.since)}</span>`:''}
         <a href="#" class="noprint" style="color:var(--gold);text-decoration:none;margin-left:6px"
           onclick="attSetStaff('${r.id}',true);return false">→ staff</a>
         <a href="#" class="noprint" style="color:var(--muted);text-decoration:none;margin-left:6px"
@@ -5125,6 +5125,10 @@ function editUser(id){
     <input id="eu_pct" type="number" min="0" max="100" value="${u.profitPct||0}">
     <div class="switchrow"><div><div class="t">Active</div><div class="s">Inactive members can't log in</div></div>
       <button class="toggle ${u.active!==false?'on':''}" id="eu_act" onclick="this.classList.toggle('on')"></button></div>
+    ${id?'':`<div class="switchrow"><div><div class="t">Add to the attendance register</div>
+        <div class="s">A new club member shows up on the monthly meeting register and the sponsor board. Turn off for anyone who is just a login.</div></div>
+      <button class="toggle on" id="eu_reg" onclick="this.classList.toggle('on')"></button></div>
+      <label>Member since</label><input id="eu_since" type="date" value="${new Date().toLocaleDateString('en-CA')}">`}
     <div style="height:10px"></div>
     <button class="btn" onclick="saveUser(${id?`'${id}'`:'null'})">Save Member</button>
     ${id?`<div style="height:8px"></div>
@@ -5143,6 +5147,17 @@ async function saveUser(id){
     toast('You need at least one active admin',1); return; }
   const oldPct = id ? (S.users[id].profitPct||0) : null;
   await DB.set(['users', id||newId()], u);
+  // A brand-new member also goes on the attendance register (it is a separate
+  // list, matched to the login by name), unless the switch was turned off.
+  if(!id && $('eu_reg') && $('eu_reg').classList.contains('on')){
+    const roster=attRoster(), key=name.toLowerCase();
+    if(!roster.some(r=>(r.name||'').trim().toLowerCase()===key)){
+      const row={id:newId(),name,hidden:false,since:($('eu_since')&&$('eu_since').value)||new Date().toLocaleDateString('en-CA')};
+      if(u.role==='retail') row.staff=true;
+      if(S.attendance) await DB.set(['attendance','roster'],roster.concat(row));
+      else await DB.set(['attendance'],{...ATT_SEED,roster:ATT_SEED.roster.concat(row)});
+    }
+  }
   closeModal(); toast('Member saved');
   // Changing someone's share only changes NEW sales — every sale already
   // recorded still carries the share it was rung up at. If that matters,
