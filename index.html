@@ -132,6 +132,13 @@
   .btn.small{width:auto;display:inline-block;padding:8px 14px;font-size:13px;border-radius:8px;}
   .btn:disabled{opacity:.5;}
   .rowbtns{display:flex;gap:10px;margin-top:10px;}
+  .regrow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 2px;border-bottom:1px solid #222;cursor:pointer;}
+  .regrow:last-of-type{border-bottom:none;}
+  .regrow .nm{font-weight:700;font-size:15px;} .regrow .sub{font-size:12px;color:var(--muted);margin-top:2px;}
+  .regrow.past{opacity:.6;}
+  .statgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:6px 0 4px;}
+  .statgrid div{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 4px;text-align:center;font-size:12px;color:var(--muted);}
+  .statgrid b{display:block;font-size:18px;color:var(--text);}
   .rowbtns .btn{flex:1;}
 
   /* Tables */
@@ -3495,29 +3502,23 @@ function attendHTML(){
     The TOTAL row always includes past members.</p>
     <h2>Manage the register</h2>
     <div class="card">
-      <p class="muted" style="margin-top:0">Active members — they take attendance and each secures a sponsor</p>
-      ${mem.map(r=>`<span class="sizebtn" style="cursor:default;margin:3px">${esc(r.name)}${r.since?` <span class="muted" style="font-size:11px">since ${esc(r.since)}</span>`:''}
-        <a href="#" class="noprint" style="color:var(--gold);text-decoration:none;margin-left:6px"
-          onclick="attSetStaff('${r.id}',true);return false">→ staff</a>
-        <a href="#" class="noprint" style="color:var(--muted);text-decoration:none;margin-left:6px"
-          onclick="attSetHidden('${r.id}',true);return false">hide</a></span>`).join('')
-        ||'<span class="muted">Nobody on the register yet.</span>'}
-      <p class="muted">Point-of-sale / staff — they run the till. No attendance is taken for them and no sponsor is expected.
-        Anyone whose login role is <b>Point of sale</b> lands here on their own; use the links to override it either way.</p>
-      ${stf.length? stf.map(r=>`<span class="sizebtn" style="cursor:default;margin:3px">🛒 ${esc(r.name)}
-        <a href="#" class="noprint" style="color:var(--gold);text-decoration:none;margin-left:6px"
-          onclick="attSetStaff('${r.id}',false);return false">→ member</a>
-        <a href="#" class="noprint" style="color:var(--muted);text-decoration:none;margin-left:6px"
-          onclick="attSetHidden('${r.id}',true);return false">hide</a></span>`).join('')
-        :'<span class="muted">Nobody is marked as staff.</span>'}
-      ${hid.length?`<p class="muted">Past members — hidden from the grid and sponsor board, history kept. Tap show to bring one back.</p>
-      ${hid.map(r=>`<span class="sizebtn out" style="cursor:default;margin:3px">${esc(r.name)}
-        <a href="#" class="noprint" style="color:var(--gold);text-decoration:none;margin-left:6px"
-          onclick="attSetHidden('${r.id}',false);return false">show</a></span>`).join('')}`:''}
-      <div class="rowbtns noprint" style="margin-top:10px">
-        <input id="attNewName" placeholder="New member name">
-        <button class="btn gray" style="flex:0 0 auto" onclick="attAdd()">＋ Add</button>
-      </div>
+      <p class="muted" style="margin-top:0">Active members — they take attendance and each secures a sponsor. Tap a name to open their profile.</p>
+      ${mem.map(attRegRow).join('')||'<p class="muted">Nobody on the register yet.</p>'}
+      <p class="muted" style="margin-top:16px">Point-of-sale / staff — they run the till. No attendance is taken for them and no sponsor is expected.
+        Anyone whose login role is <b>Point of sale</b> lands here on their own; open their profile to override it either way.</p>
+      ${stf.length? stf.map(attRegRow).join(''):'<p class="muted">Nobody is marked as staff.</p>'}
+      ${hid.length?`<p class="muted" style="margin-top:16px">Past members — hidden from the grid and sponsor board, history kept. Open one to bring them back.</p>
+      ${hid.map(attRegRow).join('')}`:''}
+    </div>
+    <h2 class="noprint">Add a member</h2>
+    <div class="card noprint">
+      <label style="margin-top:0">Name</label>
+      <input id="attNewName" placeholder="Same name as their login" style="width:100%;box-sizing:border-box">
+      <label>First day as a member</label>
+      <input id="attNewSince" type="date" value="${new Date().toLocaleDateString('en-CA')}" style="width:100%;box-sizing:border-box">
+      <p class="muted" style="margin:6px 2px 10px">Type the name exactly as it appears on their login so the register and the login line up.
+        Their first day starts their profile — fees and contributions can be recorded there.</p>
+      <button class="btn" onclick="attAdd()">＋ Add to the register</button>
     </div>
     <button class="btn gray noprint" onclick="window.print()">🖨 Print / Save as PDF</button>`;
 }
@@ -3584,8 +3585,98 @@ async function attMonthSave(month){
 async function attAdd(){
   const n=$('attNewName').value.trim();
   if(!n){ toast('Type the member name',1); return; }
-  await DB.set(['attendance','roster'],attRoster().concat({id:newId(),name:n,hidden:false}));
+  if(attRoster().some(r=>(r.name||'').trim().toLowerCase()===n.toLowerCase())){ toast('That name is already on the register',1); return; }
+  const since=($('attNewSince')&&$('attNewSince').value)||'';
+  const row={id:newId(),name:n,hidden:false}; if(since) row.since=since;
+  await DB.set(['attendance','roster'],attRoster().concat(row));
   toast('Added to the register'); rerender();
+}
+/* ------------------------- MEMBER PROFILES ---------------------------------
+   One per person on the register. The roster row carries the first day
+   ("since", yyyy-mm-dd) and a note. Fees and cash from the Excel sheet live in
+   attendance/baseline; anything contributed after that is recorded here under
+   attendance/contrib/<memberId>. For people with no first day entered we show
+   the first month they were ever marked on the register.                     */
+function attFirstMark(id){
+  let best=null; const yrs=(S.attendance||{}).years||{};
+  Object.keys(yrs).forEach(y=>{ const mm=((yrs[y].marks||{})[id])||{};
+    for(let i=1;i<=12;i++){ if(mm['m'+i]){ const k=(+y)*100+i; if(best===null||k<best) best=k; } } });
+  return best;
+}
+function attFmtDay(iso){ if(!iso) return ''; const d=new Date(iso+'T12:00:00'); return isNaN(d)?iso:d.toLocaleDateString('en-CA',{year:'numeric',month:'short',day:'numeric'}); }
+function attStartText(r){
+  if(r.since) return 'Member since '+attFmtDay(r.since);
+  const k=attFirstMark(r.id); return k? 'On the register since '+MONTHS[(k%100)-1]+' '+Math.floor(k/100) : 'First day not recorded';
+}
+function attRegRow(r){
+  return `<div class="regrow ${r.hidden?'past':''}" onclick="attProfile('${r.id}')">
+    <div><div class="nm">${esc(r.name)}${isStaffRow(r)?' 🛒':''}</div><div class="sub">${esc(attStartText(r))}</div></div>
+    <div class="goldtxt">profile ›</div></div>`;
+}
+function attLifeOf(id){
+  const c={P:0,L:0,AN:0,A:0,NP:0};
+  Object.values(((S.attendance||{}).years)||{}).forEach(yy=>Object.values(((yy.marks||{})[id])||{}).forEach(v=>{ if(c[v]!==undefined) c[v]++; }));
+  return c;
+}
+function attContribOf(id){
+  const o=(((S.attendance||{}).contrib)||{})[id]||{};
+  return Object.entries(o).map(([k,v])=>({k,...v})).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+}
+function attProfile(id){
+  const r=attRoster().find(x=>x.id===id); if(!r) return;
+  const bl=((S.attendance||{}).baseline||{})[id]||{owed:0,paid:0,cash:0};
+  const c=attLifeOf(id), con=attContribOf(id), conTot=con.reduce((a,e)=>a+(+e.amount||0),0);
+  const fk=attFirstMark(id);
+  const staff=isStaffRow(r);
+  openModal(`<h3><button class="x" onclick="closeModal()">✕</button>${esc(r.name)}${staff?' 🛒':''}${r.hidden?' <span class="muted">(past member)</span>':''}</h3>
+    <label style="margin-top:0">First day as a member</label>
+    <input id="ap_since" type="date" value="${esc(r.since||'')}" style="width:100%;box-sizing:border-box">
+    ${fk?`<p class="muted" style="margin:4px 2px 0">First month marked on the register: ${MONTHS[(fk%100)-1]} ${Math.floor(fk/100)}</p>`:''}
+    <label>Notes</label>
+    <textarea id="ap_note" rows="2" placeholder="Sponsor, contact, anything worth remembering">${esc(r.note||'')}</textarea>
+    <div style="height:8px"></div>
+    <button class="btn" onclick="attSaveProfile('${id}')">Save profile</button>
+    <h3 style="margin:18px 0 6px">Attendance — lifetime</h3>
+    <div class="statgrid"><div><b class="attP">${c.P}</b>Present</div><div><b>${c.L}</b>Late</div><div><b>${c.AN}</b>Away (notice)</div><div><b>${c.A}</b>Absent</div></div>
+    <h3 style="margin:18px 0 6px">Fees &amp; contributions</h3>
+    <table class="stockgrid" style="width:100%">
+      <tr><td>Fees owed (from the sheet)</td><td class="r">${fmt(bl.owed||0)}</td></tr>
+      <tr><td>Fees paid (from the sheet)</td><td class="r">${fmt(bl.paid||0)}</td></tr>
+      <tr><td>Cash contributed (from the sheet)</td><td class="r">${fmt(bl.cash||0)}</td></tr>
+      <tr><td>Contributed since (recorded here)</td><td class="r">${fmt(conTot)}</td></tr>
+      <tr class="totrow"><td><b>Total contributed</b></td><td class="r"><b>${fmt((bl.cash||0)+conTot)}</b></td></tr>
+    </table>
+    ${con.length?con.map(e=>`<div class="switchrow"><div><div class="t">${fmt(+e.amount||0)} <span class="muted">· ${esc(attFmtDay(e.date))}</span></div>
+      <div class="s">${esc(e.note||'')}</div></div>
+      <button class="btn small gray" style="flex:0 0 auto;width:auto" onclick="attDelContrib('${id}','${e.k}')">remove</button></div>`).join(''):''}
+    <label>Record a contribution</label>
+    <div class="rowbtns" style="margin-top:0"><input id="ap_amt" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Amount" style="flex:1;min-width:0">
+      <input id="ap_cdate" type="date" value="${new Date().toLocaleDateString('en-CA')}" style="flex:1;min-width:0"></div>
+    <input id="ap_cnote" placeholder="What for (optional)" style="width:100%;box-sizing:border-box;margin-top:8px">
+    <div style="height:8px"></div>
+    <button class="btn gray" onclick="attAddContrib('${id}')">＋ Add contribution</button>
+    <h3 style="margin:18px 0 6px">Register</h3>
+    <div class="rowbtns" style="margin-top:0">
+      <button class="btn gray" onclick="closeModal();attSetStaff('${id}',${!staff})">${staff?'→ Make a member':'→ Make staff (no attendance)'}</button>
+      <button class="btn gray" onclick="closeModal();attSetHidden('${id}',${!r.hidden})">${r.hidden?'Show on the register':'Hide (past member)'}</button>
+    </div>`);
+}
+async function attSaveProfile(id){
+  const since=$('ap_since').value||null, note=$('ap_note').value.trim()||null;
+  await DB.set(['attendance','roster'],attRoster().map(r=>{ if(r.id!==id) return r;
+    const n={...r}; if(since) n.since=since; else delete n.since; if(note) n.note=note; else delete n.note; return n; }));
+  toast('Profile saved'); closeModal(); rerender();
+}
+async function attAddContrib(id){
+  const amount=+$('ap_amt').value;
+  if(!(amount>0)){ toast('Enter the amount',1); return; }
+  const e={amount,date:$('ap_cdate').value||new Date().toLocaleDateString('en-CA'),note:$('ap_cnote').value.trim()||null};
+  await DB.set(['attendance','contrib',id,newId()],e);
+  toast('Contribution recorded'); attProfile(id); rerender();
+}
+async function attDelContrib(id,k){
+  await DB.set(['attendance','contrib',id,k],null);
+  toast('Removed'); attProfile(id); rerender();
 }
 // Marking somebody staff takes them off the attendance grid and the sponsor
 // board. It is stored on the roster row, so it overrides the role auto-detect.
