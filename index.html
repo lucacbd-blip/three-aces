@@ -466,7 +466,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.35';
+const APP_VERSION = 'v3.36';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -3666,7 +3666,7 @@ function attProfile(id){
   openModal(`<h3><button class="x" onclick="closeModal()">✕</button>${esc(r.name)}${staff?' 🛒':''}${r.hidden?' <span class="muted">(past member)</span>':''}</h3>
     <label style="margin-top:0">First day as a member</label>
     <input id="ap_since" type="date" value="${esc(r.since||'')}" style="width:100%;box-sizing:border-box">
-    ${fk?`<p class="muted" style="margin:4px 2px 0">First month marked on the register: ${MONTHS[(fk%100)-1]} ${Math.floor(fk/100)}</p>`:''}
+    ${fk?`<p class="muted" style="margin:4px 2px 0">First meeting: <b>${esc(meetDate(Math.floor(fk/100),fk%100).toLocaleDateString('en-CA',{weekday:'short',year:'numeric',month:'short',day:'numeric'}))}</b> <span style="opacity:.8">(first month marked on the register)</span></p>`:'<p class="muted" style="margin:4px 2px 0">First meeting: not marked yet</p>'}
     <label>Notes</label>
     <textarea id="ap_note" rows="2" placeholder="Sponsor, contact, anything worth remembering">${esc(r.note||'')}</textarea>
     <h3 style="margin:18px 0 4px">Login &amp; access</h3>
