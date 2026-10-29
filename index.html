@@ -466,7 +466,7 @@
      projectId: "three-aces", appId: "1:1234:web:abcd"
    };
    ========================================================================== */
-const APP_VERSION = 'v3.34';
+const APP_VERSION = 'v3.35';
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCLlwbfE4ZilKtY5AakOUOl_h7_0uP-VQw",
   authDomain: "three-aces.firebaseapp.com",
@@ -3512,13 +3512,24 @@ function attendHTML(){
     </div>
     <h2 class="noprint">Add a member</h2>
     <div class="card noprint">
+      <p class="muted" style="margin-top:0">One step: this creates the member's profile on the register <b>and</b> their login, so there is nothing to add twice.</p>
       <label style="margin-top:0">Name</label>
-      <input id="attNewName" placeholder="Same name as their login" style="width:100%;box-sizing:border-box">
+      <input id="attNewName" placeholder="Full name as it should appear" style="width:100%;box-sizing:border-box">
       <label>First day as a member</label>
       <input id="attNewSince" type="date" value="${new Date().toLocaleDateString('en-CA')}" style="width:100%;box-sizing:border-box">
-      <p class="muted" style="margin:6px 2px 10px">Type the name exactly as it appears on their login so the register and the login line up.
-        Their first day starts their profile — fees and contributions can be recorded there.</p>
-      <button class="btn" onclick="attAdd()">＋ Add to the register</button>
+      <div class="switchrow"><div><div class="t">Give login access to the app</div><div class="s">Turn off to put them on the register only</div></div>
+        <button class="toggle on" id="attNewLogin" onclick="this.classList.toggle('on')"></button></div>
+      <label>4-digit PIN</label>
+      <input id="attNewPin" inputmode="numeric" maxlength="4" placeholder="e.g. 4821" style="width:100%;box-sizing:border-box">
+      <label>Permission level</label>
+      <select id="attNewRole" style="width:100%;box-sizing:border-box">
+        <option value="seller">Club member — can sell, never sees costs or profit</option>
+        <option value="retail">Point of sale — sells, plus full sales reporting</option>
+        <option value="admin">Admin — full access</option></select>
+      <label>% of profit kept on their own sales <span style="text-transform:none">(0 = everything to club)</span></label>
+      <input id="attNewPct" type="number" min="0" max="100" value="0" style="width:100%;box-sizing:border-box">
+      <div style="height:10px"></div>
+      <button class="btn" onclick="attAdd()">＋ Add member</button>
     </div>
     <button class="btn gray noprint" onclick="window.print()">🖨 Print / Save as PDF</button>`;
 }
@@ -3582,21 +3593,40 @@ async function attMonthSave(month){
   await DB.set(['attendance','years',y,'locked','m'+month], true);
   closeModal(); toast(MONTHS[month-1]+' saved & locked'); rerender();
 }
+function attUserOf(r){   // the login that belongs to a register row (matched by name)
+  const n=((r&&r.name)||'').trim().toLowerCase();
+  const hit=Object.entries(S.users||{}).find(([,u])=>(u.name||'').trim().toLowerCase()===n);
+  return hit? {id:hit[0],u:hit[1]} : null;
+}
+function attRosterOfUser(u){
+  const n=((u&&u.name)||'').trim().toLowerCase();
+  return attRoster().find(r=>(r.name||'').trim().toLowerCase()===n)||null;
+}
 async function attAdd(){
   const n=$('attNewName').value.trim();
   if(!n){ toast('Type the member name',1); return; }
-  if(attRoster().some(r=>(r.name||'').trim().toLowerCase()===n.toLowerCase())){ toast('That name is already on the register',1); return; }
+  const key=n.toLowerCase();
+  if(attRoster().some(r=>(r.name||'').trim().toLowerCase()===key)){ toast('That name is already on the register',1); return; }
+  const wantLogin=$('attNewLogin').classList.contains('on');
+  const hasLogin=Object.values(S.users||{}).some(u=>(u.name||'').trim().toLowerCase()===key);
+  if(wantLogin && !hasLogin){
+    const pin=$('attNewPin').value.trim();
+    if(!/^\d{4}$/.test(pin)){ toast('Enter a 4-digit PIN for their login',1); return; }
+    await DB.set(['users',newId()],{name:n,pin,role:$('attNewRole').value,
+      profitPct:Math.min(100,Math.max(0,+$('attNewPct').value||0)),active:true});
+  }
   const since=($('attNewSince')&&$('attNewSince').value)||'';
   const row={id:newId(),name:n,hidden:false}; if(since) row.since=since;
-  await DB.set(['attendance','roster'],attRoster().concat(row));
-  toast('Added to the register'); rerender();
+  if($('attNewRole').value==='retail' && wantLogin) row.staff=true;
+  if(S.attendance) await DB.set(['attendance','roster'],attRoster().concat(row));
+  else await DB.set(['attendance'],{...ATT_SEED,roster:ATT_SEED.roster.concat(row)});
+  toast(wantLogin&&!hasLogin?'Member added — profile and login created':'Member added'); rerender();
 }
 /* ------------------------- MEMBER PROFILES ---------------------------------
-   One per person on the register. The roster row carries the first day
-   ("since", yyyy-mm-dd) and a note. Fees and cash from the Excel sheet live in
-   attendance/baseline; anything contributed after that is recorded here under
-   attendance/contrib/<memberId>. For people with no first day entered we show
-   the first month they were ever marked on the register.                     */
+   One screen per person: first day, notes, login access, their sales and
+   their attendance. The register row (attendance/roster) and the login
+   (users) are matched by name. Fees and cash were stopped in May 2024, so the
+   old sheet figures are shown as history only.                               */
 function attFirstMark(id){
   let best=null; const yrs=(S.attendance||{}).years||{};
   Object.keys(yrs).forEach(y=>{ const mm=((yrs[y].marks||{})[id])||{};
@@ -3609,8 +3639,10 @@ function attStartText(r){
   const k=attFirstMark(r.id); return k? 'On the register since '+MONTHS[(k%100)-1]+' '+Math.floor(k/100) : 'First day not recorded';
 }
 function attRegRow(r){
+  const lu=attUserOf(r);
   return `<div class="regrow ${r.hidden?'past':''}" onclick="attProfile('${r.id}')">
-    <div><div class="nm">${esc(r.name)}${isStaffRow(r)?' 🛒':''}</div><div class="sub">${esc(attStartText(r))}</div></div>
+    <div><div class="nm">${esc(r.name)}${isStaffRow(r)?' 🛒':''}</div>
+    <div class="sub">${esc(attStartText(r))} · ${lu?(lu.u.active===false?'login disabled':'has login'):'no login'}</div></div>
     <div class="goldtxt">profile ›</div></div>`;
 }
 function attLifeOf(id){
@@ -3618,43 +3650,46 @@ function attLifeOf(id){
   Object.values(((S.attendance||{}).years)||{}).forEach(yy=>Object.values(((yy.marks||{})[id])||{}).forEach(v=>{ if(c[v]!==undefined) c[v]++; }));
   return c;
 }
-function attContribOf(id){
-  const o=(((S.attendance||{}).contrib)||{})[id]||{};
-  return Object.entries(o).map(([k,v])=>({k,...v})).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+function attSalesOf(uid){
+  const list=Object.values(S.sales||{}).filter(s=>s.sellerId===uid && !s.voided);
+  let sold=0, kept=0, last=0;
+  list.forEach(s=>{ sold+=(+s.total||0);
+    const prof=(s.lines||[]).reduce((a,l)=>a+((l.price||0)-(l.cost||0))*(l.qty||0),0);
+    kept+=prof*(s.sellerPct||0)/100; if(s.ts>last) last=s.ts; });
+  return {n:list.length,sold,kept,last};
 }
 function attProfile(id){
   const r=attRoster().find(x=>x.id===id); if(!r) return;
+  const lu=attUserOf(r), staff=isStaffRow(r), c=attLifeOf(id), fk=attFirstMark(id);
   const bl=((S.attendance||{}).baseline||{})[id]||{owed:0,paid:0,cash:0};
-  const c=attLifeOf(id), con=attContribOf(id), conTot=con.reduce((a,e)=>a+(+e.amount||0),0);
-  const fk=attFirstMark(id);
-  const staff=isStaffRow(r);
+  const sl=lu? attSalesOf(lu.id) : null, u=lu? lu.u : {pin:'',role:'seller',profitPct:0,active:true};
   openModal(`<h3><button class="x" onclick="closeModal()">✕</button>${esc(r.name)}${staff?' 🛒':''}${r.hidden?' <span class="muted">(past member)</span>':''}</h3>
     <label style="margin-top:0">First day as a member</label>
     <input id="ap_since" type="date" value="${esc(r.since||'')}" style="width:100%;box-sizing:border-box">
     ${fk?`<p class="muted" style="margin:4px 2px 0">First month marked on the register: ${MONTHS[(fk%100)-1]} ${Math.floor(fk/100)}</p>`:''}
     <label>Notes</label>
     <textarea id="ap_note" rows="2" placeholder="Sponsor, contact, anything worth remembering">${esc(r.note||'')}</textarea>
-    <div style="height:8px"></div>
+    <h3 style="margin:18px 0 4px">Login &amp; access</h3>
+    ${lu?'':`<p class="muted" style="margin:0 0 6px">No login yet. Set a PIN below and save to give them access to the app.</p>`}
+    <label>4-digit PIN</label><input id="ap_pin" inputmode="numeric" maxlength="4" value="${esc(u.pin||'')}" style="width:100%;box-sizing:border-box">
+    <label>Permission level</label>
+    <select id="ap_role" style="width:100%;box-sizing:border-box">
+      <option value="seller" ${(u.role!=='admin'&&u.role!=='retail')?'selected':''}>Club member — can sell, never sees costs or profit</option>
+      <option value="retail" ${u.role==='retail'?'selected':''}>Point of sale — sells, plus full sales reporting</option>
+      <option value="admin" ${u.role==='admin'?'selected':''}>Admin — full access</option></select>
+    <label>% of profit kept on their own sales</label>
+    <input id="ap_pct" type="number" min="0" max="100" value="${u.profitPct||0}" style="width:100%;box-sizing:border-box">
+    <div class="switchrow"><div><div class="t">Active</div><div class="s">Inactive members can't log in</div></div>
+      <button class="toggle ${u.active!==false?'on':''}" id="ap_act" onclick="this.classList.toggle('on')"></button></div>
+    <div style="height:10px"></div>
     <button class="btn" onclick="attSaveProfile('${id}')">Save profile</button>
+    <h3 style="margin:18px 0 6px">Sales</h3>
+    ${sl? (sl.n?`<div class="statgrid"><div><b>${sl.n}</b>Sales</div><div><b>${fmt(sl.sold)}</b>Sold</div><div><b>${fmt(sl.kept)}</b>Share kept</div><div><b>${esc(attFmtDay(new Date(sl.last).toLocaleDateString('en-CA')))}</b>Last sale</div></div>`
+       :'<p class="muted">No sales recorded yet. Their sales appear here as soon as they ring something up.</p>')
+      : '<p class="muted">Sales appear here once they have a login and start selling.</p>'}
     <h3 style="margin:18px 0 6px">Attendance — lifetime</h3>
     <div class="statgrid"><div><b class="attP">${c.P}</b>Present</div><div><b>${c.L}</b>Late</div><div><b>${c.AN}</b>Away (notice)</div><div><b>${c.A}</b>Absent</div></div>
-    <h3 style="margin:18px 0 6px">Fees &amp; contributions</h3>
-    <table class="stockgrid" style="width:100%">
-      <tr><td>Fees owed (from the sheet)</td><td class="r">${fmt(bl.owed||0)}</td></tr>
-      <tr><td>Fees paid (from the sheet)</td><td class="r">${fmt(bl.paid||0)}</td></tr>
-      <tr><td>Cash contributed (from the sheet)</td><td class="r">${fmt(bl.cash||0)}</td></tr>
-      <tr><td>Contributed since (recorded here)</td><td class="r">${fmt(conTot)}</td></tr>
-      <tr class="totrow"><td><b>Total contributed</b></td><td class="r"><b>${fmt((bl.cash||0)+conTot)}</b></td></tr>
-    </table>
-    ${con.length?con.map(e=>`<div class="switchrow"><div><div class="t">${fmt(+e.amount||0)} <span class="muted">· ${esc(attFmtDay(e.date))}</span></div>
-      <div class="s">${esc(e.note||'')}</div></div>
-      <button class="btn small gray" style="flex:0 0 auto;width:auto" onclick="attDelContrib('${id}','${e.k}')">remove</button></div>`).join(''):''}
-    <label>Record a contribution</label>
-    <div class="rowbtns" style="margin-top:0"><input id="ap_amt" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Amount" style="flex:1;min-width:0">
-      <input id="ap_cdate" type="date" value="${new Date().toLocaleDateString('en-CA')}" style="flex:1;min-width:0"></div>
-    <input id="ap_cnote" placeholder="What for (optional)" style="width:100%;box-sizing:border-box;margin-top:8px">
-    <div style="height:8px"></div>
-    <button class="btn gray" onclick="attAddContrib('${id}')">＋ Add contribution</button>
+    ${(bl.owed||bl.paid||bl.cash)?`<p class="muted" style="margin-top:12px">Old fee sheet (fees stopped May 2024): owed ${fmt(bl.owed||0)} · paid ${fmt(bl.paid||0)} · cash contributed ${fmt(bl.cash||0)}.</p>`:''}
     <h3 style="margin:18px 0 6px">Register</h3>
     <div class="rowbtns" style="margin-top:0">
       <button class="btn gray" onclick="closeModal();attSetStaff('${id}',${!staff})">${staff?'→ Make a member':'→ Make staff (no attendance)'}</button>
@@ -3662,21 +3697,19 @@ function attProfile(id){
     </div>`);
 }
 async function attSaveProfile(id){
+  const r=attRoster().find(x=>x.id===id); if(!r) return;
+  const lu=attUserOf(r), pin=$('ap_pin').value.trim();
+  const role=$('ap_role').value, active=$('ap_act').classList.contains('on');
+  const pct=Math.min(100,Math.max(0,+$('ap_pct').value||0));
+  if(lu || pin){
+    if(!/^\d{4}$/.test(pin)){ toast('The login needs a 4-digit PIN',1); return; }
+    if(lu && (role!=='admin'||!active) && !otherActiveAdminExists(lu.id)){ toast('You need at least one active admin',1); return; }
+  }
   const since=$('ap_since').value||null, note=$('ap_note').value.trim()||null;
-  await DB.set(['attendance','roster'],attRoster().map(r=>{ if(r.id!==id) return r;
-    const n={...r}; if(since) n.since=since; else delete n.since; if(note) n.note=note; else delete n.note; return n; }));
+  await DB.set(['attendance','roster'],attRoster().map(x=>{ if(x.id!==id) return x;
+    const n={...x}; if(since) n.since=since; else delete n.since; if(note) n.note=note; else delete n.note; return n; }));
+  if(lu || pin) await DB.set(['users',lu?lu.id:newId()],{...(lu?lu.u:{}),name:r.name,pin,role,profitPct:pct,active});
   toast('Profile saved'); closeModal(); rerender();
-}
-async function attAddContrib(id){
-  const amount=+$('ap_amt').value;
-  if(!(amount>0)){ toast('Enter the amount',1); return; }
-  const e={amount,date:$('ap_cdate').value||new Date().toLocaleDateString('en-CA'),note:$('ap_cnote').value.trim()||null};
-  await DB.set(['attendance','contrib',id,newId()],e);
-  toast('Contribution recorded'); attProfile(id); rerender();
-}
-async function attDelContrib(id,k){
-  await DB.set(['attendance','contrib',id,k],null);
-  toast('Removed'); attProfile(id); rerender();
 }
 // Marking somebody staff takes them off the attendance grid and the sponsor
 // board. It is stored on the roster row, so it overrides the role auto-detect.
@@ -5222,6 +5255,8 @@ function editUser(id){
       <label>Member since</label><input id="eu_since" type="date" value="${new Date().toLocaleDateString('en-CA')}">`}
     <div style="height:10px"></div>
     <button class="btn" onclick="saveUser(${id?`'${id}'`:'null'})">Save Member</button>
+    ${id&&attRosterOfUser(u)?`<div style="height:8px"></div>
+      <button class="btn gray" onclick="closeModal();attProfile('${attRosterOfUser(u).id}')">👤 Open member profile (first day, sales, attendance)</button>`:''}
     ${id?`<div style="height:8px"></div>
       <button class="btn gray" onclick="fixShareModal('${id}')">⟳ Fix the profit share on past sales</button>
       <div style="height:8px"></div><button class="btn red" onclick="deleteUser('${id}')">🗑 Delete this member permanently</button>`:''}`);
